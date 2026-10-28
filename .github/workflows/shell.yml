@@ -197,6 +197,7 @@ jobs:
     timeout-minutes: 60
     outputs:
       version: ${{ steps.tree.outputs.version }}
+      tag: ${{ steps.tree.outputs.tag }}
       origin: ${{ steps.tree.outputs.origin }}
     steps:
       - name: Check out this fork
@@ -253,16 +254,30 @@ jobs:
             echo "origin=fork $SHA" >> "$GITHUB_OUTPUT"
             echo "SHA=$SHA" >> "$GITHUB_ENV"
           fi
-          # The version names both halves: the upstream commit the tree was built from and this fork's commit, whose patches
-          # and overlay files are half the shell. Naming only upstream meant a fixed shell was published under the same tag as
-          # the broken one -- the assets were overwritten in place, and nobody could tell the two apart by version.
+          # Two names, for two different jobs.
+          #
+          # V is the asset file stem: it names both halves of the build -- the upstream commit the tree came from and this
+          # fork's commit, whose patches and overlay files are half the shell. Naming only upstream meant a fixed shell was
+          # published under the same name as the broken one: the assets were overwritten in place and nobody could tell the
+          # two apart.
+          #
+          # TAG is the release tag, and it is a version number because GitHub orders the releases list by TAG NAME, not by
+          # date (checked 2026-10-29: a release titled zzz-title under tag t-00000000-mmm sorted by its tag, not its title).
+          # With a date-and-sha tag, two releases of the same day were ordered by the sha characters -- '3' sorts above '2'
+          # -- so the newest release sat second in the list. Four digits, so that v0.0.0010 still sorts above v0.0.0009; an
+          # unpadded v0.0.10 would sort below v0.0.9. A failed build makes no tag, so the number never skips, and the
+          # shell-build concurrency group serialises runs, so two runs cannot take the same one.
           FORK=$(git -C fork rev-parse --short=7 HEAD)
           if [ "$SHA" = "$FORK" ]; then V="shell-$(date -u +%Y%m%d)-$FORK"
           else V="shell-$(date -u +%Y%m%d)-$(echo "$SHA" | cut -c1-7)-$FORK"; fi
+          LAST=$(git -C fork ls-remote --tags --refs origin 'refs/tags/v0.0.*' | sed 's#.*refs/tags/v0\.0\.##' | sort -n | tail -1)
+          TAG="v0.0.$(printf '%04d' $(( ${LAST:-0} + 1 )))"
           echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "TREE=$src" >> "$GITHUB_ENV"
           echo "V=$V" >> "$GITHUB_ENV"
-          echo "building $V from $src"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "building $V from $src, release tag $TAG"
 
       - name: Keep the packer's copies level with upstream
         # The packer a user runs reads this repository's copies of dm/tools, dm/gfx/tools and dm/games. They are not
@@ -675,8 +690,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.shell.outputs.version }}"
-          TITLE="Game-free shell ${TAG#shell-}"   # the tag already carries the shell- prefix
+          TAG="${{ needs.shell.outputs.tag }}"                  # v0.0.0001, v0.0.0002, ... the list sorts by this
+          VER="${{ needs.shell.outputs.version }}"              # shell-<date>-<upstream>-<fork>, the asset file stem
+          TITLE="Game-free shell ${VER#shell-}"                 # the page's heading keeps the date and both commits
           # Say on the page whether this shell was actually packed with a real game before it went out. The smoke job sets
           # verified=1 only when it managed to pack and inspect one; when the test data is unreachable the build is still
           # published, but nobody should have to guess whether it was tested.
@@ -690,8 +706,8 @@ jobs:
             echo
             cat notes.md
           } > body.md
-          # The tag is date + upstream commit, so several pushes in a day land on the same release. Replace the assets and
-          # the notes there instead of leaving the first version of the text up; gh release create would just fail.
+          # A rerun of this job computes the same tag again (the number is the highest existing v0.0.* plus one), so replace
+          # the assets and the notes there instead of failing on an already existing tag.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
