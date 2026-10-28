@@ -1,12 +1,14 @@
 diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
+index f3867f3..38641a2 100644
 --- a/dm/gfx/tools/shader_split.py
 +++ b/dm/gfx/tools/shader_split.py
-@@ -73,12 +73,19 @@
- 
- def red(msg): sys.exit('[RED] ' + msg)
+@@ -84,12 +84,20 @@ def span(d, at, n, where):
+     if not (0 <= at and 0 <= n <= len(d) - at): red(f'{where}: {n:#x} bytes at {at:#x} lie outside the {len(d):#x} bytes there are')
+     return d[at:at + n]
  
 -def zstd_mod():
 -    """The zstd module: compression.zstd from Python 3.14, its backport before (pip install backports.zstd), the same API"""
++
 +def zstd_opt():
 +    """The zstd module when this Python has one, else None: a plain frame can also go through the zstd command, which macOS and
 +    Linux have and Windows does not (there it is zstd.exe in the --tools folder, or pip install backports.zstd)"""
@@ -24,7 +26,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return zstd
  
  def ctl_len(ctl):
-@@ -1852,11 +1859,17 @@
+@@ -1884,11 +1892,17 @@ def unzs_dict(d, did, where):
      return zstd.decompress(d, zstd_dict=_ZD[did])
  
  def unzs(path):
@@ -45,7 +47,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return unzs_dict(d, did, path)
  
  def frame_size(f):
-@@ -2260,7 +2273,10 @@
+@@ -2300,7 +2314,10 @@ def main():
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''

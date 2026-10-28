@@ -73,6 +73,13 @@ CUTS = {
     (0x13491c, '0a00a852', '0a04a052', 'AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)'),
     (0x134920, '0808a052', '0804a052', 'AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)'),
   ],
+  # Cult of the Lamb 1.5.28 (v1966080) sdk (SDK 19.3.14, Unity 2022.3.62f3): the same node area cut, the SDK-wide rule's implementation 5 (the constructor at sdk+0x1423ec), registered because
+  # the profile was brought up on this build. nninitStartup calls StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory (the region returns to main+0xb7e45c). Region placement aligns
+  # only to 64 KB or 2 MB (sdk+0x142544), as SDK 20, so it needs no alignment cut
+  '871fb219c95d507fd5b45f667d51f9c1': [
+    (0x1423fc, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
+    (0x142468, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
+  ],
   # Patrick's Parabox 1.0.1 (v65536) sdk (SDK 13.3.7, Unity 2020.3.30f1): the same node area cut. nninitStartup (main+0x1cd010) calls StandardAllocator::Initialize(nullptr, pool − used) with virtual
   # address memory, which aborted at its CentralHeap::Init (sdk+0x324dec). The constructor is at sdk+0x37c3a0 (limit = alias start + 0x3fe00000 at +0x28, a unit heap of 0x30-byte nodes, the area then
   # registered as occupied at +0x37c44c)

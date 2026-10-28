@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**96 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**97 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -37,6 +37,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 | handheld |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a |  |
 | Celeste | `01002B30028F6000` | 1.4.1.1 |  |
+| Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
 | Cuphead | `0100A5C00D162000` | 1.3.7 |  |
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
