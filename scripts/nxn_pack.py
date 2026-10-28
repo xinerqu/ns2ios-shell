@@ -1468,6 +1468,19 @@ def main():
         f = line.split('\t')
         builds[f[0]] = f[1] if len(f) > 1 else ''
 
+    # The profile already says this title's shaders are out of reach of this route (needs_mac_shaders, the key
+    # supported_list.py marks 暂不支持 from). Refuse before the extraction: the same answer cost one reporter a whole
+    # unpack and then a [RED] from shader_split.py that named a folder instead of the reason (issue #3).
+    if one(rows, 'needs_mac_shaders') and not a.skip_oodle_check:
+        die('%s (%s) keeps its shaders where only its own decoder reaches them: in archives compressed with Oodle or LZ5,\n'
+            '    unpacked by the copy of that decoder linked into the game\'s own code -- which this packer runs inside the\n'
+            '    Mac host (dm/host/hle_oodle.c) and only on a Mac with Apple silicon, since it executes the game\'s ARM64\n'
+            '    modules. There is no Mac in the Windows route (tools/ holds .exe files only), so this title cannot be packed\n'
+            '    here, on any machine: docs/SUPPORTED.md lists it as 暂不支持.\n'
+            '    If you already have the decoded shader archives from such a run (ue_shaders/ or glslc_capture/ beside the\n'
+            '    extract folder), --skip-oodle-check packs on and shader_split.py uses them.'
+            % (one(rows, 'name', tid), tid))
+
     # Which version to pack: the newest one in the folder, as upstream does ("the script packs the newest version in the
     # folder"), or -p. Only that version is extracted -- the profile's shader tables are a union of several versions, so they
     # already cover any version the profile registers, and a version it does not register is reported rather than refused.
