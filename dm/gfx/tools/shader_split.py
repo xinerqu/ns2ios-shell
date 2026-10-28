@@ -705,13 +705,20 @@ def bea_members(d, label):
     """NintendoWare Bezel Engine archive ('.bea', magic 'SCNE', a NintendoWare binary file of version 0x10100; Big Brain Academy: Brain vs. Brain keeps nearly all of RomFS in 603 of them):
     +0x20 u64 entry count, +0x28 u64 offset of the entry pointer array (u64 each), each pointing at a 0x30-byte 'ASST' entry {+0x10 u16 kind, u16 alignment shift, u32 stored length,
     u32 length, +0x20 u64 data offset, +0x28 u64 name offset (u16 length + the path)}. Every entry of the game's 7,665 is one zstd frame (kind 2, and 258 for the one sound project),
-    even the two whose stored length equals their length, so the frame magic decides. → (path, data) of each entry"""
+    even the two whose stored length equals their length, so the frame magic decides.
+    Bezel Engine 2.9 (version 0x60000; Super Mario Party Jamboree's 949 archives, 127,203 entries) keeps the entries themselves at +0x28, back to back, each 0x48 bytes (its size is the u32 at
+    'ASST' +4): an 8-byte type tag ('_G3DSHA', '_TEXDATA', …) at +0x1c and a 16-byte hash come before the data and name offsets, which are the last two u64 of the entry in both forms.
+    → (path, data) of each entry"""
     n, arr = struct.unpack_from('<QQ', d, 0x20)
-    zstd = None
+    inline = d[arr:arr + 4] == b'ASST'
+    zstd, o = None, arr
     for i in range(n):
-        o = struct.unpack_from('<Q', d, arr + 8 * i)[0]
+        if not inline: o = struct.unpack_from('<Q', d, arr + 8 * i)[0]
         if d[o:o + 4] != b'ASST': red(f'{label}: entry {i} @{o:#x} is not an ASST entry')
-        csz, usz, off, nm = struct.unpack_from('<II4xQQ', d, o + 0x14)
+        size = struct.unpack_from('<I', d, o + 4)[0] if inline else 0x30
+        csz, usz = struct.unpack_from('<II', d, o + 0x14)
+        off, nm = struct.unpack_from('<QQ', d, o + size - 0x10)
+        if inline: o += size
         path = d[nm + 2:nm + 2 + struct.unpack_from('<H', d, nm)[0]].decode('utf-8', 'replace')
         data = d[off:off + csz]
         if data[:4] == ZSTD_MAGIC:
