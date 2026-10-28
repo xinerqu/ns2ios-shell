@@ -195,9 +195,9 @@ no such step**, so these five fail on Windows, Linux and macOS alike:
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | Unreal ShaderArchive |
 | Pokémon Legends: Z-A | `0100F43008C44000` | Trinity packs (Game Freak) |
 
-The packer stops as soon as it has unpacked the game and read those file headers — before the rewrite — and says why; it
-never produces an IPA that installs but cannot draw. Nothing is wasted but the extraction, so a retry costs little. These
-five carry a matching mark in the supported list.
+The packer stops as soon as it has read the title ID and loaded the game's profile — **before it unpacks anything** —
+and says which game it is and why; it never produces an IPA that installs but cannot draw. These five carry a matching
+mark in the supported list.
 
 > Upstream's Mac route does pack these five, in **one run**: it builds a Mac host inside the pack and unpacks the shaders
 > with the game's own decoder — no separate capture, no phone. The difference is that it wants that machine to be an
