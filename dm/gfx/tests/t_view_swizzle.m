@@ -31,7 +31,8 @@ static void read_check(int tid, id<MTLTexture> view, const float expected[8], fl
     float *actual = output.contents;
     for (int i = 0; i < 8; i++) { if (fabsf(actual[i] - expected[i]) > tol) fprintf(stderr, "case %d component %d: got %g expected %g\n", tid, i, actual[i], expected[i]); CHECK(fabsf(actual[i] - expected[i]) <= tol, "sampled channel matches NVN format and mapping"); }
 }
-// uploaded: as tex_mtl leaves a texture uploaded from guest memory, an NvPkg in the serial table, clean since its upload (no guest write since, so its pages are not looked at)
+// uploaded: as tex_mtl leaves a texture uploaded from guest memory, an NvPkg in the serial table, clean since its upload (no guest write since, so its pages are not looked at), its bits in
+// Metal's order as the upload repacks them
 static void swizzle_case(int tid, int format, int view_format, int uploaded, const void *pixels, unsigned bytes, const uint8_t *builder, const uint8_t *mapping, const float expected[8]) {
     tex_t t = {.magic=MAGIC('T','E','X',0), .serial=98000+(unsigned)tid};
     t.d = (nvn_texdesc){.target=NVN_TEXTURE_TARGET_2D, .format=format, .width=2, .height=1, .depth=1, .levels=1, .samples=1};
@@ -39,7 +40,9 @@ static void swizzle_case(int tid, int format, int view_format, int uploaded, con
     MTLTextureDescriptor *d = tex_desc(&t, 1); d.storageMode = MTLStorageModeShared;
     id<MTLTexture> base = [g_dev newTextureWithDescriptor:d];
     CHECK(base != nil, "packed texture created");
-    [base replaceRegion:MTLRegionMake2D(0, 0, 2, 1) mipmapLevel:0 withBytes:pixels bytesPerRow:bytes];
+    uint8_t host[16]; memcpy(host, pixels, bytes);   // an upload stores the RGB565 family in Metal's order (pkg_upload_)
+    if (uploaded && rb_packed_shift(format)) rb_swap_rows(host, bytes, 1, 1, bytes, bytes, rb_packed_shift(format));
+    [base replaceRegion:MTLRegionMake2D(0, 0, 2, 1) mipmapLevel:0 withBytes:host bytesPerRow:bytes];
     if (uploaded) { t.has_layout = 1; t.mem = (uint8_t *)pixels; NvPkg *pk = [NvPkg new]; pk->tex = base; pk->span = pixels; pk->seen = nvn_dirty_now(); serial_put(t.serial, pk); }
     else serial_put(t.serial, base);
     view_t v = {0}; if (mapping) { v.set_swizzle = 1; memcpy(v.swz, mapping, 4); }

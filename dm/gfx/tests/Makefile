@@ -204,6 +204,11 @@ t_upload_slots: t_upload_slots.m $(MTL_T_DEP)
 check_t_upload_slots: t_upload_slots
 	MTL_DEBUG_LAYER=1 ./t_upload_slots
 	DM_NVN_UPLOAD_REUSE=0 MTL_DEBUG_LAYER=1 ./t_upload_slots
+t_sbw: t_sbw.m $(MTL_T_DEP)
+	clang $(CFLAGS) -fobjc-arc -o $@ t_sbw.m $(MTL_T_SRC) $(FW)
+.PHONY: check_t_sbw
+check_t_sbw: t_sbw
+	./t_sbw
 t_direct_upload: t_direct_upload.m $(MTL_T_DEP)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_direct_upload.m $(MTL_T_SRC) $(FW)
 .PHONY: check_t_direct_upload

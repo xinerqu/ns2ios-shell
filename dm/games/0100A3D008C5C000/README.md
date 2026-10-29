@@ -209,6 +209,12 @@ existing [per-depth-mode entry-point mechanism](../../../docs/reference/shaders.
   reports `[RED] NVN unimplemented function called`. Its visual contribution
   has not been isolated; the diagnostic has not been suppressed.
 - Outdoor exploration and battles have not been validated yet.
+- No `regress.py replay` capture yet (2026-10-29): `DM_NVN_CAPTURE` of the bedroom
+  (frame 3000 of [`smoke.tsv`](smoke.tsv)) reports `a record's memory straddles a
+  region: the capture is incomplete` and nine record values outside every pool
+  that look like data, not addresses; `nvn_replay` then finds a program where a
+  render target's texture should be (`-[NvProg width]` in `rt_dims`) and aborts.
+  The capture's record field walk misreads one of this game's records: cause open.
 - iPhone gameplay, device memory and touch controls are untested. Audio runs
   through both Wwise output queues on the Mac without sustained underruns;
   listening on the iPhone is pending.

@@ -1441,6 +1441,58 @@ def adrp_targets(d, lo, hi):
                 break
     return out
 
+SUMO_NX, NVNSH, SUMO_MUX = b'Ninty_NX' + bytes(8), b'NVNsh\0', b'MuxFDMR\x02'
+
+def sumo_members(d, label):
+    """Sumo's MuxFDMR v2: two buffer lengths at +24/+32, one or two zlib streams whose stored lengths start at +40."""
+    if len(d) < 44: red(f'{label}: truncated MuxFDMR header')
+    head, n = struct.unpack_from('<I', d, 8)[0], d[18]
+    if d[17] != 2 or n not in (1, 2) or head != 44 + 4 * n or head > len(d): red(f'{label}: unsupported MuxFDMR layout')
+    sizes = struct.unpack_from('<' + 'I' * n, d, 40)
+    if head + sum(sizes) != len(d): red(f'{label}: MuxFDMR streams do not fit the file')
+    import zlib
+    for i, size in enumerate(sizes):
+        expected = struct.unpack_from('<I', d, 24 + 8 * i)[0]
+        z = zlib.decompressobj()
+        raw = z.decompress(d[head:head + size], expected + 1)
+        if not z.eof or z.unused_data or len(raw) != expected: red(f'{label}: MuxFDMR stream {i} length does not match its header')
+        yield f'#MUX{i}', raw
+        head += size
+
+def sumo_program(d, base, size, co, ko, cn, kn, label, stage=None):
+    if base < 0 or size < 0x34 or base + size > len(d) or cn < 0x760 or kn < 0x40 or min(co, ko) < 0x34 or max(co + cn, ko + kn) > size or not (co + cn <= ko or ko + kn <= co):
+        red(f'{label}: shader ranges do not fit the container')
+    ctl, code = d[base + co:base + co + cn], d[base + ko:base + ko + kn]
+    st = glslc_stage(ctl, code)
+    if not st or stage is not None and st != stage: red(f'{label}: invalid shader stage')
+    why = check(label, st, ctl, code)
+    if why: red(f'{label}: {why}')
+    return label, st, ctl, code
+
+def sumo_shaders(d, label):
+    """Sumo's Ninty_NX descriptors use container-relative ranges and their own relative offset; NVNsh v1 stores one stage per record. As with Needle's, a magic whose container
+    does not fit the data is a literal in executable code, not a container (the split reads main whole, where a stop would end it); a container that fits must be valid."""
+    out = []
+    for m in re.finditer(re.escape(SUMO_NX), d):
+        r = m.start() - 0x30
+        if r < 0: continue
+        base = r - struct.unpack_from('<Q', d, r + 0x28)[0]
+        if base < 0 or r < base + 0x38: continue
+        size = struct.unpack_from('<Q', d, base + 8)[0]
+        if r + 0x40 > base + size or base + size > len(d): continue
+        if struct.unpack_from('<I', d, base + 4)[0] != 1: red(f'{label}: unsupported Ninty_NX container version')
+        co, ko, cn, kn = struct.unpack_from('<QQII', d, r)
+        out.append(sumo_program(d, base, size, co, ko, cn, kn, f'{label}#SUMO@{r:#x}'))
+    for m in re.finditer(re.escape(NVNSH), d):
+        h = m.start()
+        if h + 0x34 > len(d) or not 0x34 <= struct.unpack_from('<I', d, h + 8)[0] <= len(d) - h: continue
+        if struct.unpack_from('<H', d, h + 6)[0] != 1: red(f'{label}: unsupported NVNsh version')
+        size, stage = struct.unpack_from('<I', d, h + 8)[0], struct.unpack_from('<I', d, h + 28)[0]
+        if stage >= len(STAGES): red(f'{label}: invalid NVNsh stage {stage}')
+        co, ko, kn, cn = struct.unpack_from('<4I', d, h + 32)
+        out.append(sumo_program(d, h, size, co, ko, cn, kn, f'{label}#NVNSH@{h:#x}', STAGES[stage]))
+    return out
+
 def phyre_shaders(d, label):
     """Phyre's NVN code immediately precedes its control section, unaligned in RYHP effects; loose blobs also prefix their two lengths (FFX/X-2)."""
     out = []
@@ -2127,6 +2179,11 @@ NEST = 16   # archives in archives scan_blob opens (SARC, PlatinumGames' DAT): r
             # member point at the same inner archive, its work doubling with each level: the members a file's archives open may add up to at most NEST times the file
 def scan_blob(d, label, out, depth=0, left=None):
     if depth > NEST: red(f'{label}: archives nested more than {NEST} deep')
+    if d[:8] == SUMO_MUX:
+        members = list(sumo_members(d, label))
+        if left is None: left = [NEST * sum(len(member) for _, member in members)]   # as with Yaz0, count decoded bytes, not compressed bytes
+        for nm, member in members: scan_blob(member, label + nm, out, depth + 1, left)
+        return
     if d[:4] in (b'HCPS', b'xbc1', b'DRSM') or d[:8] == b'cmp\0zlib':
         monolith_shaders(d, label, out)
         return
@@ -2153,6 +2210,7 @@ def scan_blob(d, label, out, depth=0, left=None):
         if m.start() + size <= len(d) and d[m.start() + 0x60:m.start() + 0x64] == b'grsc': out.extend(bnsh_shaders(d, m.start(), label))
     if MGFX in d: out.extend(mgfx_shaders(d, label))
     if NEEDLE in d: out.extend(needle_shaders(d, label))
+    if SUMO_NX in d or NVNSH in d: out.extend(sumo_shaders(d, label))
 
 def group(label):
     """source group (second half of the package file name)"""
@@ -2173,10 +2231,11 @@ def pixel_input_cover(shaders):
         k = min(ins, key=lambda k: (-len(ins[k] & left), k)); cover.append(k); left -= ins[k]
     return cover
 
-SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TFXO@', '#NEEDLE@', '#SNOWDROP@', '#PHYRE@')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
+SINGLE_STAGE = ('#GLSLC@', '#UE', '#MTSPK@', '#MGFX@', '#NLG', '#PGSO', '#RAW@', '#TFXO@', '#NEEDLE@', '#SNOWDROP@', '#PHYRE@', '#SUMO@', '#NVNSH@')   # sources whose every shader is a program of one stage: GLSLC outputs, Unreal's shader records, MT Framework's shader package (BNSH variations, Unity programs, MSHD and SDF pair theirs);
 # Unreal Engine 3's shader caches (ue3_shaders, '#UE3@'); MonoGame's effects, whose passes may name no vertex shader and keep the one bound (Celeste: 10 of its 13 effects draw through SpriteBatch's vertex shader, which is in main); Next Level Games'
 # archives (Luigi's Mansion 3 makes 5,317 programs of one stage each at boot); PlatinumGames' shader objects (Bayonetta 3: one stage each, pg_shader); control sections loose in main
-# (Advance Wars 1+2: Re-Boot Camp's Bink shaders, raw_shaders), which no file pairs; and YEBIS's effect file (tfxo_shaders)
+# (Advance Wars 1+2: Re-Boot Camp's Bink shaders, raw_shaders), which no file pairs; YEBIS's effect file (tfxo_shaders); and Sumo's Ninty_NX descriptors and NVNsh records, one stage
+# each (Team Sonic Racing: 2,116 vertex and 2,399 pixel programs, sumo_shaders)
 def separable_pairs(keys):
     """Single-stage programs (13 Sentinels: each GLSLC output becomes a program with one stage, and BindProgram's stage bits combine vertex and pixel programs per draw; Unreal combines its shaders per draw
     from the pipeline state) have their real pairs only at draw time. vs_pad uses only the union of the locations the paired pixel shaders read, so every single-stage vertex shader is paired with
@@ -2334,7 +2393,7 @@ def scan_file_in(args):
         try: pairs = unity_shaders(d, '/' + rel, found, trees if not TREES else dict(TREES))
         except unityfs.NoTree: return rel, {}, set(), 'defer'
         return rel, uniq_keys(found), var_pairs(found) | {(a, b, 'prog') for a, b in pairs}, trees
-    elif b'BNSH\0\0\0\0' not in d and b'BAHS' not in d and d[:4] != b'MSHD' and not (d[:4] == b'SARC' and b'Yaz0' in d) and b'\x91\x68\x86\x19' not in d and MGFX not in d and NEEDLE not in d: return rel, {}, set(), {}   # a SARC may hold Yaz0 members
+    elif b'BNSH\0\0\0\0' not in d and b'BAHS' not in d and d[:4] != b'MSHD' and not (d[:4] == b'SARC' and b'Yaz0' in d) and b'\x91\x68\x86\x19' not in d and MGFX not in d and NEEDLE not in d and d[:8] != SUMO_MUX and SUMO_NX not in d and NVNSH not in d: return rel, {}, set(), {}   # a SARC may hold Yaz0 members
     else:
         scan_blob(d, '/' + rel, found)
         # whole GLSLC outputs in a file no other reader takes (FINAL FANTASY TACTICS - The Ivalice Chronicles: its engine's technique files, resources_nx/…/shader/*.tec, 261 outputs beside

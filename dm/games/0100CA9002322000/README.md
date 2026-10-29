@@ -2,7 +2,7 @@
 
 Update 4.1.1 (v196608), SDK 3.4.0, on NVN (18 shaders, BNSH files). Modules `main` and `sdk`. Image & Form's own engine (the SteamWorld series' engine, the one [SteamWorld Heist: Ultimate Edition](../010016100A186000/README.md) runs on), with its shaders in a zip `.impak` archive in RomFS. SDK 3.4.0 is the oldest in the games table. The standard host and rewriter run this build with no game-specific fix: no shader overrides, rewriter cuts or host changes. The profile is the NSP script's provisional one, unchanged apart from its comments and app category ([What it needs](#what-it-needs)). Only this update is registered in the profile.
 
-On the Mac (2026-10-29, a short gameplay check, as for the SteamWorld Heist games): the title, a new game (slot 1, Normal), the opening on the cliff, then the first stretch of desert: walking, jumping and the tutorial prompts (walk, jump, wall jump), at 60 fps (frame time p50 16.67 ms, GPU p50 about 1.5 ms at 1080p) with audio rendered and no `[RED]` line from the game. The game saved after the new game started; in a second run the title listed the slot ("Game 1") and Continue loaded it. The unsigned IPA is built with the frame rate counter but not tested on an iPhone.
+On the Mac (2026-10-29, a short gameplay check, as for the SteamWorld Heist games): the title, a new game (slot 1, Normal), the opening on the cliff, then the first stretch of desert: walking, jumping and the tutorial prompts (walk, jump, wall jump), at 60 fps (frame time p50 16.67 ms, GPU p50 about 1.5 ms at 1080p) with audio rendered (choppy until the audio fix in [Found on this game](#found-on-this-game)) and no `[RED]` line from the game. The game saved after the new game started; in a second run the title listed the slot ("Game 1") and Continue loaded it. The unsigned IPA is built with the frame rate counter but not tested on an iPhone.
 
 ## What it needs
 
@@ -37,7 +37,9 @@ On the Mac (2026-10-29, a short gameplay check, as for the SteamWorld Heist game
 
 ## Found on this game
 
-Nothing new: it runs on mechanisms found on other games, SDK 3.4.0's NVN and services included.
+- Resolved: the sound was choppy because the host looked for the `AudioRenderSystem` at SDK 16's offset in `AudioRendererImpl`; this `sdk` (the same build as [SteamWorld Dig](../01009320084A4000/README.md)'s) keeps it at `+0x50`. After the fix, a 40 s dump has no silent blocks once the music starts → [Where the `AudioRenderSystem` sits in `AudioRendererImpl`](../../../docs/reference/audio.md#where-the-audiorendersystem-sits-in-audiorendererimpl).
+
+Otherwise it runs on mechanisms found on other games, including SDK 3.4.0's NVN and services.
 
 ## Open
 

@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 --- a/dm/gfx/tools/dmsh_mtlcache.py
 +++ b/dm/gfx/tools/dmsh_mtlcache.py
-@@ -7,16 +7,33 @@
+@@ -7,17 +7,34 @@
  # Filling from earlier builds: every imported library must record the current compiler identity and flags in its reflection. Legacy libraries without that identity are not imported.
  # A fresh compile of two shaders per stage also checks their bytes. Each folder is read once per compiler identity (filled.json remembers its number of libraries).
  # Not part of the chain version (dmsh_chain.py): the cache never changes an output, it only skips recompiling one. Change FORMAT when what it stores changes.
@@ -9,6 +9,7 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 +import os, re, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
  
  FORMAT = b'dmsh_mtlcache 2'   # earlier prefill could misclassify an unsampled library from another compiler
+ OUTPUT = re.compile(r'[0-9a-f]{16}_b\.metal')   # a shader's MSL in dmsh_build.py's outputs: <key>_b.metal
 -_clonefile = getattr(ctypes.CDLL(None, use_errno=True), 'clonefile', None)   # APFS copy-on-write copy (no data written); elsewhere a plain copy
 +try:   # CDLL(None) means "the running process" on POSIX only; on Windows it raises TypeError, so the copy is a plain one
 +    _clonefile = getattr(ctypes.CDLL(None, use_errno=True), 'clonefile', None)   # APFS copy-on-write copy (no data written); elsewhere a plain copy
@@ -38,7 +39,7 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
  
  
  def compiler_id(sdk):
-@@ -55,7 +72,7 @@
+@@ -56,7 +73,7 @@ class Cache:
              clone(p, lib); self.count((target, 'reused')); return
          tmp = f'{lib}.tmp-{os.getpid()}-{threading.get_ident()}'
          self._compile(target, msl, tmp)

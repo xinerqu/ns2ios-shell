@@ -2,7 +2,7 @@
 
 Update 1.12.0 (v65536), SDK 3.4.0, on NVN (9 shaders, BNSH files). Modules `main` and `sdk`. Image & Form's own engine (the SteamWorld series' engine, the one [SteamWorld Dig 2](../0100CA9002322000/README.md) and [SteamWorld Heist: Ultimate Edition](../010016100A186000/README.md) run on), with its shaders as loose `.bnsh` files in `Shaders/`. It ships the same `sdk` build as SteamWorld Dig 2. The standard host and rewriter run this build with no game-specific fix: no shader overrides, rewriter cuts or host changes. The profile is the NSP script's provisional one, unchanged apart from its comments and app category ([What it needs](#what-it-needs)). Only this update is registered in the profile.
 
-On the Mac (2026-10-29, a short gameplay check, as for the other SteamWorld games): the title, slot A, the opening in the mine and its lines, then control of Rusty: walking, jumping onto ledges, climbing ladders, the pause menu and quitting to the main menu, at 60 fps (frame time p50 16.67 ms, GPU p50 about 1.6–4 ms at 1080p) with audio rendered (no underruns) and no `[RED]` line. The game committed its save when the new game started; in a second run the title listed slot A and Play loaded it. The unsigned IPA is built with the frame rate counter but not tested on an iPhone.
+On the Mac (2026-10-29, a short gameplay check, as for the other SteamWorld games): the title, slot A, the opening in the mine and its lines, then control of Rusty: walking, jumping onto ledges, climbing ladders, the pause menu and quitting to the main menu, at 60 fps (frame time p50 16.67 ms, GPU p50 about 1.6–4 ms at 1080p) and no `[RED]` line; the sound was choppy until the audio fix in [Found on this game](#found-on-this-game). The game committed its save when the new game started; in a second run the title listed slot A and Play loaded it. The unsigned IPA is built with the frame rate counter but not tested on an iPhone.
 
 ## What it needs
 
@@ -36,7 +36,9 @@ On the Mac (2026-10-29, a short gameplay check, as for the other SteamWorld game
 
 ## Found on this game
 
-Nothing new: it runs on mechanisms found on other games, SDK 3.4.0's NVN and services included.
+- Resolved: the sound was choppy (69% of the 5 ms blocks silent) because the host looked for the `AudioRenderSystem` at SDK 16's offset in `AudioRendererImpl`; SDK 3.4 keeps it at `+0x50`. After the fix, no blocks are silent once the music starts → [Where the `AudioRenderSystem` sits in `AudioRendererImpl`](../../../docs/reference/audio.md#where-the-audiorendersystem-sits-in-audiorendererimpl).
+
+Otherwise it runs on mechanisms found on other games, including SDK 3.4.0's NVN and services.
 
 ## Open
 
