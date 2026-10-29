@@ -96,6 +96,14 @@
 - **Fix:** `scripts/build_ipa_from_nsp.py` `decompress_nsz` prefers the current Python's module: it links the file selected by `-k` as `keys.txt` in the conversion's temporary folder and runs `nsz -D` there, with `sys.argv[0]` set to `nsz` before import. Without the module, `nsz_command` probes `nsz` and `nsz-cli-macos-arm64` on the build's PATH and passes `--keys` to the first whose successful help lists that option. An unsupported or failed candidate does not hide the next one; when none works, the error lists the reasons and installation options. Executable, input and output paths are absolute because conversion changes directories. The temporary folder and link are removed on success or failure; the user's default keys are untouched.
 - **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md), converting its v0 NSZ. Applies to NSZ and XCZ inputs for every game. Synthetic tests during [PR #327](https://github.com/seedds/nxnative/pull/327) also reproduce an older console script hiding the release binary, a failed help probe containing `--keys`, and a relative PATH executable failing after the directory change; no game files are needed for those cases.
 
+### ZBIC-compressed NSO segments
+
+- **Symptom:** the NSP script or any module tool stops on `main`: `compressed with zstd (NSO flag bit 7), which this loader does not decode yet`; with the decoder but without its package, `ZBIC (zstd) segments need the zbic package (python3 -m pip install zbic)`.
+- **Cause:** from system 22.0.0, an NSO may store its segments as **ZBIC**, NSO flag bit 7 for the whole module (the per-segment compression and check-hash bits keep their meaning). ZBIC is Nintendo's variant of zstd, not a container around standard frames: its frames start with the magic `ZBIC` and its FSE tables are written with binary interpolative coding, so neither `compression.zstd` nor the `zstd` command can read them.
+- **Fix:** `dm/tools/nso.py` decodes such segments with the [`zbic`](https://pypi.org/project/zbic/) package (Kinnay's, zstd with Atmosphère's ZBIC changes), imported only for a flag-bit-7 module, so an LZ4 title needs nothing new; every segment is still held to the header's size and SHA-256. zstd has no fixed ratio bound, so a ZBIC segment is held only to its own size, where an LZ4 one is also held to 255 bytes per stored byte. Install it with the other tools (README, step 1).
+- **Check:** Well Dweller's `main` decodes to 85,370,056 bytes with segments `0x39680d0 / 0x9f7e74 / 0x9b1930`, every SHA-256 matching; `dm/tools/tests/test_nso.py` checks that a flag-bit-7 module whose segments are not ZBIC is an Error naming ZBIC.
+- **Found on:** [Well Dweller](../../dm/games/0100217023F6C000/README.md) (SDK 22.2.0).
+
 ## Cartridge dumps
 
 ### A cartridge dump with its update on it extracts the update as the base game

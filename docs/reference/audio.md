@@ -251,6 +251,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Fix:** `ListAudioIns` reports none, both opens fail, and the calls that need an open AudioIn answer without touching the game's object (`hle_audio.c`).
 - **Found on:** [Absolum](../../dm/games/0100A83022A22000/README.md) (SDK 18.3.2, FNA on .NET NativeAOT with SDL3; one boot each).
 
+### `OpenAudioOut` without a release event (SDK 22)
+
+- **Symptom:** `game called nn::diag abort: Result 0xe15, call site sdk+0x1f8704`, i.e. inside `nn::audio::CreateAudioOutManagerByHipc+0xb4`, before any audio device opened.
+- **Cause:** SDK 22 calls **`nn::audio::OpenAudioOut(AudioOut*, const char*, const AudioOutParameter&)`** (`sdk+0x1f7914`, `nn::audio::OpenAudioOut(AudioOut*, const char*, const AudioOutParameter&)`'s failure path) — the overload without the `SystemEvent` the host implemented (`_ZN2nn5audio12OpenAudioOutEPNS0_8AudioOutEPKcRKNS0_17AudioOutParameterEPNS_2os11SystemEventE`). With no hook the SDK's own IPC path ran and the audout service is not there.
+- **Fix:** `hle_audio.c` gained the 4-argument hook, which opens through the same `au_open_at` and leaves the release event NULL (`au_open_at(g, NULL, name, param, __builtin_return_address(0))`), so the output polls its released buffers. The log then reads `OpenAudioOut … , no release event (the game polls)`.
+- **Found on:** [Well Dweller](../../dm/games/0100217023F6C000/README.md) (SDK 22.2.0); the game's first `AudioOut` is the "DeviceOut" form, the second its 48 kHz music output.
+
 ## Codecs
 
 ### Hardware Opus decoders built on the SDK's software decoders

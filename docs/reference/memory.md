@@ -77,6 +77,13 @@ The guest address space, heaps, pools, virtual address memory and the allocators
 - **Found on:** [Fire Emblem Engage](../../dm/games/0100A6301214E000/README.md); [Ace Attorney Investigations Collection](../../dm/games/010005501E68C000/README.md) (Unity 2022.3, SDK 17.5.3); [Brain Memory Training Academy](../../dm/games/0100F5D01DA3A000/README.md); [Patrick's Parabox](../../dm/games/0100E44016C22000/README.md); [Advance Wars 1+2: Re-Boot Camp](../../dm/games/0100300012F2A000/README.md).
 - **Note:** to measure regions and commits, see [Measuring address regions and commits](#measuring-address-regions-and-commits).
 
+### `nv::GetGraphicsMemoryInfo` with no graphics device
+
+- **Symptom:** `CRASH sig=11 addr=0 pc=sdk+0x4656c8` right after the window is created, with `x0 = 0` and the return address in `main` (`main+0x3508a90`): the faulting code is `ldr x0,[0xc5d000+0xc68]; ldr x8,[x0]; ldr x1,[x8,#0x68]; br x1`.
+- **Cause:** the game reports GPU memory in its startup log, so it calls `nv::GetGraphicsMemoryInfo` and then `nv::DumpGraphicsMemoryInfo` (both imported by `main`). The SDK's implementation reads a driver object from its own static (`0xc5d000+0xc68`) that only `nv::InitializeGraphics` sets; a game that never initialises an NVN device — as every EGL/OpenGL game does — leaves it null, and the SDK dereferences it. `nv::MemoryInfo` is 0x40 bytes, filled from eight sign-extended 32-bit driver counters.
+- **Fix:** [`dm/gfx/hle_nv.c`](../../dm/gfx/hle_nv.c) answers the five `nv::` symbols such a game imports: it records the allocator callbacks (`SetGraphicsAllocator`, `SetGraphicsDevtoolsAllocator`) and the pool from `InitializeGraphics(void*, size_t)`, and `GetGraphicsMemoryInfo` reports that pool (total and free = its size) or zeroes the structure when nothing was initialised.
+- **Found on:** [Well Dweller](../../dm/games/0100217023F6C000/README.md) (SDK 22.2.0, GameMaker Studio 2, OpenGL through EGL). The game's allocator is never called again, so a zeroed report is equally correct on a GL-only title.
+
 ## Virtual address memory and the alias region
 
 ### Virtual address memory follows the NPDM's system resource
