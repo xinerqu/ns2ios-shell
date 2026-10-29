@@ -54,6 +54,7 @@
 ~ dm/games/game.py              # DM_GAMES_DIR split with os.pathsep: ':' cannot hold a Windows path
 ~ dm/tools/nx_extract/Program.cs      # wraps the stacked storage in AlignedReadStorage
 
+~ dm/gfx/tools/dmsh_chain.py    # SPIRV_CROSS: the release's .exe on Windows, not the in-repo macOS build
 ~ dm/gfx/tools/tool_lock.py     # tolerate a single-file translator build and a CRLF checkout
 ~ dm/gfx/tools/dmsh_mtlcache.py # ctypes.CDLL(None) is POSIX-only
 ~ dm/gfx/tools/dmsh_build.py    # atomic_json retries a Windows sharing violation: keys sharing a digest publish the same .json at once

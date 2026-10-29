@@ -29,6 +29,11 @@ STAMP = 'inputs.tsv'   # in the library directory b-<V>/
 XLATE_DIR = os.path.dirname(os.environ.get('XLATE', os.path.join(HERE, 'dmsh_xlate_bin/dmsh_xlate')))
 # spirv-cross likewise: the in-repo build (spirv_cross_bin/build.sh, a pinned upstream commit) that matches the lock file, not the one on PATH, so every Mac converts with the same build
 SPIRV_CROSS = os.environ.get('SPIRV_CROSS', os.path.join(HERE, 'spirv_cross_bin/spirv-cross'))
+# Windows cannot run the in-repo build at all (it is the macOS binary a Mac's build.sh fetched, and it has no .exe extension), and
+# the release ships spirv-cross.exe in --tools instead, which nxn_pack puts on PATH: take that one rather than a path that cannot run.
+# An explicit SPIRV_CROSS wins, and nothing changes on macOS.
+if not os.environ.get('SPIRV_CROSS') and (os.name == 'nt' or not os.path.isfile(SPIRV_CROSS)):
+    import shutil; SPIRV_CROSS = shutil.which('spirv-cross') or SPIRV_CROSS
 
 def options():
     return 'debug=%s reduced=%s' % (os.environ.get('XLATE_DEBUG', '1') != '0', os.environ.get('XLATE_REDUCED', '1') == '1')
