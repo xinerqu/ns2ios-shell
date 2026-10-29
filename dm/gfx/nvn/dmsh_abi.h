@@ -58,3 +58,6 @@
 // A pool binding points at a buffer the host keeps (nvn_mtl.m pool_gpu): a 32-bit bound n (the highest index the shader may read), then from DMSH_POOL_HEAD one 8-byte resource ID per ID
 #define DMSH_POOL_HEAD 8                 // bytes before element 0 of a pool buffer
 #define DMSH_KIND_UNKNOWN "?"            // a binding the build could not place: the host refuses the shader
+
+// The alpha test's state (dm/gfx/tools/dmsh_alpha.py, the <key>_ba libraries): uint function (NVN_ALPHA_FUNC_*), float reference, at this fragment buffer index (nvn_mtl.m at_bind)
+#define DMSH_ALPHA_BUFFER 30             // the fragment argument table's last binding; translated shaders use only buffer 0 there

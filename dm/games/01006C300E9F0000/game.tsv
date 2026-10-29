@@ -19,11 +19,6 @@ shader_versions	v262144
 # ---- Files ----
 # subsdk0 is NintendoSDK_movie (main imports from it)
 modules	main subsdk0 sdk
-# A Mac is needed once for this one: the shaders sit in Oodle- or LZ5-compressed archives, and only the game own decoder
-# unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c). The Windows packer stops and says so; supported_list.py
-# marks the row from this key.
-needs_mac_shaders	1
-
 romfs_marker	JackGame/Content/Paks/pakchunk1-Switch.pak
 zip_store	.pak:.webm:.metallib
 

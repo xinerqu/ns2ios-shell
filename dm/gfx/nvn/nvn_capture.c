@@ -30,7 +30,7 @@ CAP_SIZE(p_clear_buf, 24); CAP_OFF(p_clear_buf, addr, 0); CAP_OFF(p_clear_buf, s
 CAP_SIZE(p_tf_bind, 24); CAP_OFF(p_tf_bind, addr, 8); CAP_OFF(p_tf_bind, size, 16);
 CAP_SIZE(p_tf_state, 16); CAP_OFF(p_tf_state, ctl, 8);
 CAP_SIZE(p_render_cond, 16); CAP_OFF(p_render_cond, mode, 0); CAP_OFF(p_render_cond, addr, 8);
-_Static_assert(OP_COUNT_ == 52, "nvn_capture.c: a record op was added or removed: give it a case in cap_rec_fields");
+_Static_assert(OP_COUNT_ == 53, "nvn_capture.c: a record op was added or removed: give it a case in cap_rec_fields");
 
 const char *cap_layout(void) {
     // sizes and pointer offsets as the walk knows them (the asserts above hold them to nvn_obj.h); bump this text with any change to the walk
@@ -60,7 +60,7 @@ int cap_rec_fields(uint32_t op, uint8_t *payload, uint32_t size, const cap_ops *
     switch (op) {
         case OP_END: case OP_BEGIN: case OP_CLEAR_COLOR: case OP_CLEAR_DS: case OP_VIEWPORTS: case OP_SCISSOR: case OP_DEPTH_RANGE: case OP_BIND_STATE: case OP_BIND_VATTR:
         case OP_BIND_VSTREAM: case OP_BIND_TEX1: case OP_STENCIL: case OP_POLY_OFFSET: case OP_BARRIER: case OP_COPY_STRIDE: case OP_BLEND_COLOR: case OP_RESET_COUNTER:
-        case OP_DEPTH_CLAMP: case OP_RAST_DISCARD: case OP_VP_SWIZZLE: case OP_PRIM_RESTART: case OP_DRAW_TEX:   // OP_DRAW_TEX: a texture handle, read through the pools at replay
+        case OP_DEPTH_CLAMP: case OP_RAST_DISCARD: case OP_VP_SWIZZLE: case OP_PRIM_RESTART: case OP_ALPHA_REF: case OP_DRAW_TEX:   // OP_DRAW_TEX: a texture handle, read through the pools at replay
             return 1;
         case OP_JUMP: case OP_CALL: return HAS(0) && ops->obj(ctx, CAP_K_SEG, F(0), payload, (uint32_t)plen);
         case OP_SIGNAL_EVENT: return HAS(0) && ops->addr(ctx, F(0), 4, 1);   // volatile uint32_t *val, mode, value

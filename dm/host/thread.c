@@ -1,5 +1,7 @@
 // Guest thread environment: gate slot = this thread's gate entry (guest_gate_stack); x18 slot cleared; tpidr_el0 slot = ELF TLS block; tpidrro_el0 slot = Horizon ThreadLocalRegion (0x200).
-// The SDK's internal critical section takes the current thread object pointer from TLR[0x1f8]; here each thread gets a zero-initialized object allocated and written in.
+// The kernel owns two fields of the ThreadLocalRegion that the SDK reads: the current thread object at TLR[0x1f8] and, since SDK 22, the thread's ID at TLR[0x110] (nn::os 22's internal critical
+// section stores it as a mutex's owner and compares it in IsLockedByCurrentThread, where SDK 16 compared the object pointer). Here each thread gets a zero-initialized object allocated and
+// written in, and its ID once the thread table has one (guest_thread_set_id)
 #include "dm.h"
 #include <sys/mman.h>
 #define TLS_SIZE 8192
@@ -24,6 +26,9 @@ void guest_thread_init(void) {
     void **prev = pthread_getspecific(g_keyown); if (prev) own_free(prev);   // re-initialised on the same thread: free the previous set first (the new one is what the slots now point to)
     pthread_setspecific(g_keyown, own);
 }
+// The thread's kernel ID at TLR[0x110], the one svcGetThreadId answers (hle_thread.c's thr_t id, never 0: 0 is the owner word of an unlocked mutex). Without it every
+// unlocked SDK 22 mutex reads as the caller's and the first heap lock aborts (docs/reference/threads.md)
+void guest_thread_set_id(uint64_t id) { *(uint32_t *)((uint8_t *)pthread_getspecific(g_keytlr) + 0x110) = (uint32_t)id; }
 
 // Gate stacks (entry.S dm_gate): the SVC gate's register frame and the host's SVC handlers run on a stack of the thread's own, never below the guest's sp, as on Horizon, whose kernel leaves a
 // thread's stack untouched during an SVC. Each thread holds a gate slot k: its KGATE slot points to entry.S stub k, which loads dm_gate_top[k]. A guest thread (hle_thread.c thread_main) runs

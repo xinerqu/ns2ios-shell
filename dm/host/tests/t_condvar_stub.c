@@ -4,6 +4,7 @@ struct dm_flags g_flag;
 uint64_t g_t0_ns;
 void crash_thread_init(void) {}
 void guest_thread_init(void) {}
+void guest_thread_set_id(uint64_t id) { (void)id; }
 void guest_gate_stack(int own_stack) { (void)own_stack; }
 // The notification scheduler test supplies a C entry for real thread SVCs.
 #ifndef DM_TEST_THREAD_ENTER

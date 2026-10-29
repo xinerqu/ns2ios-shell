@@ -358,3 +358,8 @@ check_t_vk_desc: RUN_ENV = MTL_DEBUG_LAYER=1
 t_float_pad: t_float_pad.m $(MTL_T_DEP)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_float_pad.m $(MTL_T_SRC) $(FW)
 check_t_float_pad: RUN_ENV = MTL_DEBUG_LAYER=1
+# The alpha test through the replay (t_alpha.m), with its shaders from test_dmsh_alpha.py
+t_alpha: t_alpha.m $(MTL_T_DEP)
+	clang $(CFLAGS) -fobjc-arc -o $@ t_alpha.m $(MTL_T_SRC) $(FW)
+check_t_alpha: t_alpha
+	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; python3 test_dmsh_alpha.py --fixture "$$work"; MTL_DEBUG_LAYER=1 ./t_alpha "$$work"

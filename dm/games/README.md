@@ -141,6 +141,7 @@ One row per profile; the notes are each profile's `README.md`.
 | [Super Mario Party Jamboree](0100965017338000/README.md) | `0100965017338000` | 2.3.0 | 17.5.9 | NintendoWare Bezel Engine 2.9 | NVN |
 | [Super Smash Bros. Ultimate](01006A800016E000/README.md) | `01006A800016E000` | 13.0.5 | 8.2.1 | Bandai Namco / Sora's engine | NVN |
 | [Taiko Risshiden V DX](0100346017304000/README.md) | `0100346017304000` | 1.1.1 | 12.3.3 | Koei Tecmo's KTGL | NVN |
+| [Team Sonic Racing](010092B0091D0000/README.md) | `010092B0091D0000` | 1.0.3 | 5.6.0 | Sumo Digital's engine, Wwise | NVN |
 | [The Great Ace Attorney Chronicles](010036E00FB20000/README.md) | `010036E00FB20000` | 1.0.0 (base) | 10.4.1 | Capcom's MT Framework | NVN |
 | [The Legend of Zelda: Breath of the Wild](01007EF00011E000/README.md) | `01007EF00011E000` | 1.9.0 | 20.5.22 | Nintendo EPD (sead / agl / gsys / ksys, Havok) | NVN |
 | [The Legend of Zelda: Echoes of Wisdom](01008CF01BAAC000/README.md) | `01008CF01BAAC000` | 1.1.0 | 20.5.1 | NintendoWare (G3d / Ui2d / Vfx) | NVN |
@@ -148,6 +149,7 @@ One row per profile; the notes are each profile's `README.md`.
 | [The Legend of Zelda: Tears of the Kingdom](0100F2C0115B6000/README.md) | `0100F2C0115B6000` | 1.4.3 | 20.5.22 | Nintendo EPD (sead / agl / gsys) | NVN |
 | [Unicorn Overlord](010069401ADB8000/README.md) | `010069401ADB8000` | 1.05 | 16.2.4 | Vanillaware's engine | NVN |
 | [Unicorn Overlord, Asian release](010054B01AD92000/README.md) | `010054B01AD92000` | 1.05 | 16.2.4 | Vanillaware's engine | NVN |
+| [Well Dweller](0100217023F6C000/README.md) | `0100217023F6C000` | 1.0.0 | 22.2.0 | GameMaker Studio 2 (its runner) | OpenGL |
 | [Xenoblade Chronicles: Definitive Edition](0100FF500E34A000/README.md) | `0100FF500E34A000` | 1.1.2 | 9.3.1 | Monolith's engine | NVN |
 | [Xenoblade Chronicles 2](0100E95004038000/README.md) | `0100E95004038000` | 2.1.0 | 3.5.0 | Monolith's engine | NVN |
 | [Xenoblade Chronicles 3](010074F013262000/README.md) | `010074F013262000` | 2.2.1 | 12.3.9 | Monolith's engine | NVN |
