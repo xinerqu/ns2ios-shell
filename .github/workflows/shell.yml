@@ -81,18 +81,23 @@ jobs:
               # a tag is shell-<date>-<upstream7>-<fork7>, so its last segment is THIS repository's sha and comparing
               # that against upstream's can never match -- which quietly turned every nightly run into a rebuild and a
               # republish, and buried the current release among a day's worth of them.
-              PREV_UP=''
+              PREV_UP=''; PREV_SHA=''
               if [ -n "$LATEST" ]; then
                 PREV_UP=$(gh release view "$LATEST" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' 2>/dev/null \
                           | sed -n 's/^Source: upstream \([0-9a-f]\{7,\}\).*/\1/p' | head -1) || true
+                # This repository's commit is the last segment of the release TITLE ("Game-free shell <date>-<upstream>-<fork>",
+                # or <date>-<fork> for a fork build). It used to be read from the tag, which was <date>-<upstream>-<fork>
+                # until the tags became version numbers (v0.0.0011) -- after that the last segment was "v0.0.0011", never
+                # equal to HEAD, so every nightly rebuilt and republished what was already published (2026-10-29).
+                PREV_SHA=$(gh release view "$LATEST" --repo "$GITHUB_REPOSITORY" --json name -q .name 2>/dev/null \
+                           | sed 's/.*-//') || true
               fi
               # A release is a snapshot of this repository, not just a shell: GitHub attaches the source (Source code zip
               # and tar.gz) to every release, and the packer a user runs is that source. So publishing on every change is
               # the honest behaviour -- one place to download from, and what is on the releases page is what was built.
               # Skip only when BOTH upstream and this tree are already published: nothing would differ.
               HEAD_SHA=$(git rev-parse HEAD)
-              PREV_SHA=$(echo "$LATEST" | awk -F- '{print $NF}')   # the tag's last segment is this repository's commit
-              if [ -z "$WHY" ] && [ -n "$PREV_UP" ] && [ "$PREV_UP" = "$UP" ] && [ "$PREV_SHA" = "$HEAD_SHA" ]; then
+              if [ -z "$WHY" ] && [ -n "$PREV_UP" ] && [ -n "$PREV_SHA" ] && [ "$PREV_UP" = "$UP" ] && [ "$PREV_SHA" = "$HEAD_SHA" ]; then
                 NEEDED=false; WHY="upstream $UP and this tree are both already published as $LATEST"
               fi
               [ -n "$WHY" ] || WHY="upstream ${UP:0:7} or this tree ${HEAD_SHA:0:7} is not what ${LATEST:-nothing} was built from"
@@ -110,12 +115,17 @@ jobs:
 
   tools:
     name: Windows tools
-    needs: [check]
+    # After the shell job, not beside it: that job levels this repository's copies of dm/gfx/tools and dm/tools with
+    # upstream and commits, and the translator is compiled from them. Built in parallel, the tools came from whatever
+    # this repository last synced while the shell came from today's upstream.
+    needs: [check, shell]
     if: needs.check.outputs.needed == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.shell.outputs.sha }}
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -202,6 +212,7 @@ jobs:
       version: ${{ steps.tree.outputs.version }}
       tag: ${{ steps.tree.outputs.tag }}
       origin: ${{ steps.tree.outputs.origin }}
+      sha: ${{ steps.sync.outputs.sha }}
     steps:
       - name: Check out this fork
         uses: actions/checkout@v4
@@ -286,25 +297,32 @@ jobs:
           echo "building $V from $src, release tag $TAG"
 
       - name: Keep the packer's copies level with upstream
-        # The packer a user runs reads this repository's copies of dm/tools, dm/gfx/tools and dm/games. They are not
-        # patched, so the overlay never mentions them and nothing kept them level with the tree the shell is built from --
-        # which is how the shell stayed current while the rewriter stayed months old. The nightly copies them over and
-        # commits. Files this fork patches or adds are left to a human, because those need reading.
-        if: github.event_name == 'schedule'
+        id: sync
+        # The packer a user runs reads this repository's copies of dm/tools, dm/gfx/tools and dm/games; the Windows tools
+        # job compiles dm/gfx/tools/dmsh_xlate from them as well. They are not patched, so the overlay never mentions them
+        # and nothing kept them level with the tree the shell is built from -- which is how the shell stayed current while
+        # the rewriter stayed months old. This used to run only on the nightly, so a release dispatched by hand shipped a
+        # shell from today's upstream beside a packer from whenever this repository last moved (2026-10-29). It now runs on
+        # every build, before the tools job, and commits: shell, tools and packer then come from one upstream commit.
+        # Files this fork patches or adds are left to a human, because those need reading.
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/fork"
           python3 dm/tools/packer_sync.py . "$TREE" --sync
-          if [ -z "$(git status --porcelain)" ]; then echo "already level with upstream"; exit 0; fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Sync the packer's copies with upstream
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "already level with upstream"
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -q -m "Sync the packer's copies with upstream
 
           dm/tools, dm/gfx/tools and dm/games are what the packer in this repository runs. They are not patched, so the
           overlay never mentions them and nothing kept them level with the tree the shell is built from. Copied from the
           tree this run assembled; the files this fork patches or adds are left alone."
-          git push
+            git push
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Report drift a human has to look at
         # Whatever still differs after the sync is a file this fork patches that upstream moved: that needs a rebase, not

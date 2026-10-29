@@ -56,3 +56,7 @@ Tag releases with a version number, because GitHub sorts that list by tag name	r
 Base to ac9598a: eight new ports, the tool lock in its own file, and shader_key_skip reachable at run time	基座对齐到上游 ac9598a：8 款新 port（Bastion、蝙蝠侠 阿卡姆骑士、纸片马力欧 折纸国王、路易吉洋楼 3、深海迷航 零度之下、蒸汽世界 1/2、Baba Is You）；工具锁校验拆进独立文件 tool_lock.py；新 profile 键 shader_key_skip 打通运行期通路（否则蝙蝠侠的着色器表对不上）
 dmsh_chain.py: keep the Windows spirv-cross fallback the base move dropped	补回基座移动时被我误删的一行：Windows 上 SPIRV_CROSS 要走 PATH 取发布包里的 spirv-cross.exe（仓库里那个是 macOS 二进制，一跑就 WinError 193）。症状是每个 GL 游戏都在「capture: all N shaders」之后直接崩
 Base to cd62e5e: storage the CPU wrote before first use, and two more ports	基座对齐到上游 cd62e5e：修复「首次使用前被 CPU 写过的块压缩纹理」（#568）、prepare 步骤移出图形闸门，外加两款新 port（SteamWorld Dig 2、Streets of Rage 4）。支持列表 104 → 106 款
+restore the two files a packing run rewrites	把两个「打包必然改写」的派生文件（dmsh_chain.h、dmsh_chain.lock）还原——它们被 git add -A 误提交了
+Build on the xcode-27 image, and ship the two iOS sources this fork lacked	改用 xcode-27 镜像：上游用了 iOS 27 的 CMMotionManager.deviceMotionBody，@available 挡不住编译期缺符号；同时补上本仓库缺的两个 iOS 源文件（LauncherRow.swift、player_env.h）
+Release tag: parse the highest tag as base ten, and refuse to reuse a number	修 release 版本号：bash 把 0010 当八进制算成 8，+1 得到 9 又撞回 v0.0.0009 并覆盖了那条 release；同时加上「tag 已被别的 release 占用就报错」的守卫
+Build shell, tools and packer from one upstream commit, and stop republishing nightly	壳/工具/打包器文件改为同一次构建里对齐同一个上游提交（原来只有定时任务会同步打包器副本，手动发版会发出「今天的壳 + 前几天的打包器」）；并修掉定时任务的判重，避免每晚白发一版
