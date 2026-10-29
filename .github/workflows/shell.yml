@@ -274,7 +274,10 @@ jobs:
           if [ "$SHA" = "$FORK" ]; then V="shell-$(date -u +%Y%m%d)-$FORK"
           else V="shell-$(date -u +%Y%m%d)-$(echo "$SHA" | cut -c1-7)-$FORK"; fi
           LAST=$(git -C fork ls-remote --tags --refs origin 'refs/tags/v0.0.*' | sed 's#.*refs/tags/v0\.0\.##' | sort -n | tail -1)
-          TAG="v0.0.$(printf '%04d' $(( ${LAST:-0} + 1 )))"
+          # 10# : bash reads a zero-padded number as octal, so v0.0.0010 + 1 evaluated to 9 and the release took the tag
+          # v0.0.0009 -- one that already existed, which the publish step then overwrote in place instead of failing
+          # (2026-10-29). Parse base ten explicitly; v0.0.0008 + 1 would have thrown "value too great for base".
+          TAG="v0.0.$(printf '%04d' $(( 10#${LAST:-0} + 1 )))"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "TREE=$src" >> "$GITHUB_ENV"
@@ -709,9 +712,16 @@ jobs:
             echo
             cat notes.md
           } > body.md
-          # A rerun of this job computes the same tag again (the number is the highest existing v0.0.* plus one), so replace
-          # the assets and the notes there instead of failing on an already existing tag.
+          # A rerun of this job computes the same tag again and replaces its own assets, so a rerun is not a failure.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # A rerun of this job computes the same tag again and replaces its own assets. Anything else means the number
+            # was reused, and quietly overwriting a published release is exactly how v0.0.0009 lost its own title and
+            # assets to the octal bug above: refuse unless this release is already this build.
+            EXIST=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json name -q .name)
+            if [ "$EXIST" != "$TITLE" ]; then
+              echo "::error::$TAG already names another release ($EXIST): the version number was reused, not overwritten"
+              exit 1
+            fi
             gh release upload "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
           else
