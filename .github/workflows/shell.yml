@@ -193,7 +193,10 @@ jobs:
     if: needs.check.outputs.needed == 'true'
     permissions:
       contents: write        # the nightly sync commits the packer's copies
-    runs-on: macos-26
+    # xcode-27, not macos-26: upstream's iOS code now uses an iOS 27 API (CMMotionManager.deviceMotionBody, cca3333), and
+    # @available(iOS 27, *) guards the call, not the symbol -- with the macos-26 image's iOS 26.5 SDK the build stops at
+    # "property 'deviceMotionBody' not found on object of type 'CMMotionManager *'" and nothing can be published.
+    runs-on: xcode-27
     timeout-minutes: 60
     outputs:
       version: ${{ steps.tree.outputs.version }}
