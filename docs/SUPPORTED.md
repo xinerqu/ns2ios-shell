@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**109 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**111 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -112,6 +112,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Super Mario Party Jamboree | `0100965017338000` | 2.3.0 |  |
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 |  |
 | Taiko Risshiden V DX | `0100346017304000` | 1.1.1 | handheld |
+| Team Sonic Racing | `010092B0091D0000` | 1.0.3 |  |
 | The Great Ace Attorney Chronicles | `010036E00FB20000` | 1.0.0 |  |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 | 60 fps |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |
@@ -119,6 +120,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
+| Well Dweller | `0100217023F6C000` | 1.0.0 |  |
 | Xenoblade Chronicles 2 | `0100E95004038000` | 2.1.0 |  |
 | Xenoblade Chronicles 3 | `010074F013262000` | 2.2.1 |  |
 | Xenoblade Chronicles: Definitive Edition | `0100FF500E34A000` | 1.1.2 |  |
