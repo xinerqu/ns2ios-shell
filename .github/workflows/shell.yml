@@ -291,7 +291,10 @@ jobs:
           TAG="v0.0.$(printf '%04d' $(( 10#${LAST:-0} + 1 )))"
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "TREE=$src" >> "$GITHUB_ENV"
+          # Absolute, because the step that levels the packer's copies runs from inside fork/ and a bare "up" resolves
+          # to fork/up, which does not exist: packer_sync then walked nothing, found nothing, and reported "already level
+          # with upstream" on every run -- the copies stayed months behind while the log looked clean (2026-10-29).
+          echo "TREE=$GITHUB_WORKSPACE/$src" >> "$GITHUB_ENV"
           echo "V=$V" >> "$GITHUB_ENV"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "building $V from $src, release tag $TAG"
