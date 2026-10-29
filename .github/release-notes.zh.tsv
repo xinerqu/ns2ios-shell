@@ -62,3 +62,4 @@ Release tag: parse the highest tag as base ten, and refuse to reuse a number	修
 Build shell, tools and packer from one upstream commit, and stop republishing nightly	壳/工具/打包器文件改为同一次构建里对齐同一个上游提交（原来只有定时任务会同步打包器副本，手动发版会发出「今天的壳 + 前几天的打包器」）；并修掉定时任务的判重，避免每晚白发一版
 Level the packer's copies on every build (the step was a no-op)	CI 里「对齐打包器副本」那步一直在空转：它 cd 进 fork 之后用相对路径 up，目录不存在，于是每次都报「已经对齐」。改成绝对路径
 docs: the supported list after upstream's three ports	支持列表重生成：上游加了 Streets of Rage 4、SteamWorld Dig 2、Mario Party Superstars，106 → 109 款
+Windows packer: split every version a profile's shader tables cover	Windows 打包器修 issue #5：当 profile 的 shader_versions 是多版本并集时（Wonder 的 v0+1.2.1、马车 8 的 4.0.0+4.0.1），以前只解一个版本、只拆一个版本，拆出的表永远对不上并集表，于是崩在 dmsh_build.py 的 packs[name][k]（IndexError）。现在按 shader_versions 把每个版本都解出来、逗号拼给 shader_split.py，表自然等于并集；版本不齐时按上游口径退回派生 profile（表只用要打的那一版现拆）并在日志里说明；另加一道守卫，表的下标超出拆出的包时提前给出可读原因，不再裸崩。影响面：全库 109 款里只有这两款是多版本并集。

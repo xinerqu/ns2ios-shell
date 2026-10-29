@@ -1037,33 +1037,64 @@ def oodle_archives(game, mods):
     return {k: src[k][1] for k in ('oodle_packs', 'ue_legacy') if src.get(k) and src[k][0]}
 
 
-def step_shaders(game, prof_dir, tables, work, tid, force=False):
+def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
     """shader_split.py: pull the shaders out of the game files and produce the four tables. The rows must match the
-    profile's (that is how we know the files are the version the profile was built from)."""
+    profile's (that is how we know the files are the version the profile was built from).
+
+    `versions` are read in ONE split, in the profile's shader_versions order. A profile whose tables are the union of
+    several versions (Wonder: v0 + v327680; Mario Kart 8 Deluxe: v1441792 + v1507328) has to be split from every one of
+    them: that single package holds the shader records the tables index into, and one version alone holds fewer, so
+    dmsh_build.py stopped with a bare IndexError (a user's report, GitHub issue #5). Upstream splits them the same way:
+    build_ipa_from_nsp.py passes one RomFS/main per shader_versions entry and shader_split.py takes comma-separated lists.
+    Returns the differences against the profile's tables, which the caller judges (main()): shader_facts.tsv is merged
+    and written back, the others must match or the build cannot index its package."""
     # Only NVN games come here (main(): `if route == 'nvn'`): a GL or Vulkan game's shaders are not in its files, and the
     # refusal for those lives there, next to the --no-shaders / --gl-capture / --vk-capture runs it points at.
     pkg, tb = work / 'shader' / 'pkg', work / 'shader' / 'tables'
-    if not force and (pkg / 'index.tsv').is_file() and all((tb / n).is_file() for n in tables):
-        say('shader split already done'); return pkg, tb
+    stamp = tb / 'versions.txt'
+    key = ' '.join(versions)
+    if not force and (pkg / 'index.tsv').is_file() and stamp.is_file() \
+            and stamp.read_text(encoding='utf-8').strip() == key and all((tb / n).is_file() for n in tables):
+        say('shader split already done (%s)' % key); return pkg, tb, []
     tb.mkdir(parents=True, exist_ok=True)
     # argv of shader_split.py: romfs, main, package, shader_map.tsv, shader_facts.tsv, shader_pairs.tsv, pso_pairs.tsv --
     # the last is what the pipeline prebuild takes of agl's BAHS program variations, as upstream's build_ipa_from_nsp.py
-    # asks for it (split_shaders, names + ('pso_pairs.tsv',))
+    # asks for it (split_shaders, names + ('pso_pairs.tsv',)). Several versions go in as comma-separated lists in the
+    # same order as the profile's shader_versions, because the tables on disk are a union over exactly that set.
     names = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
-    run([PY, GFX / 'shader_split.py', game / 'RomFS', game / 'ExeFS' / 'main', pkg] + [tb / n for n in names],
+    run([PY, GFX / 'shader_split.py', ','.join(str(dirs[v] / 'RomFS') for v in versions),
+         ','.join(str(dirs[v] / 'ExeFS' / 'main') for v in versions), pkg] + [tb / n for n in names],
         env={'DM_GAME': tid}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
         hint=shader_split_hint)
+    stamp.write_text(key, encoding='utf-8')   # the reuse above must not serve another set of versions
+    diff = []
     for n in names:
         a, b = tb / n, prof_dir / n
         if b.is_file():
             ra = [l for l in a.read_text(errors='replace').splitlines() if l and not l.startswith('#')]
             rb = [l for l in b.read_text(errors='replace').splitlines() if l and not l.startswith('#')]
-            if ra != rb:
-                # The profile's table was built on the machines upstream tested; ours is split from your files right now, which
-                # is at least as accurate for the version you have. The build ID check above is the hard gate on the version.
-                warn('%s differs from game profile %s\'s (a different build of the tables, or another game version): '
-                     'using the one just split from your files' % (n, prof_dir.name))
-    return pkg, tb
+            if ra != rb: diff.append(n)
+    return pkg, tb, diff
+
+
+def map_overflow(pkg_dir, table):
+    """The first row of `table` whose index runs past what the split package holds, or None.
+
+    dmsh_build.py's rec_of() reads the profile's shader_map.tsv rows as packs[name][index] over the package the split
+    wrote, so a table split from other files ends in a bare IndexError (GitHub issue #5). Only the highest index of each
+    package is compared, and the records are counted the way that tool counts them: one per BTCDBTCD control-section
+    header."""
+    worst = {}
+    for ln in table.read_text(errors='replace').splitlines():
+        c = ln.split('\t')
+        if len(c) < 2 or ln.startswith('#') or not c[1].isdigit(): continue
+        if int(c[1]) > worst.get(c[0], -1): worst[c[0]] = int(c[1])
+    for p in sorted(worst):
+        f = pkg_dir / p
+        if not f.is_file(): return '%s is missing from the split' % p
+        n = f.read_bytes().count(b'BTCDBTCD')
+        if worst[p] >= n: return '%s#%d, and the split made %d records' % (p, worst[p], n)
+    return None
 
 
 def step_translate(pkg, work, xlate, iosout, tid, force=False):
@@ -1504,11 +1535,33 @@ def main():
         warn('%s is registered, but the shader tables were built from %s -- shaders this version adds may be missing'
              % (pkg, ' '.join(need)))
     versions = [pkg]
+    # A profile whose shader tables are the UNION of several versions (Wonder: v0 + v327680; Mario Kart 8 Deluxe:
+    # v1441792 + v1507328) has to be split from every one of them -- that is what its `shader_versions` line means, and
+    # upstream splits exactly that set. One version alone holds fewer shader records than those tables index into, which
+    # is what made the shader build stop with a bare IndexError (issue #5). A version the folder does not have is refused
+    # here, before the extraction, with upstream's own sentence ("packing either needs both NSPs").
+    derive_for = None
+    if len(need) > 1 and pkg in need:
+        absent = [v for v in need if v != 'v0' and v not in fam['updates']]
+        if absent:
+            # Upstream's rule (dm/games/README.md, shader_versions): "A registered version is built from the profile as it
+            # is only when all of them are in the folder; otherwise from a derived profile, with tables from the packed
+            # version alone." So this is a derived profile and a warning, not a refusal.
+            derive_for = ('its shader tables are the union of %s and %s not in the folder'
+                          % (' + '.join(need), ', '.join(absent) + (' is' if len(absent) == 1 else ' are')))
+            warn('%s: %s.\n'
+                 '    Packing %s from a profile derived from these files, with the shader tables from %s alone -- as\n'
+                 '    upstream does. Put %s in the folder to pack against the tables the profile registers (a merged\n'
+                 '    package does not help: it holds only the newest version\'s files).'
+                 % (one(rows, 'name', tid), derive_for, pkg, pkg, ', '.join(absent)))
+        else:
+            versions = list(need)
+            say('shader tables are the union of %s: splitting all of them' % ' + '.join(versions))
     # A cartridge dump carries no version of its own, which decides how the version is chosen (above) -- not whether an
     # update in the same folder is used. An XCI of the base game plus an NSP update is an ordinary pairing: dropping the
     # update packed the cartridge's v0 files under the update's version number, and the module build IDs then matched
     # nothing in the profile.
-    picks = {pkg: (fam['base'], fam['updates'][pkg] if pkg != 'v0' and pkg in fam['updates'] else None)}
+    picks = {v: (fam['base'], fam['updates'].get(v) if v != 'v0' else None) for v in versions}
     say('files: base %s%s' % (fam['base'].name,
         (', update %s' % fam['updates'][pkg].name) if pkg != 'v0' and pkg in fam['updates'] else ', no update')
         + (('; %d DLC' % len(fam['dlc'])) if fam['dlc'] else ''))
@@ -1569,7 +1622,7 @@ def main():
     derived_dir = None
     reg = gdir
     bad, had_row = check_build_ids(game, rows, pkg, mods)
-    if not bad:
+    if not bad and not derive_for:
         say('build IDs match the profile for %s' % pkg)
     else:
         # Upstream packs any version: when the files are not the build the profile was brought up on, it derives a profile
@@ -1591,9 +1644,12 @@ def main():
         mods = one(rows, 'modules').split()      # the derived list, not the one the registered profile names
         derived_dir = derived
         builds[pkg] = disp
-        warn('these files are not the build of %s that profile %s registers (%s).\n'
-             '    Packing %s from a profile derived from them, as upstream does: the shader tables come from these files, '
-             'and the observation gates registered for the other build do not apply.' % (pkg, reg.name, '; '.join(bad), pkg))
+        if bad:
+            # Not printed when the profile is only being derived because a version its tables cover is missing: that
+            # warning above already says why, and the build IDs do match.
+            warn('these files are not the build of %s that profile %s registers (%s).\n'
+                 '    Packing %s from a profile derived from them, as upstream does: the shader tables come from these files, '
+                 'and the observation gates registered for the other build do not apply.' % (pkg, reg.name, '; '.join(bad), pkg))
         say('derived profile: %s (%s)' % (derived, disp))
 
     patched = work / 'build' / 'patched'
@@ -1673,7 +1729,25 @@ def main():
     # reads; the .conflicts.tsv is derived by other tools, not passed here)
     tables = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
     if route == 'nvn':
-        pkg_dir, tb = step_shaders(game, gdir, tables, work, tid, a.force)
+        pkg_dir, tb, diff = step_shaders(dirs, versions, gdir, tables, work, tid, a.force)
+        # shader_facts.tsv is the exception: the split merges the profile's shader_facts_manual.tsv into it, and the
+        # translator reads the profile's table, so a difference there is written back below (upstream writes it back too
+        # when the profile is provisional). The other tables are the ones dmsh_build.py indexes its package with, so a
+        # difference only matters when it actually runs off the end.
+        fatal = [n for n in diff if n != 'shader_facts.tsv']
+        over = map_overflow(pkg_dir, gdir / 'shader_map.tsv') if fatal else None
+        if over and derived_dir is None:
+            # This is the IndexError users saw (issue #5): dmsh_build.py's rec_of reads packs[name][index] from the
+            # profile's table, and the package the split just made holds fewer records. Naming it here, before the
+            # translation, is upstream's behaviour too ("the split shader tables differ from game profile ...").
+            die('the shader tables split from these files differ from %s\'s (%s), and its table indexes past what these\n'
+                '    files hold: %s.\n'
+                '    The tables were split from %s: pack those files together -- the base game and every update the profile\n'
+                '    lists for this game -- or pack a version this profile registers.'
+                % (gdir.name, ', '.join(fatal), over, ' + '.join(need) if need else 'another build'))
+        if fatal:
+            warn('the shader tables split from these files differ from %s\'s: %s (%s) -- using the ones just split'
+                 % (gdir.name, ', '.join(fatal), 'indices still fit' if not over else 'they agree with the package'))
         if derived_dir is not None:
             # The shader tool reads its tables from the profile it loads, and a derived profile has none (the split just made
             # them). Without this it falls back to the registered profile's tables, which name shader packs this version lacks.
