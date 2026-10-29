@@ -1,7 +1,7 @@
 diff --git a/dm/host/main.c b/dm/host/main.c
 --- a/dm/host/main.c
 +++ b/dm/host/main.c
-@@ -91,13 +91,17 @@
+@@ -92,13 +92,17 @@
      { void dm_term_install(void); dm_term_install(); }   // SIGTERM graceful exit (hle_lifecycle.c)
      { void crash_set_dump_hook(void (*)(void)); void svc_thread_dump(void); crash_set_dump_hook(svc_thread_dump); }   // Dump guest thread state on a crash
      const char *names[argc + DM_GAME_NMOD]; int n = 0;

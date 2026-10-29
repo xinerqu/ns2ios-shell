@@ -49,6 +49,7 @@ __thread _Atomic int dm_host_work;
 pthread_key_t g_key18;
 void crash_thread_init(void) {}
 void guest_thread_init(void) {}
+void guest_gate_stack(int own_stack) { (void)own_stack; }
 void dm_thread_enter(uint64_t entry, uint64_t arg, uint64_t sp) { (void)entry; (void)arg; (void)sp; abort(); }
 uint64_t now_ns(void) { return clock_ns; }
 uint64_t guest_ns(void) { return now_ns(); }

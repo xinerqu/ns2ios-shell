@@ -598,6 +598,13 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Monster Hunter Rise](../../dm/games/0100B04011742000/README.md).
 - **Note:** the replay used to commit its work and wait for the GPU before the first such draw after each GPU write, then read the count on the CPU (`mdi_wait`, now only for quads, fans and 8-bit indices). In Kamura Village that wait held the submitting thread 14 of its 20 ms a frame on an iPhone (36–54 fps). On the Mac the same scene's submit took 20 ms of wall time for 6.1 ms of work, and now 5.1 ms, all of it work.
 
+### `nvnCommandBufferDrawTexture`
+
+- **Symptom:** a black screen while the frame loop runs at full rate, with `[RED] NVN unimplemented function called: nvnCommandBufferDrawTexture`; once drawn, the picture alternates frame by frame between the right image and another texture's (a solid colour, a still image).
+- **Cause:** the call draws a texture region (texels, through the handle's sampler) into the destination region of the bound colour targets (pixels) without a shader of the game's, and the host had no implementation. Its handle holds IDs of the texture and sampler pools the command buffer bound, as a bind's does: read as IDs of the first pool, a game that draws from a second pool got that pool's textures at the same IDs.
+- **Fix:** recorded as `OP_DRAW_TEX` with the handle moved to the bound pools, as `bind_handles` does (`hle_nvn.c`), and replayed by `draw_tex` (`nvn_mtl.m`): its own render pass per bound colour target after the pass in progress, the pending clears landed first, with the scissor and channel mask; the replay's analyses (pass fusion, deferral, clear hoisting, the store lookahead) treat it as a texture copy. Region coordinates map to the targets' rows directly in either window origin, since the host keeps the Switch's memory layout. Blending is not applied (`[RED] DrawTexture with blending on`), and integer, depth and compressed targets are not drawn.
+- **Found on:** [Streets of Rage 4](../../dm/games/0100EC9010258000/README.md): its scene target gets the movie frame this way (the intro, the title's flames), from movie textures registered at IDs 256 and 257 of a second texture pool.
+
 ### Rasterizer discard preserves vertex storage writes
 
 - **Symptom:** the HUD and sky render but the battle's characters and terrain are absent; the replay logs `draw skipped: rasterizer discard` between model draws.
