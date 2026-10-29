@@ -61,3 +61,4 @@ Build on the xcode-27 image, and ship the two iOS sources this fork lacked	改�
 Release tag: parse the highest tag as base ten, and refuse to reuse a number	修 release 版本号：bash 把 0010 当八进制算成 8，+1 得到 9 又撞回 v0.0.0009 并覆盖了那条 release；同时加上「tag 已被别的 release 占用就报错」的守卫
 Build shell, tools and packer from one upstream commit, and stop republishing nightly	壳/工具/打包器文件改为同一次构建里对齐同一个上游提交（原来只有定时任务会同步打包器副本，手动发版会发出「今天的壳 + 前几天的打包器」）；并修掉定时任务的判重，避免每晚白发一版
 Level the packer's copies on every build (the step was a no-op)	CI 里「对齐打包器副本」那步一直在空转：它 cd 进 fork 之后用相对路径 up，目录不存在，于是每次都报「已经对齐」。改成绝对路径
+docs: the supported list after upstream's three ports	支持列表重生成：上游加了 Streets of Rage 4、SteamWorld Dig 2、Mario Party Superstars，106 → 109 款
