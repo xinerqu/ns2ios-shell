@@ -21,11 +21,6 @@ modules	main subsdk0 sdk
 romfs_marker	Octopath_Traveler0/Content/Paks/pakchunk0-Switch.pak
 zip_store	.awb:.pak:.ttf:.txt:.usm:.metallib
 
-# A Mac is needed once for this one: the shaders sit in Oodle- or LZ5-compressed archives, and only the game own decoder
-# unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c). The Windows packer stops and says so; supported_list.py
-# marks the row from this key.
-needs_mac_shaders	1
-
 # ---- Graphics ----
 # 60 fps (30 on the Switch): the game's config caps Unreal at 30 (t.MaxFPS 30, FrameRateLimit 30, and rhi.SyncInterval 2, the present interval 2 it asks for); the host writes t.MaxFPS 60 and
 # rhi.SyncInterval 1 into its console variables (hle_fpslock.c), so the game asks for present interval 1 itself. Unreal steps the game by the time that really passed.

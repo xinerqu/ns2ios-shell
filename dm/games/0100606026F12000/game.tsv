@@ -24,11 +24,6 @@ modules	main subsdk0 sdk
 romfs_marker	FFRS/Content/Paks/FFRS-Switch.ucas
 zip_store	.pak:.ttf:.txt:.ucas:.utoc:.metallib
 
-# A Mac is needed once for this one: the shaders sit in Oodle- or LZ5-compressed archives, and only the game own decoder
-# unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c). The Windows packer stops and says so; supported_list.py
-# marks the row from this key.
-needs_mac_shaders	1
-
 # ---- Graphics ----
 # 60 fps (30 on the Switch): the engine's Switch device profile sets rhi.syncinterval=2 (BaseSwitchDeviceProfiles.ini), so the game asks for present interval 2, and the game sets no t.MaxFPS.
 # The host writes rhi.SyncInterval 1 into its console variable (hle_fpslock.c), whenever the game sets it back (at level loads), so the game asks for present interval 1 itself. Unreal steps

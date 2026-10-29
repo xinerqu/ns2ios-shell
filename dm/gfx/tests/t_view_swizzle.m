@@ -91,6 +91,40 @@ static void image_case(int tid) {
     for (int i = 0; i < 8; i++) CHECK(abs((int)px[i] - (int[4]){64, 128, 191, 32}[i % 4]) <= 1, "the image write is stored as written");
     read_check(tid, view, (const float[8]){px[0]/255.f, px[1]/255.f, px[2]/255.f, 1, px[4]/255.f, px[5]/255.f, px[6]/255.f, 1}, 0.001f);
 }
+// A plain texture filled once from its pool (tex_init_fill): guest bits uploaded in Metal's order, so it reads right with no swap, and a later Metal render into part of it
+// leaves the rest as uploaded (GitHub issue #183: Tears of the Kingdom's Depths walls). The guest storage keeps the guest's bits
+static void init_fill_case(int tid, int format, int pool_flags) {
+    tex_t t = {.magic=MAGIC('T','E','X',0), .serial=98000+(unsigned)tid};
+    pool_t pool = {.flags=pool_flags | NVN_MEMORY_POOL_FLAGS_GPU_CACHED};
+    t.d = (nvn_texdesc){.target=NVN_TEXTURE_TARGET_2D, .format=format, .width=2, .height=1, .depth=1, .levels=1, .samples=1};
+    nvn_tex_layout(&t.d, &t.L); t.mem = calloc(1, t.L.size); t.pool = &pool; pool.mem = t.mem; pool.size = t.L.size;
+    int b565 = format == NVN_FORMAT_RGB565 || format == NVN_FORMAT_BGR565;
+    uint16_t pixels[2] = {b565 ? 0x001f : 0x801f, b565 ? 0xf800 : 0x7c00}, kept[2] = {0};   // red, then blue (alpha 1 / 0 where the format has it)
+    CHECK(nvn_swizzle(&t.d, 0, 0, pixels, 4, t.mem) == 0, "guest texels swizzled");
+    g_sub_thread = pthread_self(); atomic_store(&g_sub_thread_set, 1);
+    id<MTLTexture> base = [g_dev newTextureWithDescriptor:tex_desc(&t, 0)];
+    CHECK(tex_init_fill(&t, base), "initial fill from the pool");
+    up_flush(); mtl_finish_gpu();
+    serial_put(t.serial, base); mtl_reg_tex(tid, &t, NULL);
+    os_unfair_lock_lock(&g_rmu); id<MTLTexture> view = tex_by_id(tid); os_unfair_lock_unlock(&g_rmu);
+    float want[8] = {1,0,0,1, 0,0,1, format == NVN_FORMAT_RGB5A1 ? 0 : 1};
+    if (format == NVN_FORMAT_BGR565) { want[0] = want[6] = 0; want[2] = want[4] = 1; }
+    read_check(tid, view, want, 0.001f);
+    id<MTLLibrary> lib = [g_dev newLibraryWithSource:@"#include <metal_stdlib>\nusing namespace metal;\nvertex float4 v(uint i [[vertex_id]]) { return float4(i == 1 ? 3 : -1, i == 2 ? 3 : -1, 0, 1); }\nfragment float4 f() { return float4(0, 1, 0, 1); }\n" options:nil error:nil];
+    MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+    pd.vertexFunction = [lib newFunctionWithName:@"v"]; pd.fragmentFunction = [lib newFunctionWithName:@"f"]; pd.colorAttachments[0].pixelFormat = base.pixelFormat;
+    id<MTLRenderPipelineState> p = [g_dev newRenderPipelineStateWithDescriptor:pd error:nil];
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+    rp.colorAttachments[0].texture = base; rp.colorAttachments[0].loadAction = MTLLoadActionLoad; rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+    id<MTLCommandBuffer> command = q_cb(); id<MTLRenderCommandEncoder> e = [command renderCommandEncoderWithDescriptor:rp];
+    [e setRenderPipelineState:p]; [e setScissorRect:(MTLScissorRect){0, 0, 1, 1}]; [e drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3]; [e endEncoding];
+    [command commit]; [command waitUntilCompleted];
+    CHECK(p && command.status == MTLCommandBufferStatusCompleted, "partial render completed");
+    want[0] = want[2] = 0; want[1] = want[3] = 1;   // texel 0 drawn green, texel 1 as uploaded
+    read_check(tid, view, want, 0.001f);
+    CHECK(nvn_deswizzle(&t.d, 0, 0, t.mem, kept, 4) == 0 && !memcmp(kept, pixels, 4), "guest storage keeps the guest's bits");
+    free(t.mem);
+}
 int main(void) { @autoreleasepool {
     mtl_init();
     uint16_t pixels[2] = {0x001f, 0xf800};
@@ -116,6 +150,11 @@ int main(void) { @autoreleasepool {
     cleared_case(413, NVN_FORMAT_RGB565);
     cleared_case(414, NVN_FORMAT_BGR565);
     image_case(415);
+    int packed[4] = {NVN_FORMAT_RGB565, NVN_FORMAT_RGB5A1, NVN_FORMAT_RGB5, NVN_FORMAT_BGR565};
+    for (int i = 0; i < 4; i++) {
+        init_fill_case(416 + i, packed[i], NVN_MEMORY_POOL_FLAGS_CPU_UNCACHED);
+        init_fill_case(420 + i, packed[i], NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS);
+    }
     printf("texture view swizzle: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 } }

@@ -26,6 +26,7 @@ Update 1.23.55063 (v655360) over the base game, SDK 13.3.5. Unity 2019.4.36f1 IL
 
 - RomFS: 21,861 files, 4.0 GB: 14,633 UnityFS bundles (Addressables, `Data/StreamingAssets/aa/Switch`), 24 FMOD banks, 4,823 `.optoctrees` and 2,306 `.bin` world-streaming files.
 - 10,840 shaders: 5,413 vertex, 5,400 pixel, 2 geometry and 25 compute, read with Unity 2019.4's layouts (Pokémon Brilliant Diamond's); the compute kernels are the player's skinning and blend shapes, the ocean's FFT (`FFT512x512`), `UpdateSpectrum`, `DetermineVisibility` and the eye histogram. 11 are the player's GLSLC outputs in `main`. All of them build for the Mac; no run met a shader missing from the map.
+- **Current, cause unknown:** every run logs 1 to 8 `[RED] texture type mismatch: … declares slot 135 (or 136) as Metal type 2, texture ID 800 is type 7 (NVN target 2, …)` lines, a 3D texture in a slot the shader declares 2D; Subnautica's player logs the same ([its note](../0100429011144000/README.md#files-and-shaders)). Nothing wrong was seen on screen.
 
 ## Frame rate
 

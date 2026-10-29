@@ -31,11 +31,6 @@ modules	main subsdk0 sdk
 romfs_marker	root_000.pkz
 zip_store	.avi:.pkz:.webm:.metallib
 
-# A Mac is needed once for this one: the shaders sit in Oodle- or LZ5-compressed archives, and only the game own decoder
-# unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c). The Windows packer stops and says so; supported_list.py
-# marks the row from this key.
-needs_mac_shaders	1
-
 # ---- Memory ----
 # The NPDM declares no system resource (META +0x14 = 0): nninitStartup sets a heap of the pool − used memory (3.09 GB here), which the game maps only as it touches it. The 4 GB block
 # of the other games without virtual address memory (256 MB in front + 256 MB alias region + 256 MB stack region + 3.25 GB heap region)
