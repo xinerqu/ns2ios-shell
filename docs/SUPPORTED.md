@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**97 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**104 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -25,8 +25,11 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 |  |
 | ANIMAL WELL | `010020D01AD24000` | 1.0.10 |  |
 | ASTRAL CHAIN | `01007300020FA000` | 1.0.1 | 60 fps |
+| Baba Is You | `01002CD00A51C000` | 1.0.12 |  |
 | Balatro | `0100CD801CE5E000` | 1.1.3 | handheld |
 | BALL x PIT | `010086A022444000` | 1.293 |  |
+| Bastion | `010038600B27E000` | 1.0.0 |  |
+| Batman: Arkham Knight | `0100ACD0163D0000` | 1.0.5 |  |
 | Bayonetta | `010076F0049A2000` | 1.1 |  |
 | Bayonetta 2 | `01007960049A0000` | 1.2 |  |
 | Bayonetta 3 | `01004A4010FEA000` | 1.2.0 | 暂不支持 |
@@ -71,6 +74,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 |  |
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
+| Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
 | Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 | 60 fps |
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
 | Persona 4 Golden | `010062B01525C000` | 1.0.2 |  |
@@ -91,7 +95,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
 | Stardew Valley | `0100E65002BB8000` | 1.6.15.13 |  |
+| SteamWorld Heist II | `010089C01E9CA000` | 1.5.1 |  |
+| SteamWorld Heist: Ultimate Edition | `010016100A186000` | 2.2.1 |  |
 | STEINS;GATE RE:BOOT | `01008BC024FDE000` | 1.0.3 |  |
+| Subnautica: Below Zero | `010014C011146000` | 1.23.55063 |  |
 | Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 1.2.2 |  |
 | Super Mario Bros. Wonder | `010015100B514000` | 1.2.1（也可 1.0.0 / 1.0.1） |  |
 | Super Mario Galaxy | `010099C022B96000` | 1.3.1 | handheld · 需抓一次 |

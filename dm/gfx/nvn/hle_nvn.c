@@ -330,6 +330,15 @@ static int tex_dirty_upload(void) { static int v = -1; if (v < 0) { const char *
 // Profile render_cond, same arrangement (DM_RENDER_COND): recorded here, evaluated at replay in nvn_mtl.m (OP_RENDER_COND), which reads the
 // same switch -- both ends have to agree, or the records are made and never acted on.
 static int render_cond_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_RENDER_COND"); v = e ? atoi(e) != 0 : DM_GAME_RENDER_COND; } return v; }
+// Profile key shader_key_skip, "<offset>+<length>": overridable at run time for the same reason as the three above -- the shell compiles the
+// placeholder profile's 0+0, so a packed game that sets it would hash its control sections unmasked and ask for shaders its map does not have
+static void shader_key_skip(uint32_t *off, uint32_t *len) {
+    static uint32_t o, l; static int once;
+    if (!once) { once = 1; const char *e = getenv("DM_SHADER_KEY_SKIP"); char *plus = e ? strchr(e, '+') : NULL;
+        if (plus && plus > e) { o = (uint32_t)strtol(e, NULL, 0); l = (uint32_t)strtol(plus + 1, NULL, 0); }
+        else { o = DM_GAME_SHADER_KEY_SKIP_OFF; l = DM_GAME_SHADER_KEY_SKIP_LEN; } }
+    *off = o; *len = l;
+}
 // Textures the CPU fills in place (profile tex_flush_upload): Tears of the Kingdom streams its textures (TexToGo, already in the GPU's block-linear layout) straight into
 // CPU-cached memory pools and publishes each with nvnMemoryPoolFlushMappedRange (9,436 calls at boot), without a packaged layout or WriteTexels. They stayed GPU-only
 // textures with content 0, and the G-buffer's base colour came out black. Textures that can hold such data (not render targets, not linear, no packaged layout, in a pool
@@ -619,7 +628,13 @@ static int keys_hash(const NVNshaderData *sd, int mapped, uint8_t out[8]) {
     uint32_t nctl = 0x880, own; memcpy(&own, (const uint8_t *)sd->control + 0x20, 4);
     if (own >= 0x760 && own < 0x880) nctl = own;
     uint8_t md[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_CTX hc; CC_SHA256_Init(&hc);
-    CC_SHA256_Update(&hc, sd->control, nctl);
+    // Profile key shader_key_skip: bytes of the control section hashed as zeros (shader_split.py key_ctl). Batman: Arkham Knight's engine shares one control section among shaders whose
+    // sections differ only in GLSLC's compile information (+0x778..+0x791, +0x7d0..+0x7e7): it hands a program the section of an earlier shader with the same rest, so the bytes there name another shader
+    uint32_t sko, skl; shader_key_skip(&sko, &skl);
+    if (skl && sko + skl <= nctl) {
+        uint8_t ctl[0x880]; memcpy(ctl, sd->control, nctl); memset(ctl + sko, 0, skl);
+        CC_SHA256_Update(&hc, ctl, nctl);
+    } else CC_SHA256_Update(&hc, sd->control, nctl);
     if (code) CC_SHA256_Update(&hc, (const void *)(uintptr_t)sd->data, ncode);
     CC_SHA256_Final(md, &hc); memcpy(out, md, 8);
     return 1;

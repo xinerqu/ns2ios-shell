@@ -32,6 +32,8 @@ supplied version. The supplied 4.0.0 update is damaged and remains unsupported
   32 MB alignment, as for the equivalent SDK build in Sparks of Hope.
   Decompilation confirms region size and page guards are unchanged. The same
   startup check fails with only the main cut and reaches `nnMain` with both.
+  Since Subnautica: Below Zero ([010014C011146000](../010014C011146000/README.md))
+  the build aligns its 4 MB, 32 MB and 1 GB classes to 2 MB, as SDK 20 does.
 - **Resolved: freed startup pages stayed mapped past the application pool.**
   Startup probes all allocatable memory, frees it, and leaves those pages in
   the SDK's cache. Without `mem_map_limit`, a physical-map census reaches

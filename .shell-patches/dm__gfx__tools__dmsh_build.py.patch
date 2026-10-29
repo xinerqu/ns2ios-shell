@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 --- a/dm/gfx/tools/dmsh_build.py
 +++ b/dm/gfx/tools/dmsh_build.py
-@@ -86,7 +86,10 @@
+@@ -88,7 +88,10 @@
      os.makedirs(os.path.dirname(path), exist_ok=True)
      tmp = path + '.tmp-' + str(os.getpid()) + '-' + str(threading.get_ident())
      with open(tmp, 'w') as f: json.dump(value, f, ensure_ascii=False, indent=1)
@@ -13,7 +13,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  
  def source_without_rule_bodies():   # this file's code form (dmsh_chain.code_form): no comments, docstrings or formatting, and the rule functions' bodies blanked
      return dmsh_chain.code_form(open(__file__, 'r').read(), {f.__name__ for f, _ in RULES})
-@@ -918,7 +921,7 @@
+@@ -951,7 +954,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)

@@ -9,10 +9,9 @@
 # Usage: dmsh_chain.py                 print V (default options)
 #       dmsh_chain.py --header        rewrite dm/gfx/nvn/dmsh_chain.h (run after changing any file listed above, and commit it with the change)
 #       dmsh_chain.py --inputs        print the digest of the current game profile's inputs (DM_GAME), as b-<V>/inputs.tsv records it
-#       dmsh_chain.py --check-tools   verify that the actual tools match the lock file; on mismatch print [RED] lines and exit 1
-#       dmsh_chain.py --update-lock   rewrite the lock file from the actual tools (run after changing Ryujinx / spirv-cross / Xcode; committed to the repo)
+#       (checking the tools against dmsh_chain.lock, and rewriting it, is tool_lock.py's: the checks decide no output, so they are outside V and the shaders' cache keys)
 # Environment: XLATE_DEBUG / XLATE_REDUCED (same meaning as in dmsh_build.py, default 1 / 1; non-default options yield a different V, which the host will not load)
-import os, sys, ast, hashlib, subprocess, shutil
+import os, sys, ast, hashlib
 DM_ROOT = os.environ.get('DM_ROOT') or os.path.expanduser('~/dm-work')   # Workspace root (game files, build outputs and run artifacts are all under it)
 HERE = os.path.dirname(os.path.abspath(__file__)); GFX = os.path.dirname(HERE); HOME = os.path.expanduser('~')
 FILES = ['tools/dmsh_chain.py', 'tools/dmsh_build.py', 'tools/dmsh_atomic.py', 'tools/dmsh_fetch.py', 'tools/dmsh_vin.py', 'tools/dmsh_pull.py', 'tools/dmsh_pull.metal', 'tools/dmsh_geometry.py', 'tools/dmsh_mesh.py', 'tools/dmsh_facts.py', 'nvn/dmsh_abi.h', 'tools/dmsh_abi.py', 'tools/dmsh_xlate/Program.cs', 'tools/dmsh_xlate/dmsh_xlate.csproj', '../ios/tools/ios_metal.py', 'tools/dmsh_chain.lock']
@@ -29,13 +28,7 @@ STAMP = 'inputs.tsv'   # in the library directory b-<V>/
 # the translator defaults to the in-repo build that matches the lock file (a rebuilt dll has different fingerprints)
 XLATE_DIR = os.path.dirname(os.environ.get('XLATE', os.path.join(HERE, 'dmsh_xlate_bin/dmsh_xlate')))
 # spirv-cross likewise: the in-repo build (spirv_cross_bin/build.sh, a pinned upstream commit) that matches the lock file, not the one on PATH, so every Mac converts with the same build
-_env_cross = os.environ.get('SPIRV_CROSS')
-SPIRV_CROSS = _env_cross or os.path.join(HERE, 'spirv_cross_bin/spirv-cross')
-# Windows cannot run the in-repo build at all (it is the macOS binary a Mac's build.sh fetched, and it has no .exe extension), and
-# the release ships spirv-cross.exe in --tools instead, which nxn_pack puts on PATH: take that one rather than a path that cannot run.
-# An explicit SPIRV_CROSS wins, and nothing changes on macOS.
-if not _env_cross and (os.name == 'nt' or not os.path.isfile(SPIRV_CROSS)):
-    SPIRV_CROSS = shutil.which('spirv-cross') or SPIRV_CROSS
+SPIRV_CROSS = os.environ.get('SPIRV_CROSS', os.path.join(HERE, 'spirv_cross_bin/spirv-cross'))
 
 def options():
     return 'debug=%s reduced=%s' % (os.environ.get('XLATE_DEBUG', '1') != '0', os.environ.get('XLATE_REDUCED', '1') == '1')
@@ -87,36 +80,8 @@ def write_stamp(lib, game_id, digest):
 def table_head(lib):   # the header c1_full.tsv / cb_extent.tsv start with: the library's chain version and its inputs ("none" when it has no stamp, which nothing takes)
     return f'# chain {os.path.basename(os.path.normpath(lib))} inputs {read_stamp(lib).get("inputs", "none")}'
 
-def sha16(p):
-    """Tool fingerprint; 'absent' for a single-file build, which has no .dll next to the executable. The lock then records
-    'absent' as well, so the comparison still holds on that machine (on macOS the files are there and nothing changes)."""
-    if not os.path.isfile(p): return 'absent'
-    return hashlib.sha256(open(p, 'rb').read()).hexdigest()[:16]
-
-def tools_now():
-    """Actual tool fingerprints: translator dll (including the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
-    t = {}
-    for dll in ('dmsh_xlate.dll', 'Ryujinx.Graphics.Shader.dll', 'Ryujinx.Common.dll'): t[dll] = sha16(os.path.join(XLATE_DIR, dll))
-    _x = os.path.join(XLATE_DIR, 'dmsh_xlate')
-    if not os.path.isfile(_x) and os.path.isfile(_x + '.exe'): _x += '.exe'   # a Windows build is dmsh_xlate.exe
-    t['xlate_source'] = subprocess.run([_x, '--source-sha'], capture_output=True, text=True).stdout.strip()
-    sc = shutil.which(SPIRV_CROSS)
-    t['spirv-cross'] = sha16(sc) if sc else 'missing'
-    for sdk in ('macosx', 'iphoneos'):
-        t['metal_' + sdk] = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '--version'], capture_output=True, text=True).stdout.splitlines()[0:1] or ['missing']
-        t['metal_' + sdk] = t['metal_' + sdk][0]
-    return t
-
 def xlate_source_sha():   # same convention as dmsh_xlate --source-sha: the embedded Program.cs and csproj concatenated in that order
     return hashlib.sha256(b''.join(open(os.path.join(HERE, 'dmsh_xlate', f), 'rb').read() for f in ('Program.cs', 'dmsh_xlate.csproj'))).hexdigest()[:16]
-
-def check_tools():
-    want = dict(l.rstrip('\n').split('\t', 1) for l in open(LOCK) if '\t' in l and not l.startswith('#'))
-    now = tools_now(); bad = [f'{k}: lock {want.get(k)} / actual {v}' for k, v in now.items() if want.get(k) != v]
-    # A Windows checkout converts line endings, so a translator built there embeds a digest of CRLF sources while the tree
-    # computes one of LF sources. The lock is the authority: when it already names what the translator reports, accept it.
-    if now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
-    return bad
 
 def header_text(v):
     return (f'// Generated file (dm/gfx/tools/dmsh_chain.py --header): the B shader library translation chain version this source tree expects (default options), one for every game;\n'
@@ -125,20 +90,7 @@ def header_text(v):
 
 if __name__ == '__main__':
     a = sys.argv[1:]
-    if a == ['--update-lock']:
-        t = tools_now()
-        # Line endings decide this hash and a Windows checkout converts them, so a translator built there reports a digest
-        # the tree cannot reproduce. Record what the translator says and let the lock be the authority, as check_tools does.
-        if t['xlate_source'] != xlate_source_sha():
-            print(f'[i] the translator embeds source {t["xlate_source"]}, the tree computes {xlate_source_sha()} '
-                  '(line endings, e.g. a Windows checkout): recording what the translator reports')
-        open(LOCK, 'w').write('# Translation chain tool fingerprints (written by dmsh_chain.py --update-lock; regenerate after changing tools and commit it)\n' + ''.join(f'{k}\t{v}\n' for k, v in t.items()))
-        print('wrote', LOCK)
-    elif a == ['--check-tools']:
-        bad = check_tools()
-        for b in bad: print('[RED] translation chain tools do not match the lock file: ' + b)
-        sys.exit(1 if bad else 0)
-    elif a == ['--header']:
+    if a == ['--header']:
         open(HEADER, 'w').write(header_text(version()))
         print(version())
     elif a == ['--inputs']: print(inputs(load_game()))

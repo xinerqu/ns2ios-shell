@@ -23,7 +23,7 @@ On the Mac (headless, docked): from a fresh save the opening movie with sound, t
 ## Rendering
 
 - 25,693 shaders (8,140 vertex, 17,501 pixel, 35 compute, 12 geometry, 1 hull, 4 domain), 25,447 of them in the archives (most in the 13,839 `.fshb` entries, type tag `_G3DSHA`) and 246 in `main`; 20,541 shader pairs. All build for the Mac. Window origin upper left (set after a lower-left default), depth mode near = 0, swapchain 1920x1080 RGBA8 sRGB, present interval 1.
-- **Open: a flat grey backdrop.** On the board and at the minigame podium, part of the far background is a flat grey area with straight edges where the scene should go on (behind the dice block, beside the path in the board's opening talk, behind the item shop and the podium). No draw is skipped and no `[RED]` line names it; the near scene, characters, HUD and minigame are right. Not investigated: a pass dump of such a frame is the next step, with Bezel's render-to-texture module (`RttsModule`) a first suspect for the background.
+- **Resolved: flat grey triangles on the board.** On the board and at the minigame podium, flat grey or background-coloured shapes with straight edges covered part of the scene (behind the dice block, beside the path, behind the item shop), changing shape from frame to frame while the camera stood still, and the board's spaces were missing. The spaces are GPU-driven instances: a vertex shader drawn as 62 points with rasterization off (`2b5485a2a731a231`) writes an 80-byte transform per visible instance and counts them, `276504dc5c987ecf` turns the count into nine indirect draw records, and the instanced draws (`5a805bbb08421b86` in the depth pre-pass, `4b05556737e9535f` and `eaa3a44ba28f0744` in the colour pass) read record = instance + `c0[0x644]`, the driver's base-instance word. The host could only put 0 there for an indirect draw, so every draw read the first records ([The base instance of indirect draws comes from Metal](../../../docs/reference/shaders.md#the-base-instance-of-indirect-draws-comes-from-metal)). Found by bisecting the colour pass with `DM_NVN_SKIP_FS` (which never removed the shapes), then following the vertex-stage storage buffer the instanced draws read back to its writer in the pass dump.
 - `[RED] NVN unimplemented function called: nvnQueueGetTotalCommandMemoryUsed` / `…ControlMemoryUsed` / `…ComputeMemoryUsed` / `nvnQueueResetMemoryUsageCounts`, about once every few seconds: memory-usage statistics the engine reads; nothing depends on them in the route.
 - One `SetRenderEnableConditional` (drawn unconditionally), one `stage 0 cb7 has no uniform buffer bound` and one `sampler ID 4095 not registered`, at boot.
 - Run headless while someone works at the Mac: in a covered window the display link stalled for a second at a time and screenshots were not taken.
@@ -49,11 +49,11 @@ General changes first needed here; each applies to every game:
 
 - **Bezel Engine 2.9 archives** (`bea_members` reads inline entries): [Bezel Engine 2.9 archives keep their entries inline](../../../docs/reference/shaders.md#bezel-engine-29-archives-keep-their-entries-inline).
 - **Native-texture `GetOutputBuffer` returns the output index**, and a release of an index the client does not hold changes nothing (`hle_movie.c`): [`GetOutputBuffer` returns the output index in native-texture mode](../../../docs/reference/movies.md#getoutputbuffer-returns-the-output-index-in-native-texture-mode).
+- **The base instance of indirect draws from Metal** (`dmsh_build.py` `vs_base_instance`): [The base instance of indirect draws comes from Metal](../../../docs/reference/shaders.md#the-base-instance-of-indirect-draws-comes-from-metal).
 - **Bezel's memory setups** (profile data only): [Bezel Engine's two memory setups](../../../docs/reference/memory.md#bezel-engines-two-memory-setups).
 
 ## Open
 
-- The grey backdrop on the board (above).
 - Only one board and one minigame were played; the other boards, modes (Koopathlon, Bowser Kaboom Squad, Rhythm Kitchen, …) and most minigame NROs were not loaded. Motion minigames were turned off at the prompt.
 - Only the 2.3.0 build (`v458752`) is registered.
 - iPhone: not built, not installed, not tested.

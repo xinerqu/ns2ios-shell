@@ -1093,12 +1093,12 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     # dmsh_chain.h -- the header is the compile-time constant only the Xcode route needs, and the shell reads the version
     # from the directory name, so neither value is used any further here.
     genv = {'XLATE': str(xlate), 'DM_GAME': tid}
-    chk = subprocess.run([PY, nometal, GFX / 'dmsh_chain.py', '--check-tools'], capture_output=True, text=True,
+    chk = subprocess.run([PY, nometal, GFX / 'tool_lock.py', '--check-tools'], capture_output=True, text=True,
                          env=dict(os.environ, PYTHONUTF8='1', **genv))
     if chk.returncode:
         say('the toolchain differs from dmsh_chain.lock: registering this machine')
-        run([PY, nometal, GFX / 'dmsh_chain.py', '--update-lock'], env=genv,
-            log=work / 'logs' / 'chain_lock.log', what='dmsh_chain --update-lock')
+        run([PY, nometal, GFX / 'tool_lock.py', '--update-lock'], env=genv,
+            log=work / 'logs' / 'chain_lock.log', what='tool_lock --update-lock')
         warn('dmsh_chain.lock now describes this machine (do not commit it)')
     # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
     # header is per game: packing a second game on the same machine fails with "run --header first" if this only happens
@@ -1181,7 +1181,7 @@ def env_for(rows):
     # Same again for the keys whose environment name does not follow the profile's: each host reads its own spelling and
     # takes the profile's text as it stands (a list of shader keys, "segment", "display").
     for k, ev in (('feedback_snap', 'DM_NVN_FB_SNAP'), ('gpu_timestamps', 'DM_NVN_GPU_TS'),
-                  ('present_interval', 'DM_PRESENT_INTERVAL')):
+                  ('present_interval', 'DM_PRESENT_INTERVAL'), ('shader_key_skip', 'DM_SHADER_KEY_SKIP')):
         v = one(rows, k)
         if v: lines.append('%s=%s' % (ev, v.strip()))
     # ... and the two that are read as atoi != 0, where the profile writes "on" (atoi("on") is 0, which is off)

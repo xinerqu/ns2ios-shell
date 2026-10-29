@@ -67,6 +67,7 @@ dm/gfx/tools/dmsh_chain.*	shader:stage:*	the chain version: every NVN game's lib
 dm/gfx/tools/dmsh_abi.py	shader:stage:*	the reader of the shader library ABI: every NVN game's libraries
 dm/gfx/tools/dmsh_mtlcache.py	shader:stage:*	the Metal compile cache
 dm/gfx/tools/own_compilers.py	shader:stage:*	the tested-compiler build guard
+dm/gfx/tools/tool_lock.py	shader:stage:*	the tool lock check every NVN shader build runs first (not part of the chain version)
 dm/gfx/tools/dmsh_dryrun.py	shader:stage:*	the standalone shader conversion check
 dm/gfx/tools/spirv_cross_bin/*	api:*	the pinned SPIRV-Cross used by every graphics API
 dm/gfx/tools/dmsh_xlate/*	shader:stage:*	the translator's driver

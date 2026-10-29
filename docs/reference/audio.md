@@ -36,6 +36,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Fix:** a thread-local flag (`t_in_open`) hands the inner call straight to the SDK with the host's CPU / manual copy of the parameter, and only the outer call starts the thread (`hle_audren.c`).
 - **Found on:** [ROMANCE OF THE THREE KINGDOMS 8 REMAKE](../../dm/games/0100C2A01A730000/README.md) (SDK 17.5.3).
 
+### The renderer event as the service gives it: a kernel event
+
+- **Symptom:** the frame loop stops for good as a level loads while audio keeps rendering. The main thread waits in `os::WaitSystemEvent` under `CAudioMemoryPool::Shutdown`, and a sound thread of higher priority waits on the same condition variable.
+- **Cause:** with the DSP service (device 0, what the game asks for) `OpenAudioRenderer` attaches the service's renderer event, a kernel readable event (`AttachReadableHandleToSystemEvent`, auto-clear). With CPU rendering and manual execution, which the host switches to ([Running the SDK's own renderer on the CPU](#running-the-sdks-own-renderer-on-the-cpu)), it creates a local one instead (`CreateSystemEvent(event, AutoClear, false)`, SDK 4: `sdk+0x190b6c`). Signalling a local auto-clear event wakes one waiter, the one of highest priority. A kernel event wakes every waiter, and each one tries `ResetSignal`. Donkey Kong Country: Tropical Freeze waits on the event from two threads: its sound thread (priority 29, `main+0x971e8`) every frame, and the main thread while it detaches an audio memory pool (`main+0x6fa8c`: `RequestDetachMemoryPool`, then wait and update until `IsMemoryPoolAttached` is false). The sound thread took every wake, and the main thread never woke again.
+- **Fix:** when the game opened the renderer for the service, the host replaces the SDK's local event with an inter-process auto-clear one (`DestroySystemEvent`, then `hle_bind_system_event(event, 1)` in `ar_open`). The SDK's renderer signals through `os::SignalSystemEvent`, which handles either kind. A game that opens a CPU renderer itself keeps the SDK's local event.
+- **Found on:** [Donkey Kong Country: Tropical Freeze](../../dm/games/0100C1F0051B6000/README.md) (SDK 4.4.0): the first level's load after the intro cinematic.
+
 ### The renderer's update lock (`update_lock`)
 
 - **Symptom:** none of its own; command generation races the game's `Update` on SDKs whose lock is not at SDK 16's offset.
@@ -43,6 +50,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Fix:** `update_lock` in `hle_audren.c` reads it off the SDK's own `Update`: the register the prologue adds the offset to and moves into x0 before its first `bl`, whose PLT slot must hold `LockMutex` or `SdkMutexType::Lock`; anything else keeps SDK 16's.
 - **Found on:** [Mario Kart 8 Deluxe](../../dm/games/0100152000022000/README.md) (4.4), the first game it was plainly wrong for.
 - **Check:** checked with sound on [Big Brain Academy: Brain vs. Brain](../../dm/games/0100620012D6E000/README.md) (11.4, +0x1d8), [DRAGON QUEST XI S](../../dm/games/01006C300E9F0000/README.md) (7.3, `MutexType` +0x1d8) and [Super Mario Odyssey](../../dm/games/0100000000010000/README.md) (7.3, which is silent for its first minute with either lock).
+
+### No `SdkMutexType` in SDK 3
+
+- **Symptom:** `FATAL audren: missing SDK symbol _ZN2nn2os12SdkMutexType4LockEv` right after the renderer's render thread starts.
+- **Cause:** the render path looked up `SdkMutexType::Lock` / `Unlock` before reading which lock the SDK's `Update` takes ([The renderer's update lock](#the-renderers-update-lock-update_lock)); SDK 3.5.1's `sdk` has no `SdkMutexType` and takes `nn::os::LockMutex` at +0x1f8.
+- **Fix:** `render_once` looks up the `SdkMutexType` functions only when `update_lock` does not find `LockMutex` (`hle_audren.c`).
+- **Found on:** [OCTOPATH TRAVELER](../../dm/games/010057D006492000/README.md) (SDK 3.5.1), the first SDK 3 game through the audio renderer (Bayonetta 2's 3.6.0 plays through `AudioOut`).
 
 ### The render thread's route through the public `ExecuteAudioRendererRendering` (SDK 20)
 
@@ -70,6 +84,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 
 ## Command lists by SDK
 
+### Incomplete startup lists must not select the command layout
+
+- **Symptom:** no sound after boot; `audren: no DeviceSink (ID 0x13) in the command list` and a malformed-command error persist even when later command lists are valid.
+- **Cause:** the host's render thread can generate commands before the game's first `RequestUpdate`. Mario Kart 8 Deluxe's first list ended in a zeroed third command, so none of the supported header layouts could walk it. `capture` nevertheless latched the default layout and consumed the one-time sink scan. Later SDK 6 headers were read as SDK 8–20 headers, and SDK 4's DeviceSink was never found. Retrying only header detection still leaves the sink scan consumed.
+- **Fix:** select the header only when the whole list walks in a supported layout. Until then, return a silent frame before the sink scan; the first valid list can select both the header and its sink. `t_audren_layout` reproduces the failure and checks stereo PCM for SDK 4, 6, 16 and 21, with valid-first, empty and incomplete startup lists and SDK 21's short first list.
+- **Found on:** [Mario Kart 8 Deluxe](../../dm/games/0100152000022000/README.md) (SDK 4.4.0; [PR #331](https://github.com/seedds/nxnative/pull/331)).
+
 ### The final mix is taken from the DeviceSink's mix buffers
 
 - **Symptom:** the CPU processor drops the final mix.
@@ -88,8 +109,23 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 
 - **Symptom:** no sound; red `audren: command 1 in the command list is malformed (magic 0 size 0)`.
 - **Cause:** SDK 6's DSP command header is +0x04 size (s16), +0x06 command ID (s16), +0x10 enabled, where SDK 8–20 have +0x04 enabled, +0x05 ID, +0x06 size (`CommandListProcessor::Process`, `sdk+0xaaa00`); its DeviceSink is ID 0x10.
-- **Fix:** `capture` in `hle_audren.c` takes the layout whose walk finds the 0xcafebabe magic on every command of the first full list.
+- **Fix:** `capture` in `hle_audren.c` takes the layout whose walk finds the 0xcafebabe magic on every command of the first valid list; [incomplete startup lists](#incomplete-startup-lists-must-not-select-the-command-layout) leave detection open.
 - **Found on:** [Fire Emblem: Three Houses](../../dm/games/010055D009F78000/README.md) (SDK 6.5.0).
+
+### SDK 5: a startup list that walks in two layouts, and a 0x138-byte DeviceSink
+
+- **Symptom:** no sound: `[RED] audren: no DeviceSink (ID 0x13) in the command list, 0 commands of 0x148 bytes` and `[RED] audren: command 2 in the command list is malformed (offset 0x3e, …)`, with `first-frame commands 13, by command ID:  0×2`.
+- **Cause:** SDK 5.4.0's command list has SDK 6's header. Its first list holds two commands, the first of ID 0x14 and 0x14 bytes, so it walks in the SDK 8–20 layout as well (the ID read as the size), and that layout was taken because it is tried first. Its DeviceSink (`CommandBuffer::GenerateDeviceSinkCommand`, `sdk+0x233890`) is SDK 4's (ID 0xf, device name +0x14, upsample buffer +0x118, input count +0x120) but 0x138 bytes, with the input indices as s16 from +0x124.
+- **Fix:** `capture` in `hle_audren.c` takes a header layout only from a list that walks in exactly one; a list that walks in none or in several is a silent frame. The sink scan takes the one 0x130-byte (s8 indices) or 0x138-byte (s16 indices, `g_sink5`) command with 1 to 6 inputs. `t_audren_layout` covers SDK 5 and Bastion's first list.
+- **Found on:** [Bastion](../../dm/games/010038600B27E000/README.md) (1.0.0, SDK 5.4.0).
+
+### Unaligned command headers during layout probing
+
+- **Symptom:** UBSan reports a misaligned `uint32_t` load in `cmd_ok` while `t_audren_layout` probes SDK 4/6 lists (issue #409).
+- **Cause:** interpreting the command ID as another layout's size can advance the candidate pointer off word alignment. Typed header loads then have undefined C behavior even though arm64 supports the machine load. A wrong size could also take the next header outside the generated list.
+- **Fix:** `cmd_size`, `cmd_id` and the magic check decode multibyte wire fields with `memcpy`. `cmd_ok` verifies that the complete header and command fit before consuming them; malformed-command diagnostics do not dereference a rejected header. All supported SDK layouts use the same readers, with no game gate.
+- **Check:** `t_audren_layout` checks deliberately unaligned headers, every truncated header/body length, invalid signed sizes and stereo PCM for SDK 4/6/16/21, including recovery from incomplete startup lists. The shipped SDK 6 processor reads the enabled byte at +0x10 before dispatching any command, confirming the 0x11-byte minimum used by the parser. Its UBSan alignment suppression was removed.
+- **Found on:** the sanitizer audit's SDK 4/6 fixtures, representing [Mario Kart 8 Deluxe](../../dm/games/0100152000022000/README.md) and [Fire Emblem: Three Houses](../../dm/games/010055D009F78000/README.md); no game crash was attributed to this undefined load.
 
 ### SDK 8: command IDs numbered differently
 
@@ -129,6 +165,23 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 - **Fix:** `AVAudioSession` `setPreferredIOBufferDuration:0.005` (and 48 kHz) before the game opens audio and again on return to the foreground (`front_ios_audio_session` in `front_ios.m`); the device then calls back with 240 frames and nothing underruns.
 - **Check:** when checking a new device, read the host's `audio #N device callbacks` line, logged every 2000 callbacks: frames per callback, queued blocks, underruns.
 
+### The Mac's default I/O buffer
+
+- **Symptom:** clicks and dropouts on the Mac, heard as clipping; the log's `audio #N device callbacks` lines show hundreds of underruns per 2000 callbacks. Closing an output can also log `[RED] audio device buffer: ... (status 560947818)` (`!obj`).
+- **Cause:** the Mac's default output asks for 512 device frames per callback (10.7 ms at 48 kHz; 557 frames of the 48 kHz stream when the device runs at 44.1 kHz), more than a game that keeps only a few small blocks queued has ready every time. Unicorn Overlord on a MacBook Pro's speakers: 250–290 underruns in every 2000 callbacks at 48 kHz (0.1–0.2 s of zeros), about 1,000 at 44.1 kHz. Whether a game underruns depends on how much it queues: 13 Sentinels (2.8 blocks queued, like Unicorn Overlord's 3.0, but larger ones) had none at 512 frames.
+- **Fix:** like iOS's session buffer, the Mac sets its output unit's device buffer to about 5 ms of device frames (`kAudioDevicePropertyBufferFrameSize`, 240 at 48 kHz, 221 at 44.1 kHz), within the device's supported range (`au_buffer` in `hle_audio.c`). It reapplies this when the default output changes and when the same device's output sample rate changes; `CurrentDevice` alone does not notify a rate change. An unchanged buffer is not written again, since a write can itself notify the format listener. Both listeners are removed before uninitializing or disposing the unit, including a failed open: disposal otherwise calls the listener after the device has gone (`!obj`). The log reads back the actual frame count. `DM_DBG_AU_FRAMES=N` asks N frames instead.
+- **Found on:** [Unicorn Overlord](../../dm/games/010069401ADB8000/README.md) (Asian release 1.05 on the Mac).
+- **Check:** [PR #262](https://github.com/seedds/nxnative/pull/262) reports Unicorn Overlord at 240 frames: 0 underruns in 10,000 callbacks; 13 Sentinels stays at 0. A silent Core Audio probe on a Mac mini reproduced the disposal error and the stale buffer after a rate change, then verified the fixes: default output switched between USB at 48 kHz and speakers at 44.1 kHz with callbacks continuing, and the same speakers at 44.1 / 96 / 48 kHz used 221 / 480 / 240 frames. The original default output and device rates were restored. `make -C dm/host/tests GAME=<id> audio-device` checks setup, device and rate notifications, scope filtering, buffer limits, synchronous notifications, the diagnostic override, absent devices, close and failed-open listener cleanup without audio hardware.
+- **Open:** the listed HDMI output was not retained as the system default during the probe, so switching to it remains unvalidated. The probe verifies silent host playback; gameplay listening after these listener changes has not been repeated.
+
+### The ring / silent switch muted the game on iOS
+
+- **Symptom:** a game is silent on an iPhone whose ring / silent switch is set to silent, though the volume is up; a game or video app plays through the switch.
+- **Cause:** the audio session's category was `AVAudioSessionCategorySoloAmbient`, which iOS silences with the switch.
+- **Fix:** `front_ios_audio_session` in `front_ios.m` sets `AVAudioSessionCategoryPlayback`: the switch no longer mutes the game, and it still interrupts other apps' audio, as `SoloAmbient` did. The host still suspends its output when the app goes to the background (no background audio mode is declared).
+- **Found on:** [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md) (iPhone: reported by the player); also [issue #155](https://github.com/seedds/nxnative/issues/155), whose commenter has to toggle the switch to hear any game.
+- **Check:** open question, not run on a device: with the switch on silent, the game's sound should play; the log's `audio session:` line shows the session came up.
+
 ### Interruptions that stop RemoteIO callbacks
 
 - **Symptom:** sound stays silent after Siri, an alarm, a call or another app's audio; a game whose audio thread waits for its buffers back (Wwise's poll-only output, FMOD) then waits forever.
@@ -138,6 +191,14 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
   - `front_ios.m` also observes `AVAudioSessionMediaServicesWereResetNotification` (`dm_audio_reset` recreates every AudioUnit);
   - a watchdog in `hle_audio.c` switches any started output whose device has not called back for 200 ms in focus to the silent sink, retrying the AudioUnit after 1, 2, 4, 8 s. A start that fails (session still held by a call) falls back the same way instead of aborting.
 - **Check:** the log shows `audio session: interrupted`, `the device has not called back for N ms` and `AudioUnit restarted`. `tests/t_audio.c` (in `dm/host`) scenario 3 stops a playing AudioUnit behind the host's back.
+
+### AudioUnit construction before output publication
+
+- **Symptom:** TSan reports `au_create` writing `a->au` while `au_watchdog` reads it under `g_aos_lock` when a second real output opens (issue #410).
+- **Cause:** `au_open_at` put the output into the lifecycle/watchdog registry before joining its AudioUnit construction helper. The registry lock did not order the helper's writes.
+- **Fix:** construct and join while the output is private, then publish it under `g_aos_lock`. Suspend, resume, reset and watchdog readers only discover the completed output. Construction remains outside that lock because joining the helper can yield the guest core.
+- **Check:** `t_audio_device` asserts from inside AudioUnit creation that the pending output is absent from the registry; it failed before the fix. `t_audio` exercises real output lifetimes and watchdog recovery under TSan with the `au_create` suppression removed.
+- **Found on:** host unit tests; no particular game's failure was attributed to this race.
 
 ### Audio across a background round trip on the Mac
 

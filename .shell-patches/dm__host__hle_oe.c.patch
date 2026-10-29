@@ -1,7 +1,7 @@
 diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
 --- a/dm/host/hle_oe.c
 +++ b/dm/host/hle_oe.c
-@@ -123,7 +123,11 @@
+@@ -140,7 +140,11 @@
  // Profile perf_mode boost: Boost whatever the operation mode, a combination a Switch 1 never reports, so a profile choice and not a default. Rhythm Heaven Groove keeps one flag per mode
  //   (main+0xa764 / main+0xa784): console means a TV, which gets a latency calibration (main+0x20d0, scene script main+0x4c0820), and Boost alone picks its 1920x1080 draw size
  //   (table main+0xada6d0, else 1280x720). Handheld with Boost: no TV calibration on a phone, full-size drawing

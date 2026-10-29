@@ -1,7 +1,7 @@
 diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
 --- a/dm/ios/Sources/DmGamepad.m
 +++ b/dm/ios/Sources/DmGamepad.m
-@@ -185,8 +185,14 @@
+@@ -184,8 +184,14 @@
              if (names[b]) _label[b] = label(_key[b], names[b]);   // the D-pad arms carry no label
          }
          _swap = shape(_controls); _swapLabel = label(_swap, @"");

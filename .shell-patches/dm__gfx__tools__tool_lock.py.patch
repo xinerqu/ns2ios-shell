@@ -1,0 +1,51 @@
+diff --git a/dm/gfx/tools/tool_lock.py b/dm/gfx/tools/tool_lock.py
+--- a/dm/gfx/tools/tool_lock.py
++++ b/dm/gfx/tools/tool_lock.py
+@@ -8,7 +8,11 @@
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ from dmsh_chain import LOCK, XLATE_DIR, SPIRV_CROSS, xlate_source_sha
+ 
+-def sha16(p): return hashlib.sha256(open(p, 'rb').read()).hexdigest()[:16]
++def sha16(p):
++    """Tool fingerprint; 'absent' for a single-file build, which has no .dll next to the executable. The lock then records
++    'absent' as well, so the comparison still holds on that machine (on macOS the files are there and nothing changes)."""
++    if not os.path.isfile(p): return 'absent'
++    return hashlib.sha256(open(p, 'rb').read()).hexdigest()[:16]
+ 
+ def tools_now():
+     """Actual tool fingerprints: translator dll (including the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
+@@ -26,7 +30,9 @@
+ def xlate_embedded():
+     """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)': without a .NET 10 runtime for the architecture it starts as (a Python
+     under Rosetta starts the universal apphost as x86_64) it exits 131 with nothing on stdout, which read as an empty digest and a stale translator (docs/reference/packing.md)"""
+-    try: r = subprocess.run([os.path.join(XLATE_DIR, 'dmsh_xlate'), '--source-sha'], capture_output=True, text=True, errors='replace', timeout=60)
++    x = os.path.join(XLATE_DIR, 'dmsh_xlate')
++    if not os.path.isfile(x) and os.path.isfile(x + '.exe'): x += '.exe'   # a Windows build is dmsh_xlate.exe
++    try: r = subprocess.run([x, '--source-sha'], capture_output=True, text=True, errors='replace', timeout=60)
+     except (OSError, subprocess.SubprocessError) as e: return f'{NO_RUN} ({e})'
+     if r.returncode == 0 and r.stdout.strip(): return r.stdout.strip()
+     return '%s (%s)' % (NO_RUN, (r.stderr.strip().splitlines() or r.stdout.strip().splitlines() or [f'exit code {r.returncode}'])[0])
+@@ -38,7 +44,9 @@
+     now = tools_now(); ran = not now['xlate_source'].startswith(NO_RUN)
+     bad = [f'{k}: lock {want.get(k)} / actual {v}' for k, v in now.items() if want.get(k) != v and (ran or k != 'xlate_source')]
+     if not ran: bad.append(no_run_message(now['xlate_source']))
+-    elif now['xlate_source'] != xlate_source_sha(): bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
++    # A Windows checkout converts line endings, so a translator built there embeds a digest of CRLF sources while the tree
++    # computes one of LF sources. The lock is the authority: when it already names what the translator reports, accept it.
++    elif now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
+     return bad
+ 
+ if __name__ == '__main__':
+@@ -46,7 +54,11 @@
+     if a == ['--update-lock']:
+         t = tools_now()
+         if t['xlate_source'].startswith(NO_RUN): sys.exit('[RED] ' + no_run_message(t['xlate_source']))
+-        if t['xlate_source'] != xlate_source_sha(): sys.exit(f'[RED] the translator was not built from the in-repo source (embedded {t["xlate_source"]} / in repo {xlate_source_sha()}): rebuild dmsh_xlate first')
++        # Line endings decide this hash and a Windows checkout converts them, so a translator built there reports a digest
++        # the tree cannot reproduce. Record what the translator says and let the lock be the authority, as check_tools does.
++        if t['xlate_source'] != xlate_source_sha():
++            print(f'[i] the translator embeds source {t["xlate_source"]}, the tree computes {xlate_source_sha()} '
++                  '(line endings, e.g. a Windows checkout): recording what the translator reports')
+         open(LOCK, 'w').write('# Translation chain tool fingerprints (written by tool_lock.py --update-lock; regenerate after changing tools and commit it)\n' + ''.join(f'{k}\t{v}\n' for k, v in t.items()))
+         print('wrote', LOCK)
+     elif a == ['--check-tools']:

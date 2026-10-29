@@ -1,8 +1,7 @@
 diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
-index f3867f3..38641a2 100644
 --- a/dm/gfx/tools/shader_split.py
 +++ b/dm/gfx/tools/shader_split.py
-@@ -84,12 +84,20 @@ def span(d, at, n, where):
+@@ -86,12 +86,20 @@
      if not (0 <= at and 0 <= n <= len(d) - at): red(f'{where}: {n:#x} bytes at {at:#x} lie outside the {len(d):#x} bytes there are')
      return d[at:at + n]
  
@@ -26,7 +25,7 @@ index f3867f3..38641a2 100644
      return zstd
  
  def ctl_len(ctl):
-@@ -1884,11 +1892,17 @@ def unzs_dict(d, did, where):
+@@ -1949,11 +1957,17 @@
      return zstd.decompress(d, zstd_dict=_ZD[did])
  
  def unzs(path):
@@ -47,7 +46,7 @@ index f3867f3..38641a2 100644
      return unzs_dict(d, did, path)
  
  def frame_size(f):
-@@ -2300,7 +2314,10 @@ def main():
+@@ -2369,7 +2383,10 @@
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''
