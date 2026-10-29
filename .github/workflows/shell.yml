@@ -312,6 +312,11 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/fork"
           python3 dm/tools/packer_sync.py . "$TREE" --sync
+          # packer_sync overwrites the five Oodle/LZ5 profiles with upstream's copy, which has no needs_mac_shaders key
+          # (that key is this fork's: supported_list.py marks those rows from it). Every build dropped it and committed
+          # the drop, so the next base move had to put it back by hand -- twice (2026-10-28, 2026-10-29). The script
+          # re-adds only that key, so anything else upstream changed in those files still comes through.
+          python3 scripts/restore_mac_shader_marks.py .
           if [ -z "$(git status --porcelain)" ]; then
             echo "already level with upstream"
           else
