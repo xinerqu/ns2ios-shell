@@ -1263,6 +1263,16 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     # threshold, which a 5000-file app tree trips instantly. Renaming keeps the build going; the old tree is reported so it
     # can be deleted by hand (it is several GB because the RomFS is copied into it).
     if stage.exists():
+        # A failed or interrupted run leaves its stage tree behind, and this used to move the previous one aside instead
+        # of removing it, so they piled up until the disk filled (a 4 GB game leaves ~10 GB per run). Removing is what
+        # --clean does by hand and it is slow here -- every delete goes through the host's safety layer -- so try, and
+        # fall back to the old rename when that is refused.
+        for stale in sorted(stage.parent.glob('stage-old*')):
+            try:
+                shutil.rmtree(stale)
+                say('removed an earlier run\'s stage tree: %s' % stale.name)
+            except OSError as e:
+                warn('could not remove %s (%s): it stays until --clean "%s"' % (stale.name, e, stage.parent.parent))
         old = stage.with_name('stage-old')
         if old.exists(): old = stage.with_name('stage-old-%d' % int(time.time()))
         stage.rename(old)

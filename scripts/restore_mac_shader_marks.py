@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Put needs_mac_shaders back on the five Oodle/LZ5 profiles after a packer sync has dropped it.
+"""Put needs_mac_shaders back on the Oodle/LZ5 profiles after a packer sync has dropped it.
 
 `dm/tools/packer_sync.py --sync` copies upstream's `game.tsv` over this fork's for every file the overlay does not
-list, and upstream has no `needs_mac_shaders` key (it is ours: `supported_list.py` marks those rows from it, and
-`docs/SUPPORTED.md` says 暂不支持 for them). So every build's "Keep the packer's copies level with upstream" step
-dropped the key, committed the drop, and the next local base move had to restore it by hand -- twice so far
-(37f6fbc on 2026-10-28, and again in the 2026-10-29 base move).
+list, and upstream has no `needs_mac_shaders` key (it is ours: `supported_list.py` marks those rows 暂不支持 from it).
+So every build's "Keep the packer's copies level with upstream" step dropped the key, committed the drop, and the next
+local base move had to restore it by hand -- twice so far (37f6fbc on 2026-10-28, and again in the 2026-10-29 base move).
+
+Which profiles carry the key is read from HEAD (`git show HEAD:dm/games/<tid>/game.tsv`), not from a list kept here,
+because after the sync the working tree holds upstream's copy and no longer has it. That way the next Oodle/LZ5 game
+upstream adds needs no edit in this file: the build after the sync restores it from the profile that had it before.
 
 This script is called by that workflow step right after the sync. It re-adds the key only when it is missing, so
 whatever else upstream changed in the same file moves on untouched. Run it by hand for the same reason after a
@@ -15,46 +18,86 @@ whatever else upstream changed in the same file moves on untouched. Run it by ha
 """
 
 import pathlib
+import subprocess
 import sys
 
-# The five whose shaders sit in Oodle-, LZ5- or PKZ-compressed archives: only the game's own decoder unpacks those, and
-# that decoder runs in the Mac host (dm/host/hle_oodle.c), so this fork cannot pack them. Keep this list in step with
-# docs/SUPPORTED.md's 暂不支持 rows.
-TITLE_IDS = ('01004A4010FEA000',   # Bayonetta 3
-             '01005270232F2000',   # Octopath Traveler 0
-             '0100606026F12000',   # Final Fantasy Resonance
-             '01006C300E9F0000',   # DRAGON QUEST XI S
-             '0100F43008C44000')   # Pokemon Legends: Z-A
+KEY = b'needs_mac_shaders'
+PROFILES = 'dm/games'
 
-BLOCK = (b'# A Mac is needed once for this one: the shaders sit in Oodle- or LZ5-compressed archives, and only the game own decoder\n'
-         b'# unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c). The Windows packer stops and says so; supported_list.py\n'
-         b'# marks the row from this key.\n'
+# No packer has a path for this one yet: the shaders sit in Oodle-, LZ5- or PKZ-compressed archives, and only the game
+# own decoder unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c) -- arm64 code the Mac host runs, and this
+# fork has no Mac build step at all. So it fails on Windows, Linux and macOS alike; supported_list.py marks the row
+# from this key.
+BLOCK = (b'# No packer has a path for this one yet: the shaders sit in Oodle-, LZ5- or PKZ-compressed archives, and only the game\n'
+         b'# own decoder unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c) -- arm64 code the Mac host runs, and this\n'
+         b'# fork has no Mac build step at all. So it fails on Windows, Linux and macOS alike; supported_list.py marks the row\n'
+         b'# from this key.\n'
          b'needs_mac_shaders\t1\n\n')
+
+
+def git(root, *args):
+    """stdout of `git -C <root> <args>`; -C is what lets this run from any cwd, as the CI step and a base move both do."""
+    p = subprocess.run(['git', '-C', str(root)] + list(args),
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode:
+        raise RuntimeError('git %s failed: %s' % (' '.join(args), p.stderr.decode('utf-8', 'replace').strip()))
+    return p.stdout
+
+
+def marked_profiles(root):
+    """Every HEAD profile that carries the key: the record of what the sync has just dropped."""
+    listing = git(root, 'ls-tree', '-r', '--name-only', 'HEAD', PROFILES).decode('utf-8', 'replace').split()
+    marked = []
+    for path in (p for p in listing if p.endswith('/game.tsv')):
+        if KEY in git(root, 'show', 'HEAD:%s' % path):
+            marked.append(path)
+    return marked
 
 
 def main(argv):
     root = pathlib.Path(argv[0] if argv else '.')
-    added = []
-    for tid in TITLE_IDS:
-        p = root / 'dm' / 'games' / tid / 'game.tsv'
+    try:
+        marked = marked_profiles(root)
+    except (RuntimeError, OSError) as e:
+        print('[x] cannot read the profiles in HEAD: %s' % e)
+        return 1
+    # No key anywhere in HEAD means the record itself is gone -- someone committed the drop. Doing nothing here would
+    # leave those games looking supported, and they pack into an IPA that cannot draw, so refuse instead.
+    if not marked:
+        print('[x] no profile in HEAD carries %s: there is nothing to restore from.' % KEY.decode())
+        print('    The key was dropped from git itself. Put it back where it belongs (git log -S %s) before'
+              % KEY.decode())
+        print('    running this again -- restoring nothing would mark those games supported.')
+        return 1
+
+    added, absent = [], []
+    for path in marked:
+        p = root / path
         if not p.is_file():
+            absent.append(path)                 # upstream deleted the profile: nothing here to mark
             continue
         data = p.read_bytes()
-        if b'needs_mac_shaders' in data:
+        if KEY in data:
             continue
-        out = []
+        out, anchored = [], False
         for line in data.splitlines(True):
             out.append(line)
-            if line.startswith((b'modules\t', b'modules ')):
+            if not anchored and line.startswith((b'modules\t', b'modules ')):
                 out.append(BLOCK)
-        if len(out) == len(data.splitlines(True)):   # no modules line: append, so the key is never silently lost
+                anchored = True
+        if not anchored:                        # no modules line: append, so the key is never silently lost
             if out and not out[-1].endswith(b'\n'):
                 out.append(b'\n')
             out.append(BLOCK)
         p.write_bytes(b''.join(out))
-        added.append(tid)
+        added.append(path)
+
+    for path in absent:
+        print('[!] HEAD has %s but the working tree does not: skipped, look at whether the game is gone' % path)
     if added:
-        print('needs_mac_shaders restored on %s' % ', '.join(added))
+        print('needs_mac_shaders restored on %s' % ', '.join(a.split('/')[-2] for a in added))
+    else:
+        print('needs_mac_shaders already on all %d profiles -- nothing to restore' % (len(marked) - len(absent)))
     return 0
 
 

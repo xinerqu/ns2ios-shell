@@ -181,11 +181,12 @@ extra install and a minute of play.
 Both count as **supported games**, just slower. Keep the captured folder: repacking the same game needs `--vk-capture`
 again, not another run; a different game needs its own.
 
-### Games that cannot be packed yet (5)
+### Games that cannot be packed yet
 
 Their shaders sit inside the game's own Oodle or LZ5 archives, and only the game's own decoder can unpack those — code
 that is Switch arm64 machine code, which only an Apple silicon (M-series) Mac can run natively. **The current packer has
-no such step**, so these five fail on Windows, Linux and macOS alike:
+no such step**, so they fail on Windows, Linux and macOS alike. The list is the rows marked 暂不支持 in
+[docs/SUPPORTED.md](docs/SUPPORTED.md); the table below only records where each one keeps its shaders:
 
 | Game | Title ID | Where its shaders live |
 |---|---|---|
@@ -196,10 +197,10 @@ no such step**, so these five fail on Windows, Linux and macOS alike:
 | Pokémon Legends: Z-A | `0100F43008C44000` | Trinity packs (Game Freak) |
 
 The packer stops as soon as it has read the title ID and loaded the game's profile — **before it unpacks anything** —
-and says which game it is and why; it never produces an IPA that installs but cannot draw. These five carry a matching
+and says which game it is and why; it never produces an IPA that installs but cannot draw. These carry a matching
 mark in the supported list.
 
-> Upstream's Mac route does pack these five, in **one run**: it builds a Mac host inside the pack and unpacks the shaders
+> Upstream's Mac route does pack these, in **one run**: it builds a Mac host inside the pack and unpacks the shaders
 > with the game's own decoder — no separate capture, no phone. The difference is that it wants that machine to be an
 > Apple silicon Mac, while the group above is the other way round: the phone captures and Windows packs, no Mac at all.
 

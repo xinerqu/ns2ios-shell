@@ -81,26 +81,28 @@ jobs:
               # a tag is shell-<date>-<upstream7>-<fork7>, so its last segment is THIS repository's sha and comparing
               # that against upstream's can never match -- which quietly turned every nightly run into a rebuild and a
               # republish, and buried the current release among a day's worth of them.
-              PREV_UP=''; PREV_SHA=''
+              PREV_UP=''; PREV_FP=''
               if [ -n "$LATEST" ]; then
                 PREV_UP=$(gh release view "$LATEST" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' 2>/dev/null \
                           | sed -n 's/^Source: upstream \([0-9a-f]\{7,\}\).*/\1/p' | head -1) || true
-                # This repository's commit is the last segment of the release TITLE ("Game-free shell <date>-<upstream>-<fork>",
-                # or <date>-<fork> for a fork build). It used to be read from the tag, which was <date>-<upstream>-<fork>
-                # until the tags became version numbers (v0.0.0011) -- after that the last segment was "v0.0.0011", never
-                # equal to HEAD, so every nightly rebuilt and republished what was already published (2026-10-29).
-                PREV_SHA=$(gh release view "$LATEST" --repo "$GITHUB_REPOSITORY" --json name -q .name 2>/dev/null \
-                           | sed 's/.*-//') || true
+                # This repository's side is the "Fingerprint:" line the publish step writes, not a commit. It used to be
+                # the last segment of the release TITLE, which worked until the sync step began committing after the
+                # build: from then on the title named the commit before main, the comparison never matched a night after
+                # a sync, and every such night published a release whose only change was the sync commit (2026-10-30).
+                # A release from before that line existed has no fingerprint and is rebuilt once, which is correct.
+                PREV_FP=$(gh release view "$LATEST" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' 2>/dev/null \
+                          | sed -n 's/^Fingerprint: \([0-9a-f]\{16\}\).*/\1/p' | head -1) || true
               fi
               # A release is a snapshot of this repository, not just a shell: GitHub attaches the source (Source code zip
               # and tar.gz) to every release, and the packer a user runs is that source. So publishing on every change is
               # the honest behaviour -- one place to download from, and what is on the releases page is what was built.
               # Skip only when BOTH upstream and this tree are already published: nothing would differ.
-              HEAD_SHA=$(git rev-parse HEAD)
-              if [ -z "$WHY" ] && [ -n "$PREV_UP" ] && [ -n "$PREV_SHA" ] && [ "$PREV_UP" = "$UP" ] && [ "$PREV_SHA" = "$HEAD_SHA" ]; then
-                NEEDED=false; WHY="upstream $UP and this tree are both already published as $LATEST"
+              FP=$( { cat .shell-base.txt .shell-overlay.txt; \
+                    for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | sha256sum | cut -c1-16 )
+              if [ -z "$WHY" ] && [ -n "$PREV_UP" ] && [ -n "$PREV_FP" ] && [ "$PREV_UP" = "$UP" ] && [ "$PREV_FP" = "$FP" ]; then
+                NEEDED=false; WHY="upstream $UP and patch set $FP are both already published as $LATEST"
               fi
-              [ -n "$WHY" ] || WHY="upstream ${UP:0:7} or this tree ${HEAD_SHA:0:7} is not what ${LATEST:-nothing} was built from"
+              [ -n "$WHY" ] || WHY="upstream ${UP:0:7} or patch set $FP is not what ${LATEST:-nothing} was built from"
             fi
           fi
           echo "needed=$NEEDED" >> "$GITHUB_OUTPUT"
@@ -109,6 +111,7 @@ jobs:
             echo "### Nightly check"
             echo
             echo "- upstream: \`${UP:-unknown}\`"
+            echo "- patch set: `${FP:-unknown}`"
             echo "- latest release: \`${LATEST:-none}\`"
             echo "- build: **$NEEDED** — $WHY"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -213,6 +216,7 @@ jobs:
       tag: ${{ steps.tree.outputs.tag }}
       origin: ${{ steps.tree.outputs.origin }}
       sha: ${{ steps.sync.outputs.sha }}
+      fp: ${{ steps.tree.outputs.fp }}
     steps:
       - name: Check out this fork
         uses: actions/checkout@v4
@@ -297,7 +301,17 @@ jobs:
           # v0.0.0009 -- one that already existed, which the publish step then overwrote in place instead of failing
           # (2026-10-29). Parse base ten explicitly; v0.0.0008 + 1 would have thrown "value too great for base".
           TAG="v0.0.$(printf '%04d' $(( 10#${LAST:-0} + 1 )))"
-          echo "version=$V" >> "$GITHUB_OUTPUT"
+          # What "this tree" means when deciding whether the nightly has anything to do: the patch set (base commit,
+          # overlay list, the patches themselves), not a commit sha. The sync step below commits after the shell is
+          # built, so the sha a release records is always one commit behind main; the next night compared its HEAD
+          # against that sha, found them different and published again -- a release whose only change was "Sync the
+          # packer's copies with upstream". A fingerprint of the patch set moves only when the fork really changed.
+          # Computed inside fork/ with relative paths, so the check job's copy of the same command agrees byte for byte.
+          FP=$( cd fork && { cat .shell-base.txt .shell-overlay.txt; \
+                 for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | sha256sum | cut -c1-16 )
+          echo "fp=$FP" >> "$GITHUB_OUTPUT"
+          echo "tree fingerprint $FP"
+          echo "version=$V" >> "$GITHUB_OUTPUT\"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           # Absolute, because the step that levels the packer's copies runs from inside fork/ and a bare "up" resolves
           # to fork/up, which does not exist: packer_sync then walked nothing, found nothing, and reported "already level
@@ -404,6 +418,16 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$DM_ROOT/build/shell/nxnative-shell-build-input.zip" "$GITHUB_WORKSPACE/dist/${V}.zip"   # V already begins with shell-
           cp "$DM_ROOT/build/shell/shell_files.tsv" "$GITHUB_WORKSPACE/dist/${V}-contents.tsv"
+
+      - name: Point a build error at the patch that owns that file
+        # No Mac here: this page is the only view of a failure. A patch that does not apply names itself in the assemble
+        # step, but one that applies and then breaks the compile reported only "exit code 65" plus one line inside a
+        # ten-minute log. scripts/annotate_build_errors.py maps a /.../up/<path>:<line>: error: line back to
+        # .shell-patches/<path with __ for />.patch, which is the file that has to change.
+        if: failure()
+        run: |
+          set -uo pipefail
+          python3 scripts/annotate_build_errors.py "$RUNNER_TEMP/shell.out" "$GITHUB_WORKSPACE/fork" || true
 
       - name: Generate the supported-games list
         run: |
@@ -619,6 +643,20 @@ jobs:
           done
           (cd flat && zip -q ../dist/nxnative-windows-tools.zip ./*.exe)
 
+      - name: Check the release notes table
+        # The Chinese section is built by looking each commit subject up in .github/release-notes.zh.tsv, and none of the
+        # three ways that lookup goes wrong said anything: a missing row ships as "**未翻译**", a duplicated subject
+        # silently takes the first row so the later translation never appears, and a row with a stray tab prints half a
+        # line. v0.0.0014 went out with the first and its table carried the second. Missing rows only warn -- the nightly
+        # runs at 08:00 with nobody watching, and losing the night's shell to an untranslated commit is worse than a page
+        # that names the gap; structural problems stop the build, because those make the page wrong, not incomplete.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PREV=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""' 2>/dev/null || true)
+          python3 scripts/check_release_notes.py ${PREV:+--from "$PREV"} --to HEAD
+
       - name: Write the notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -630,14 +668,22 @@ jobs:
           # that the only thing that happened is "upstream moved".
           PREV=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
           SUBJ=""
+          MORE_EN=""
           if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null 2>&1; then
-            SUBJ=$(git log --no-merges --pretty='%s' "$PREV"..HEAD 2>/dev/null | head -30 || true)
+            # This repository's own sync commit says nothing to a user: it moves the packer's internal copies. And the
+            # list is cut at 30 rows, which used to happen silently -- a day of upstream's 51 commits read as 30.
+            ALLS=$(git log --no-merges --pretty='%s' "$PREV"..HEAD 2>/dev/null \
+                   | grep -vxF "Sync the packer's copies with upstream" || true)
+            N=$(printf '%s' "$ALLS" | grep -c . || true)
+            SUBJ=$(printf '%s' "$ALLS" | head -30)
+            if [ "${N:-0}" -gt 30 ]; then MORE_EN="and $((N - 30)) more commit(s) -- the full list is in the commit history"; fi
           fi
           if [ -z "$SUBJ" ]; then
             CHANGES="- (no commits since ${PREV:-the previous release})"
             CHANGES_ZH="- （上一版之后没有新提交）"
           else
             CHANGES=$(printf '%s\n' "$SUBJ" | sed 's/^/- /')
+            if [ -n "$MORE_EN" ]; then CHANGES=$(printf '%s\n- %s\n' "$CHANGES" "$MORE_EN"); fi
             # The commit subjects are English, because the history is. Printing them under a Chinese heading is what this
             # used to do, and it read as untranslated boilerplate: the section said 本版变更 and then listed English. Each
             # subject is looked up in .github/release-notes.zh.tsv instead, one line per commit, and a subject that has no
@@ -649,6 +695,7 @@ jobs:
               if [ -n "$t" ]; then printf -- '- %s\n' "$t"
               else printf -- '- %s\n  **未翻译**：这一条还没有中文，补一行到 `.github/release-notes.zh.tsv`\n' "$s"; fi
             done)
+            if [ -n "$MORE_EN" ]; then CHANGES_ZH=$(printf '%s\n- %s' "$CHANGES_ZH" "另有 $((N - 30)) 条提交未列出（完整列表见提交历史）"); fi
           fi
           AUTO_EN=""; AUTO_ZH=""
           if [ "$EVENT" = "schedule" ]; then
@@ -742,6 +789,7 @@ jobs:
           # published, but nobody should have to guess whether it was tested.
           {
             echo "Source: ${{ needs.shell.outputs.origin }}"
+            echo "Fingerprint: ${{ needs.shell.outputs.fp }}"
             if [ "${{ needs.smoke.outputs.verified }}" = '1' ]; then
               echo "Smoke test: **passed** — a real game was packed with this shell on Windows before publishing. <br> 冒烟测试：**通过**——发布前已用真实游戏在 Windows 上完整打过一次包。"
             else

@@ -11794,7 +11794,8 @@ extern _Atomic uint64_t dm_present_ns;   // hle_thread.c (DM_HITCH_DUMP); the NV
 // the present, the presenting thread does not wait for the encode thread, and the frame's present waits only until that block is encoded (snap_commit_wait), before its blit.
 // The ring's length is the number of frames the game may run ahead of the screen: DM_PRESENT_SNAP=<n> (2 to SNAP_MAX; 1 = 2). Off by default; the iOS launcher's Frame buffering toggle enables it.
 #define SNAP_MAX 4
-static struct { id<MTLTexture> tex; uint64_t serial; _Atomic uint64_t ticket, ev; } g_snap[SNAP_MAX];
+// old: the slot's texture before the presented size or format last changed, resident until the slot's next use (snap_take)
+static struct { id<MTLTexture> tex, old; uint64_t serial; _Atomic uint64_t ticket, ev; } g_snap[SNAP_MAX];
 static id<MTL4CommandAllocator> g_snap_alloc[SNAP_MAX]; static id<MTL4CommandBuffer> g_snap_cb[SNAP_MAX];
 static id<MTLResidencySet> g_snap_res; static id<MTLSharedEvent> g_snap_ev; static uint64_t g_snap_v;
 static _Atomic uint64_t g_snap_next, g_snap_cmt;   // g_snap_cmt: the last copy the encode thread has committed (its g_snap_v)
@@ -11834,7 +11835,14 @@ static uint64_t snap_take(const tex_t *t) {
     pthread_mutex_lock(&g_pq_mu); int busy = atomic_load(&g_snap[k].ticket) > g_pq_done; pthread_mutex_unlock(&g_pq_mu);
     uint64_t ev = atomic_load(&g_snap[k].ev);
     if (busy || (ev && g_snap_ev.signaledValue < ev)) return 0;
+    // The texture this slot held before it was last replaced: every present that read it had been committed when the replacing copy was (the busy check then), and the queue
+    // signals g_snap_ev only after all work committed before the signal, so those presents have run and it can leave the residency set
+    if (g_snap[k].old) { [g_snap_res removeAllocation:g_snap[k].old]; [g_snap_res commit]; g_snap[k].old = nil; }
     id<MTLTexture> src = tex_mtl(t); if (!src) return 0;
+    // The copy reads the source before present_now runs, so it needs the same commit as present_now: a window texture presented before any submission has used it was made just
+    // now and is outside the committed residency set. DRAGON QUEST XI S presents three times before its first submission; on an A17 Pro the copy faulted silently (its command buffer
+    // has no error handler) and every later command buffer of the process was ignored (GitHub issue #626). A commit with nothing new costs nothing
+    res_commit();
     if (!g_snap_ev) {
         g_snap_ev = [g_dev newSharedEvent];
         MTLResidencySetDescriptor *rd = [MTLResidencySetDescriptor new]; rd.initialCapacity = SNAP_MAX; NSError *e = nil;
@@ -11849,7 +11857,9 @@ static uint64_t snap_take(const tex_t *t) {
     if (!dst || dst.width != src.width || dst.height != src.height || dst.pixelFormat != src.pixelFormat) {
         MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:src.pixelFormat width:src.width height:src.height mipmapped:NO];
         d.storageMode = MTLStorageModePrivate; d.usage = MTLTextureUsageShaderRead;
-        if (dst) [g_snap_res removeAllocation:dst];
+        // The old texture stays resident (and referenced) until the slot's next use: the busy check above means its last present was committed, not that the GPU has run it,
+        // and a texture removed here was sampled outside the residency set by a display command buffer still queued
+        g_snap[k].old = dst;
         dst = [g_dev newTextureWithDescriptor:d]; if (!dst) { RED_ONCE(112, "present snapshots: no texture"); return 0; }
         [g_snap_res addAllocation:dst]; [g_snap_res commit];
         if (!g_snap[k].serial) { static _Atomic uint64_t n; g_snap[k].serial = (1ull << 61) + atomic_fetch_add(&n, 1) + 1; }

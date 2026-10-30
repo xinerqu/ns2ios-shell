@@ -9,7 +9,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
 - **内存**：iOS 给不带 entitlement 的应用约 3.4 GB；本项目的壳在构建时已请求提高上限，侧载工具保留该权限后可用到 6–8 GB。
 - 表内是本仓库带参数、并且打包器跟随其快照验证过的游戏。**不在表内**的游戏，打包器会尝试从上游取它的参数并尽力打包（未经本仓库验证，可能跑不起来），不会产出半成品 IPA。
-- **标着「暂不支持」的游戏**：着色器压在 Oodle / LZ5 容器里（Trinity 包、PlatinumGames PKZ、旧式 Unreal pak），只有游戏自己的解码器能解，而那段代码是 Switch 的 arm64 机器码，只能在 Apple Silicon（M 系列）的 Mac 上跑。**当前版本的打包器没有这条通路**，所以这几款在 Windows、Linux、macOS 上都会失败——它会在拆着色器那步停下并说明，不会产出装上去却画不出东西的半成品。详见 README 的「现在打不了的游戏（5 款）」。
+- **标着「暂不支持」的游戏**：着色器压在 Oodle / LZ5 容器里（Trinity 包、PlatinumGames PKZ、旧式 Unreal pak），只有游戏自己的解码器能解，而那段代码是 Switch 的 arm64 机器码，只能在 Apple Silicon（M 系列）的 Mac 上跑。**当前版本的打包器没有这条通路**，所以这几款在 Windows、Linux、macOS 上都会失败——它会在拆着色器那步停下并说明，不会产出装上去却画不出东西的半成品。详见 README 的「现在打不了的游戏」。
 - **标着「需抓一次」的游戏**：着色器只在游戏跑起来时才生成，没有文件可拆。先用手机装一个不带画面的包抓一次，再打第二遍——**不需要 Mac**，Windows + 手机就够。步骤见 `docs/CAPTURE.zh-CN.md`。
 
 | 游戏 | Title ID | 已验证版本 | 特性 |

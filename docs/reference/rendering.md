@@ -438,6 +438,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Super Smash Bros. Ultimate](../../dm/games/01006A800016E000/README.md) (13.0.5, `DM_WINDOW=1`).
 - **Check:** Breath of the Wild windowed with the change: its title, 60 fps, no GPU error.
 
+### A present snapshot's copy needs the same residency commit
+
+- **Symptom:** with present snapshots on (`DM_PRESENT_SNAP`, the iOS launcher's **Frame buffering**), a frozen, corrupted picture from the first presents; the first error is already `kIOGPUCommandBufferCallbackErrorSubmissionsIgnored` ("Ignored (for causing prior/excessive GPU errors)") on the display command buffer, then on every upload, segment and submission command buffer, and `[RED] present snapshots: the previous copy into a ring slot did not finish within 2 s`. With snapshots off the same game runs.
+- **Cause:** the case of [the entry above](#the-residency-set-committed-before-a-present), on the snapshot path: `snap_take` resolves the presented texture and copies it into a ring slot on the game's queue before `present_now` runs, and only `present_now` committed the residency set. A window texture presented before any submission had used it was outside the committed set when the copy read it. The copy's command buffer has no error handler, so its fault shows only as the ignored command buffers after it.
+- **Fix:** `snap_take` commits the residency set after resolving the source (`res_commit`, free when nothing changed), for every game.
+- **Found on:** [DRAGON QUEST XI S](../../dm/games/01006C300E9F0000/README.md) 1.0.4 on an iPad mini 7 (A17 Pro), which presents three times before its first submission ([GitHub issue #626](https://github.com/seedds/nxnative/issues/626)). The reporter's Apple M4 test did not fault without the fix.
+- **Not checked:** the iPad with the fix.
+
 ### A CPU-written window texture resolved where the present is queued
 
 - **Symptom:** an abort at the first present: `[RED] upload batches belong to the submit thread only: up_begin called on thread 'nvn-present-link'`, with `pkg_upload`, `tex_mtl` and `present_now` in the backtrace.
