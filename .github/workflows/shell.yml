@@ -258,6 +258,14 @@ jobs:
               n=$((n+1))
             done
             echo "applied $n patches"
+            # A loop over no files exits 0, so a renamed directory or a lost .shell-patches/ used to build a shell with a
+            # change missing and nothing saying so -- the patches are semantic (env paths, a SPIRV_CROSS fallback), the
+            # tree still compiles without them. Count both sides: the overlay's "~" entries are what the fork needs.
+            want=$(grep -c '^~' fork/.shell-overlay.txt)
+            if [ "$n" -ne "$want" ]; then
+              echo "::error::applied $n of $want patches: .shell-overlay.txt lists $want patched files and the loop applied $n. A shell built from this tree is missing a change the fork depends on."
+              exit 1
+            fi
             src=up
             SHA=$UP   # GITHUB_ENV only reaches later steps; this step needs the value itself for the version string
             echo "::endgroup::"
@@ -458,7 +466,11 @@ jobs:
       # nothing about the shell -- the release is then published and labelled unverified rather than silently trusted.
       verified: ${{ steps.data.outputs.ok }}
     steps:
+      # Same tree as the release: a bare checkout takes the event's SHA, so a night the sync step committed, this job
+      # packed with the previous dm/games and dm/tools and its "passed" said nothing about what users download.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.shell.outputs.sha }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -751,7 +763,10 @@ jobs:
             gh release upload "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
           else
-            gh release create "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
+            # --target: without it the tag lands on whatever main is at this moment, which is not the commit the
+            # shell was built from (the sync step pushes its own commit, and anyone may push in between).
+            gh release create "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --notes-file body.md --target "${{ needs.shell.outputs.sha }}"
           fi
           echo "published $TAG" >> "$GITHUB_STEP_SUMMARY"
 

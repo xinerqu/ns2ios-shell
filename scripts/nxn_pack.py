@@ -14,7 +14,9 @@ Usage:
   -k            prod.keys (also read from the KEYS environment variable)
   -p            the version to pack (default: the newest one in the folder)
   --stop-after  stop after a step, to bring the chain up one piece at a time. Steps:
-                extract, rewrite, shaders, guest, assemble, pack
+                extract, rewrite, shaders, guest, assemble
+                (there is no "pack": packing is the last thing that happens, so stopping before it is the same as a run
+                that failed there, and stopping after it is just a run)
   --force       redo steps whose output already exists
   --keep-work   keep the working folder (<NSP folder>/<title ID>_pack) instead of removing it after a good pack, so a
                 rerun reuses the extraction, the rewritten modules and the compiled shaders. Worth it when repacking the
@@ -760,8 +762,9 @@ def check_free_space(folder, factor=3.5):
         say('disk: %.1f GiB free, about %.1f GiB needed' % (free / 2**30, need / 2**30)); return
     die('not enough space on the disk holding %s: %.1f GiB free, about %.1f GiB needed.\n'
         '    %.1f GiB of game files, and packing holds three copies at once (the extraction, the assembled app and the '
-        'IPA).\n    Free some space, or move the game folder to another disk.'
-        % (folder, free / 2**30, need / 2**30, src / 2**30))
+        'IPA).\n    Free some space, move the game folder to another disk, or remove an earlier run\'s work folder with\n'
+        '    --clean "%s" (it is several times the size of the game and only --keep-work needs it after a run).'
+        % (folder, free / 2**30, need / 2**30, src / 2**30, folder))
 
 
 HOST_DIRS = ('dm/host', 'dm/gfx', 'dm/gfx/nvn', 'dm/gfx/nvn/include', 'dm/gfx/tex', 'dm/gfx/vk', 'dm/gfx/gl')
@@ -1009,10 +1012,11 @@ def shader_split_hint(text):
     """
     if 'DM_OODLE_HOST' in text or 'DM_OODLE_MODULES' in text:
         return ('this game keeps its shaders in Oodle-compressed archives (Trinity packs, PlatinumGames PKZ, or an older\n'
-                "    Unreal pak). Oodle is only decoded by the game's own code, running inside the Mac host, so this title\n"
-                '    cannot be packed on Windows — it needs one run on a Mac (docs/CAPTURE.md).\n'
+                "    Unreal pak). Oodle is only decoded by the game's own code, running inside the Mac host, and this route\n"
+                '    has no Mac at all (tools/ holds .exe files only), so this title cannot be packed here, on any machine:\n'
+                '    docs/SUPPORTED.md lists it as 暂不支持.\n'
                 '\n'
-                '    Games that pack straight from Windows are listed in docs/SUPPORTED.md.')
+                '    Games that pack straight from Windows are listed in the same file.')
     return None
 
 
@@ -1337,6 +1341,17 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         pl['CFBundleVersion'] = version
         pl['DMShowFPS'] = 'NO'
         pl['DMLanguage'] = os.environ.get('NXN_LANG', 'en-US')
+        # Which shell this package was made from. The host prints Info.plist's DMCommit in its first line
+        # (dm/host/main.c: "build: commit %s, shader chain %s, profile %s"), and only the Mac packer wrote it -- so a
+        # phone log said "not recorded" and naming the shell meant asking for dm/shell_info.txt. The shell's own stamp
+        # carries the commit it was built from, so the line says something here too. Written whole (40 chars), not the
+        # Mac packer's 12: this side has no git checkout to shorten against and the full hash is what a lookup needs.
+        sha = shell_stamp(shell).get('SOURCE_SHA', '')
+        if re.fullmatch(r'[0-9a-f]{40}', sha):
+            pl['DMCommit'] = sha
+            say('Info.plist: DMCommit %s (the shell this package was built from)' % sha[:12])
+        else:
+            warn('the shell\'s dm/shell_info.txt carries no SOURCE_SHA, so log.txt will say "commit not recorded"')
         icon_src = game / 'icon.jpg'
         if icon_src.is_file():
             try:
@@ -1414,14 +1429,15 @@ def main():
     ap.add_argument('-k', '--keys', default=os.environ.get('KEYS', ''), help='prod.keys')
     ap.add_argument('-o', '--out', default='', help='output IPA (default: next to the NSPs)')
     ap.add_argument('-p', '--package', default='', help='version to pack (default: the newest one in the folder)')
-    ap.add_argument('--stop-after', default='', choices=['', 'extract', 'rewrite', 'shaders', 'guest', 'assemble', 'pack'])
+    ap.add_argument('--stop-after', default='', choices=['', 'extract', 'rewrite', 'shaders', 'guest', 'assemble'],
+                    help='stop when that step is done, leaving the work folder as it is (debugging, or checking one '
+                         'step before paying for the rest)')
     ap.add_argument('--force', action='store_true', help='redo steps whose output already exists')
     ap.add_argument('--no-shaders', action='store_true', help='a GL/Vulkan game: build it without a shader library, so it boots and captures its own shaders (no picture until they are packed in)')
     ap.add_argument('--allow-damaged', action='store_true', help='read files that fail their hash check as they are: a dump with a few bad files (a couple of music tracks) still packs')
     ap.add_argument('--skip-oodle-check', action='store_true',
                     help='do not stop early for a game whose shaders sit in Oodle- or LZ5-compressed archives (it then stops '
                          'at the shader step instead). Only useful when the scan is wrong about your files')
-    ap.add_argument('--diagnose', action='store_true', help='extract, rewrite and build the Mac host, then stop: for running the game under lldb (macOS)')
     ap.add_argument('--capture-gl', default='', help='boot the game in the Mac host and capture the GLSL it assembles at run time, then stop (macOS, Apple silicon)')
     ap.add_argument('--vk-capture', default='', metavar='FOLDER',
                     help="a Vulkan game's captured SPIR-V (<key>.spv, which DM_VK_CAPTURE writes on the phone) for a game "
@@ -1463,6 +1479,20 @@ def main():
     if not a.capture_gl and not shell.is_file(): die('no shell file: %s' % shell)
     if not folder.is_dir(): die('no such folder: %s' % folder)
     check_free_space(folder)
+    # Where the IPA goes is only needed at the very end, twenty minutes away, so a folder that does not exist or a disk
+    # that cannot hold the package used to cost the whole run and end in a Python traceback. Say it now instead.
+    if a.out:
+        parent = Path(a.out).resolve().parent
+        if not parent.is_dir():
+            die('the folder for -o does not exist: %s\n    Create it, or give a path inside one that does.' % parent)
+        if not os.access(str(parent), os.W_OK):
+            die('cannot write to the folder for -o: %s' % parent)
+        src = sum(p.stat().st_size for p in folder.iterdir()
+                  if p.is_file() and p.suffix.lower() in ('.nsp', '.xci', '.nsz'))
+        free = shutil.disk_usage(parent).free
+        if src and free < src:
+            die('not enough space on the disk that would hold the IPA (%s): %.1f GiB free, and the package alone is about '
+                '%.1f GiB.\n    Give another -o, or free some space there.' % (parent, free / 2**30, src / 2**30))
     if not a.keys: die('give prod.keys with -k')
     keys = Path(a.keys).resolve()
     stamp = shell_stamp(shell)
@@ -1848,6 +1878,11 @@ def main():
         shutil.copytree(gl_out, dst)
         say('GL shader table and %d sources → msl/gl (the phone compiles them at first launch)'
             % len(list((dst / 'src').glob('*.metal'))))
+    # After assembly the app tree is complete and inspectable, and packing it is the only thing left: --stop-after assemble
+    # is how someone looks at what the packer produced without writing a 4 GB IPA first (the work folder stays, the tidy
+    # below is only reached by a run that packs).
+    if a.stop_after == 'assemble':
+        return say('stopped before packing: the app tree is %s' % stage)
     step_pack(A, out_ipa, rows, work)
     say('done: %s (%.0f MB)' % (out_ipa, out_ipa.stat().st_size / 1048576))
     say('next: sign it with a sideloading tool (SideStore / Sideloadly / LiveContainer) and install it on the phone')
