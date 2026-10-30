@@ -39,7 +39,7 @@ fps_target	60
 
 # ---- Memory ----
 # Unreal Engine 5.6.1: nninitStartup (main+0x13370) reserves one 62 GB region for the engine (-SwitchVirtualAddressSpaceSize= in MB up to 4095, game_args below), and its FMallocBinned3
-# (38 GB of address space) is constructed in place in the bss; the constructor call is cut and the host runs Unreal's heap on a malloc zone (patches.py, hle_uemalloc.c layout UE5_6),
+# (38 GB of address space) is constructed in place in the bss; the constructor call is cut and the host runs Unreal's heap on a malloc zone (dm/tools/ue_malloc.py, hle_uemalloc.c layout UE5_6),
 # and the SDK's node area is cut to 62 MB. The engine hands the region out with a page allocator of its own (main+0x13ef0): a bump pointer, and freed blocks kept in free lists by size
 # class, so its address use only grows, and past the region's end OnOutOfMemory (main+0x13c74) aborts. Probed at main+0x13fcc from the save in the first field, through the first battle:
 # a 1 GB block at boot (a static constructor), the high-water mark at +1.50 GB 15 s in, +1.77 GB at 56 s, +2.02 GB at 166 s; a 2 GB region (DRAGON QUEST VII Reimagined's) aborted in that

@@ -85,10 +85,6 @@ HOST_BINDING = [
      'why': "engine code other Frostbite games ship (the simulation's own rate is already set by name)", 'blocked': 'one Frostbite game here'}),
     ('k_ue', '', 'feae83dc9e9fb34c77d0a62f1fa9ae9f', {'what': "UE3's GMalloc setup skipped, the host allocator in (hle_uemalloc.c)", 'now': 'build', 'goal': 'game', 'purpose': 'address space',
      'why': "UE3 inlines the allocator's constructor into the GMalloc setup and has its own vtable layout (25 slots, 32-bit sizes), so the Unreal 4/5 discovery does not apply"}),
-    ('k_ue', '', '', {'what': 'FMallocBinned3 constructor call cut, with the gate that puts the host allocator in (hle_uemalloc.c)', 'now': 'build', 'checked': 'the discovery run on the five mains, 2026-10-29', 'goal': 'engine', 'purpose': 'address space',
-     'why': f'found without a build ID on {UE_DRIVE}: the "Binned3" name, its getter, the one vtable holding it, the layout from the getter\'s slot (19: UE 4.26 and 4.27, 22: UE 5, 26: '
-            'UE 5.6), the one function other than slots 0 and 1 that stores the vtable (the constructor) and its one call site, whose x0 is the object. A rewriter rule must apply RELA '
-            'relocations (OCTOPATH TRAVELER II, Pikmin 4) and pass what it found to the host'}),
     ('k_nier_dr', '', '', {'what': "NieR's frame interval and dynamic-resolution floor at fixed addresses", 'now': 'build', 'goal': 'game', 'purpose': 'frame rate',
      'checked': "both releases' mains, where these rows were found",
      'why': "the game's own display object; the Asian release's function is the global one's 0x13c0 further on, so the rewriter's function match could give the host both releases' addresses"}),

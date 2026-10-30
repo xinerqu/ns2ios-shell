@@ -49,6 +49,8 @@ t_dirty_slots: t_dirty_slots.c ../nvn/nvn_dirty.c ../../host/crash.c ../nvn/nvn_
 	clang $(CFLAGS) -o $@ t_dirty_slots.c ../../host/crash.c ../nvn/nvn_dirty.c
 t_dirty_race: t_dirty_race.c ../nvn/nvn_dirty.c ../../host/crash.c ../nvn/nvn_dirty.h $(GAME_H)
 	clang $(CFLAGS) -o $@ t_dirty_race.c ../../host/crash.c
+t_dirty_retire_race: t_dirty_retire_race.c ../nvn/nvn_dirty.c ../../host/crash.c ../nvn/nvn_dirty.h $(GAME_H)
+	clang $(CFLAGS) -o $@ t_dirty_retire_race.c ../../host/crash.c
 t_builtin: t_builtin.m ../nvn/nvn_builtin.h
 	clang -O1 -g -Wall -fobjc-arc -o $@ t_builtin.m -framework Metal -framework Foundation
 t_vin: t_vin.m
@@ -131,6 +133,11 @@ t_cube_placeholder: t_cube_placeholder.m $(MTL_T_DEP)
 .PHONY: check_t_cube_placeholder
 check_t_cube_placeholder: t_cube_placeholder
 	MTL_DEBUG_LAYER=1 ./t_cube_placeholder
+t_ms_slot: t_ms_slot.m $(MTL_T_DEP)
+	clang $(CFLAGS) -fobjc-arc -o $@ t_ms_slot.m $(MTL_T_SRC) $(FW)
+.PHONY: check_t_ms_slot
+check_t_ms_slot: t_ms_slot
+	MTL_DEBUG_LAYER=1 ./t_ms_slot
 t_tex_fit_root: t_tex_fit_root.m $(MTL_T_DEP)
 	clang $(CFLAGS) -fobjc-arc -o $@ t_tex_fit_root.m $(MTL_T_SRC) $(FW)
 .PHONY: check_t_tex_fit_root

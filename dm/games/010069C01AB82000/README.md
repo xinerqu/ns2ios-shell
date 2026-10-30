@@ -8,7 +8,7 @@ Status (2026-10-26): opening gameplay tested on the Mac with the capped memory l
 
 | Setting | Where | Why |
 |---|---|---|
-| FMallocBinned3 constructor cut at `main+0x1f2f63c`, gate at `+0x1f2f644` | [patches.py](patches.py), `hle_uemalloc.c` | its 37 GB pool reservation cannot fit the iPhone address space; the host supplies the measured UE4 allocator vtable |
+| FMallocBinned3 constructor call cut at `main+0x1f2f63c`, with gate `OBS_UE_MALLOC` on it | the rewriter's engine-wide rule (`dm/tools/ue_malloc.py`), no build ID, `hle_uemalloc.c` | its 37 GB pool reservation cannot fit the iPhone address space; the host supplies the UE4 allocator vtable. Until 2026-10-30 this build's own cut, with the gate at `+0x1f2f644` (checked on its main from the archive drive) |
 | `game_args -SwitchVirtualAddressSpaceSize=2048` | [game.tsv](game.tsv) | `nninitStartup` reads this in MB; otherwise it reserves 62 GB |
 | `mem_reserve 0xF0000000`, `mem_alias 0xC8000000`, 256 MB stacks | `game.tsv` | a 3.75 GB guest block with a 2 GB engine region and a 128 MB heap region; the C library heap request is 6 MB |
 | `sys_resource 0x2800000` | `game.tsv` | the NPDM declares 40 MB of system resource |

@@ -21,8 +21,8 @@ zip_store	.pak:.metallib
 # ---- Memory ----
 # nninitStartup (+0x1b88a10) reads this option in MB and otherwise reserves 62 GB.
 # FMallocBinned3's 37 GB pool reservation is replaced by the host's malloc zone
-# (patches.py, hle_uemalloc.c). The SDK build already has the 62 MB node-area and
-# 32 MB region-alignment cuts in sdk_patches.py.
+# (the rewriter's engine-wide cut, dm/tools/ue_malloc.py; hle_uemalloc.c). The SDK-wide
+# rules give its SDK build the 62 MB node area and 2 MB region alignment (sdk_patches.py).
 game_args	-SwitchVirtualAddressSpaceSize=2048
 mem_reserve	0xF0000000
 mem_alias	0xC8000000

@@ -117,6 +117,14 @@ The replay on Metal (`dm/gfx/nvn/nvn_mtl.m`) and the Vulkan and OpenGL layers. E
 - **Found on:** [Batman: Arkham Knight](../../dm/games/0100ACD0163D0000/README.md#files-and-shaders) (four shaders, 3,813 draws in a run to the diner). The same red line is recorded on [FINAL FANTASY RESONANCE](../../dm/games/0100606026F12000/README.md), [ROMANCE OF THE THREE KINGDOMS 8 REMAKE](../../dm/games/0100C2A01A730000/README.md), [Luigi's Mansion 3](../../dm/games/0100DCA0064A6000/README.md) and [Hyrule Warriors: Age of Calamity](../../dm/games/01002B00111A2000/README.md), none of them run with this rule.
 - **Check:** `make -C dm/gfx/tests GAME=<id> check_t_cube_placeholder` also covers a 2D texture and one- and five-layer 2D arrays in a `texture3d` argument: an unselected fallback leaves the real volume's output alone, a selected one reads zero.
 
+### Multisample texture slots
+
+- **Symptom:** `[RED] texture type mismatch: shader … declares slot … as Metal type 2, texture ID … is type 4 (NVN target 5, …); bound as is`, for a shader whose MSL declares the slot `texture2d_ms`.
+- **Cause:** the reflection reader (`nvn_refl.m` `dummy_kind`) had no rule for `texture2d_ms`, `depth2d_ms` and their arrays, so it recorded such a slot as 2D. The multisample texture the game binds there was reported as a mismatch although the binding was right; an unbound slot got a 2D zero texture, which a multisample argument does not take; and a handle pool for such a slot would be built of 2D textures. The dummy tables were also indexed by the Metal type masked with 7, where the 2D multisample array (8) shared the 1D entry.
+- **Fix:** the multisample types are read as `MTLTextureType2DMultisample` and `2DMultisampleArray`. Their zero textures are 4-sample private textures cleared by a render pass (`dummy_tex`; the integer classes as RGBA16, as the 128-bit formats have no multisample form), and the dummy tables have an entry for each Metal texture type.
+- **Found on:** [Super Monkey Ball Banana Rumble](../../dm/games/010031F019294000/README.md#files-and-shaders): URP's `CopyDepth` (`a3d53d20b89e6015`) reads the multisample depth buffer at the title.
+- **Check:** `make -C dm/gfx/tests GAME=<id> check_t_ms_slot`: the reflection of each multisample type, the multisample dummies of every pixel class, the 1D dummy beside the multisample array's, and a kernel reading the float, uint and depth dummies through multisample arguments under Metal API validation (all samples 0).
+
 ### Integer views for images a shader declares uint or int
 
 - **Symptom:** translucent UI (frosted text bands, button guides, dialog headers) yellow and white.

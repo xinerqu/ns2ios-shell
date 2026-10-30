@@ -1,7 +1,7 @@
 diff --git a/dm/host/loader.c b/dm/host/loader.c
 --- a/dm/host/loader.c
 +++ b/dm/host/loader.c
-@@ -511,7 +511,66 @@
+@@ -518,7 +518,66 @@
      if (kr != KERN_SUCCESS || a != to) die("%s vm_remap %p → %#lx (%#lx bytes) failed: %d", m->name, from, (unsigned long)to, size, kr);
      if ((cur & need) != need) die("%s permissions after vm_remap %#x, missing %#x", m->name, cur, need);
  }
