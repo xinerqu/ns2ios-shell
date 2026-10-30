@@ -311,7 +311,7 @@ jobs:
                  for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | git hash-object --stdin | cut -c1-16 )
           echo "fp=$FP" >> "$GITHUB_OUTPUT"
           echo "tree fingerprint $FP"
-          echo "version=$V" >> "$GITHUB_OUTPUT\"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           # Absolute, because the step that levels the packer's copies runs from inside fork/ and a bare "up" resolves
           # to fork/up, which does not exist: packer_sync then walked nothing, found nothing, and reported "already level
