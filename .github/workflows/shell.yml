@@ -98,7 +98,7 @@ jobs:
               # the honest behaviour -- one place to download from, and what is on the releases page is what was built.
               # Skip only when BOTH upstream and this tree are already published: nothing would differ.
               FP=$( { cat .shell-base.txt .shell-overlay.txt; \
-                    for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | sha256sum | cut -c1-16 )
+                    for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | git hash-object --stdin | cut -c1-16 )
               if [ -z "$WHY" ] && [ -n "$PREV_UP" ] && [ -n "$PREV_FP" ] && [ "$PREV_UP" = "$UP" ] && [ "$PREV_FP" = "$FP" ]; then
                 NEEDED=false; WHY="upstream $UP and patch set $FP are both already published as $LATEST"
               fi
@@ -308,7 +308,7 @@ jobs:
           # packer's copies with upstream". A fingerprint of the patch set moves only when the fork really changed.
           # Computed inside fork/ with relative paths, so the check job's copy of the same command agrees byte for byte.
           FP=$( cd fork && { cat .shell-base.txt .shell-overlay.txt; \
-                 for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | sha256sum | cut -c1-16 )
+                 for f in $(LC_ALL=C ls .shell-patches/*.patch); do cat "$f"; done; } | git hash-object --stdin | cut -c1-16 )
           echo "fp=$FP" >> "$GITHUB_OUTPUT"
           echo "tree fingerprint $FP"
           echo "version=$V" >> "$GITHUB_OUTPUT\"
@@ -427,7 +427,7 @@ jobs:
         if: failure()
         run: |
           set -uo pipefail
-          python3 scripts/annotate_build_errors.py "$RUNNER_TEMP/shell.out" "$GITHUB_WORKSPACE/fork" || true
+          python3 "$GITHUB_WORKSPACE/fork/scripts/annotate_build_errors.py" "$RUNNER_TEMP/shell.out" "$GITHUB_WORKSPACE/fork" || true
 
       - name: Generate the supported-games list
         run: |
