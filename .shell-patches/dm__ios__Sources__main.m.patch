@@ -1,7 +1,7 @@
 diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 --- a/dm/ios/Sources/main.m
 +++ b/dm/ios/Sources/main.m
-@@ -7,6 +7,7 @@
+@@ -8,6 +8,7 @@
  #include <string.h>
  #include <sys/stat.h>
  #include <unistd.h>
@@ -9,7 +9,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  #include "game_profile.h"   // game profile constants (the RomFS marker path)
  #include "front.h"
  #include "romfs_image.h"
-@@ -19,10 +20,14 @@
+@@ -20,10 +21,14 @@
  extern char **environ;
  
  int dm_main(int argc, char **argv);   // dm/host/main.c compiled in with -Dmain=dm_main
@@ -25,7 +25,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  
  // Documents/romfs.img, one RomFS image file (dm/tools/romfs_image.py, scripts/push_romfs.sh): only a complete one counts. Its index is written last and ends the file, so a copy cut off partway is skipped
  static int romfs_image_complete(NSString *path) {
-@@ -72,8 +77,15 @@
+@@ -73,8 +78,15 @@
      NSString *documentFolder = [doc stringByAppendingPathComponent:@"romfs"];
      if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return documentFolder;
      if (romfs_image_complete(bundledImage)) return bundledImage;
@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -139,6 +151,13 @@
+@@ -144,6 +156,13 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -53,10 +53,10 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
 +              av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
 +                                : "entitlement in effect"); }
-     NSString *romfs = romfs_locate();
-     if (!romfs) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
-     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
-@@ -155,6 +174,12 @@
+     id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
+     if (!gpu.supportsBCTextureCompression) {
+         snprintf(g_device_message, sizeof g_device_message, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
+@@ -166,6 +185,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -69,7 +69,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -167,11 +192,19 @@
+@@ -178,11 +203,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
