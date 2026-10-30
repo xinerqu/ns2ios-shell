@@ -38,6 +38,7 @@ On the Mac (2026-10-29): the Sumo Digital and Wwise logos with their movies, the
 ## Found on this game
 
 - Resolved: the shader split found no shaders: Sumo keeps them in container-relative `Ninty_NX` descriptors, loose `NVNsh` records and zlib-compressed `MuxFDMR` resources → [Sumo Ninty_NX shaders and MuxFDMR streams](../../../docs/reference/shaders.md#sumo-ninty_nx-shaders-and-muxfdmr-streams) ([seedds/nxnative#549](https://github.com/seedds/nxnative/pull/549)).
+- Resolved: an iPhone build after a `--platform mac` build removed the Mac shader libraries the Mac run command loads → [An iOS build after a Mac-only build kept no Mac libraries](../../../docs/reference/shaders.md#an-ios-build-after-a-mac-only-build-kept-no-mac-libraries).
 
 Otherwise it runs on mechanisms found on other games, including SDK 5's NVN and services and the six-channel `AudioOut` downmix: with sound on, 0 underruns, and no silent 5 ms block in 34 s of menu music (`DM_AUDIO_DUMP`).
 
