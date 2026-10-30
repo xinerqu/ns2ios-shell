@@ -34,6 +34,13 @@
 - **Fix:** `dm/tools/romfs_image.py` packs one `DMROMFS1` file: a 32-byte header, file bytes, then the index and name pool. Each directory has a sorted, contiguous run of child entries; the host binary-searches each path component and reads file ranges with `pread` through one descriptor per mount. Overlay folders keep precedence and directory listings merge both sources. The shared `dm/host/romfs_image.h` loader checks the full index before either mounting or iOS folder cleanup: length, entry and name bounds, file ranges, a rooted breadth-first directory tree, and sorted, unique child names. It supports an empty root too. Invalid images fall back to the folders on iOS; an explicit invalid `DM_ROMFS` image is refused with a `[RED]` line. The index check detects interrupted sequential transfers and structural damage, not same-length corruption inside file contents. The packer publishes by rename only after the source stays stable. Its reuse stamp tracks source names and file metadata including ctime, the packer and image identity; the push helper always checks it, and `--repack` forces a rebuild. Usage: [Quick reinstalls](../development.md#quick-reinstalls).
 - **Found on:** [Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md#files-and-shaders), whose 304,000-file transfer and startup deletion failures are reported in [PR #369](https://github.com/seedds/nxnative/pull/369). [ANIMAL WELL](../../dm/games/010020D01AD24000/README.md#files) provides the empty-image boot case. Synthetic packer/host tests cover actual file reads, case aliases, overlay merging, corrupt indexes and changed sources; the macOS Foundation test executes iOS's locator to check that rejected images preserve its folder.
 
+### A stale `DM_ROMFS` path crashes the game soon after `nnMain`
+
+- **Symptom:** a direct `dmhost` run logs `fs mount rom: → <path> (read-only)` for a path that does not exist, then crashes in the game's code a fraction of a second after `nnMain` (Echoes of Wisdom: `CRASH sig=11 addr=0x88` 0.3 s in). The host now stops at the mount instead with `FATAL the game files <path> (rom:) are missing: neither a folder nor a RomFS image`.
+- **Cause:** an old run command still named the extraction's `RomFS` folder after a rebuild replaced it with `RomFS.img` ([RomFS folder transfers](#romfs-folder-transfers-fail-or-leave-stale-game-files)). The read-only mount accepted any path, so every read failed and the game used the missing data. The iOS app and the Mac app launcher check their game files before they start the host; direct runs had no such check.
+- **Fix:** `mount_ex` (`dm/host/hle_fs.c`) stops on a read-only, non-save mount whose path is neither a folder nor a regular file, with the same `stat` that tells an image from a folder. Add-on content and system data check their paths before mounting, so only the rom mount (`DM_ROMFS`, or `$DM_ROOT/romfs` when it is unset) reaches it. `dm/host/tests/t_fs.c` checks a missing path and a fifo in a forked child.
+- **Found on:** [Echoes of Wisdom](../../dm/games/01008CF01BAAC000/README.md#found-on-this-game) 1.1.0 on the Mac ([issue #615](https://github.com/seedds/nxnative/issues/615), [PR #616](https://github.com/seedds/nxnative/pull/616)).
+
 ### Separate RomFS deployment loses its image or folder fallback
 
 - **Symptom:** a successful `--romfs separate --no-keep-extracted` build prints a push command pointing at deleted game files. On iOS, a complete image for another build can also prevent startup despite a valid `Documents/romfs` folder.
@@ -103,6 +110,15 @@
 - **Fix:** `dm/tools/nso.py` decodes such segments with the [`zbic`](https://pypi.org/project/zbic/) package (Kinnay's, zstd with Atmosphère's ZBIC changes), imported only for a flag-bit-7 module, so an LZ4 title needs nothing new; every segment is still held to the header's size and SHA-256. zstd has no fixed ratio bound, so a ZBIC segment is held only to its own size, where an LZ4 one is also held to 255 bytes per stored byte. Install it with the other tools (README, step 1).
 - **Check:** Well Dweller's `main` decodes to 85,370,056 bytes with segments `0x39680d0 / 0x9f7e74 / 0x9b1930`, every SHA-256 matching; `dm/tools/tests/test_nso.py` checks that a flag-bit-7 module whose segments are not ZBIC is an Error naming ZBIC.
 - **Found on:** [Well Dweller](../../dm/games/0100217023F6C000/README.md) (SDK 22.2.0).
+
+## Package identification
+
+### An NSP without a ticket or a title ID in its name stops with "no NSP with a readable title ID"
+
+- **Symptom:** `[RED] no NSP with a readable title ID in <folder>`, although the keys open the package (the launcher's key check passes). Renaming the file to `Game [0100XXXXXXXXXXXX].nsp` makes the build go on.
+- **Cause:** `title_of` took the title ID only from the ticket's file name (`<rights ID>.tik`) or from a `[title ID]` tag in the package's file name. Many NSPs carry no ticket (standard-crypto dumps, repacks), and a download's file name often has no tag.
+- **Fix:** with neither, `title_of` asks the package: `nx_extract <prod.keys> --title <package>` opens it, decrypts the header of each meta NCA with the keys' `header_key` and prints the lowest title ID (the base game's before its update's or a DLC's). It works for NSP, NSZ (the meta NCA is not compressed), XCI and XCZ, and runs only when the ticket and the tag are both missing, so the common cases stay a read of the file name table. `nx_extract` is built into a temporary folder for it, since the build folder is named after the title ID. Key values are never printed.
+- **Found on:** NX2Apple, [LNPANDY/NX2Apple#177](https://github.com/LNPANDY/NX2Apple/issues/177) ([Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md), whose base NSP has no ticket). Applies to every game.
 
 ## Cartridge dumps
 

@@ -8,7 +8,7 @@ Update 1.4.1 (v393216) over the base game, SDK 7.3.2. Nintendo EPD's sead / agl 
 |---|---|---|
 | `pad_layout full` | `game.tsv` | the 3D gamepad layout |
 | 4 GB layout: `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | `game.tsv` | from the NSP script's provisional profile |
-| Node area cut and 32 MB alignment of large regions | `dm/tools/sdk_patches.py` SDK-wide rules, `sdk` build `fcf93a41…` | DRAGON QUEST XI S's build, cut by the SDK-wide rules; Odyssey has no virtual address memory and never allocates an address region |
+| Node area cut and 2 MB alignment of large regions (SDK 20's) | `dm/tools/sdk_patches.py` SDK-wide rules, `sdk` build `fcf93a41…` | DRAGON QUEST XI S's build, cut by the SDK-wide rules; Odyssey has no virtual address memory and never allocates an address region |
 
 No `patches.py`. `op_mode` stays docked: Odyssey only takes its motion moves in its default docked mode.
 

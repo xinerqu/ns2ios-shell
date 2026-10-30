@@ -44,21 +44,6 @@ CUTS = {
     (0x134778, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
     (0x13480c, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
   ],
-  # Sea of Stars 2.0.59001 (v786432) sdk (SDK 16.2.0, the build of Super Mario Bros. Wonder 1.0.0 / 1.0.1): the same node area cut. nninitStartup (main+0x8b66a0) calls
-  # StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory, which aborted at sdk+0x126440 (Initialize+0xc0). The constructor is Brain Memory Training Academy's
-  # at sdk+0x134718 (limit = alias start + 0x3fe00000 at +0x28, a unit heap of 0x30-byte nodes, the area then registered as occupied at +0x1347bc).
-  # VammManager::AllocateAddressRegion's placement (sdk+0x1348b0) aligns a region by its size: 64 KB under 2 MB, 2 MB under 4 MB, 4 MB under 32 MB, 32 MB under 1 GB, else 1 GB, and starts
-  # the next region at that alignment past a 4 KB guard. Unity 2021.3's virtual allocator (main+0x48deb0 → main+0x12e12c0) reserves N MB + 252 KB and aligns its blocks to 256 KB itself, so each
-  # of its 94 regions of 16.25 MB took a 20 MB slot and each 4.25 MB one an 8 MB slot: measured in the prologue, 2.59 GB of live regions with 0.86 GB of gaps between them, the alias region's
-  # high-water mark at +4.26 GB of 4.375 GB with a 1.5 GB pool (with the hardware pool Unity got no region and wrote at NULL + 0x3fffe0, main+0x48b770). SDK 20 aligns regions to 64 KB or 2 MB
-  # only (FINAL FANTASY RESONANCE's build); these three classes take its 2 MB
-  '3053b22935e32ddf15ef81997603e5c2': [
-    (0x134728, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
-    (0x1347bc, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
-    (0x134914, '0b40a052', '0b04a052', 'AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)'),
-    (0x13491c, '0a00a852', '0a04a052', 'AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)'),
-    (0x134920, '0808a052', '0804a052', 'AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)'),
-  ],
   # Batman: Arkham Knight 1.0.5 (v327680) sdk (SDK 14.3.0, Unreal Engine 3): the same node area cut, registered while the rules skipped builds a profile was brought up on (the SDK-wide rule cut it
   # while the profile was provisional). The SDK-wide alignment rule matches this build too (sdk+0x12daac, checked 2026-10-29); this row keeps it out until the game is run with it. The constructor is at sdk+0x12d8a0. Regions are not aligned to 1 GB (the game's 1 GB region came right after the cut node area), so no alignment cut.
   # Persona 4 Golden 1.0.2 ships this build too; it has no virtual address memory (no system resource) and never reaches them
@@ -72,25 +57,6 @@ CUTS = {
   '9c73fb73f529fedc9ffefa28246711cc': [
     (0x37c3b0, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
     (0x37c44c, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
-  ],
-  # AI: THE SOMNIUM FILES - nirvanA Initiative 1.0.2 (v131072) sdk (SDK 13.3.5, Unity 2020.3.30f1): the same node area cut. nninitStartup (main+0x493300) calls
-  # StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory, as Patrick's Parabox. The constructor is at sdk+0x37c130 (limit = alias start + 0x3fe00000 at +0x28,
-  # a unit heap of 0x30-byte nodes, the area then registered as occupied at +0x37c1dc)
-  # Pokémon Scarlet 1.0.0 shares this SDK. Its 12 GB allocator reservation gets
-  # 4.06 GB from the host's StandardAllocator cap. Even with the node-area cut,
-  # 1 GB placement alignment makes that region fail with 0x1803 in the compact
-  # guest block. Platform workaround: use 32 MB alignment for large regions,
-  # as for the equivalent SDK build below; allocation sizes and guards stay intact.
-  # Subnautica: Below Zero 1.23.55063 (Unity 2019.4.36f1) ships this build too. VammManager::AllocateAddressRegion's placement (sdk+0x37c2fc) has Sea of Stars' size classes:
-  # 64 KB under 2 MB, 2 MB under 4 MB, 4 MB under 32 MB, 32 MB under 1 GB, else 1 GB. Unity's virtual allocator (every region returns to main+0x75a6b4) reserves N MB + 252 KB, so each
-  # region spills past a class: measured with DM_REGIONS at the crash site of the opening, 336 live regions (92 of 2.25 MB, 60 of 4.25 MB, 33 of 16.25 MB, 2 of 32.5 MB) held 3.45 GB with
-  # 0.87 GB of gaps between them and ended at +4.37 GB of the 4.375 GB alias region. As for Sea of Stars, the three large classes take SDK 20's 2 MB
-  '3644a6760469451cabc99f00c540acc2': [
-    (0x37c140, '08fca752', '087ca052', 'AddressRegionManager constructor: node area limit mov w8,#0x3fe00000 → mov w8,#0x3e00000'),
-    (0x37c1dc, '09fca752', '097ca052', 'AddressRegionManager constructor: length of the node area registered as an occupied region mov w9,#0x3fe00000 → mov w9,#0x3e00000'),
-    (0x37c334, '0b40a052', '0b04a052', 'AllocateAddressRegion: alignment of regions from 32 MB to 1 GB mov w11,#0x2000000 → mov w11,#0x200000 (2 MB, as SDK 20)'),
-    (0x37c33c, '0a00a852', '0a04a052', 'AllocateAddressRegion: alignment of regions of 1 GB and more mov w10,#0x40000000 → mov w10,#0x200000 (2 MB, as SDK 20)'),
-    (0x37c340, '0808a052', '0804a052', 'AllocateAddressRegion: alignment of regions from 4 MB to 32 MB mov w8,#0x400000 → mov w8,#0x200000 (2 MB, as SDK 20)'),
   ],
   # Hollow Knight: Silksong 1.0.30000 (v655360) sdk (SDK 20.5.8, Unity 6000.0.50f1): the same node area cut. Unity 6 takes all its memory itself through nn::os::AllocateAddressRegion and
   # AllocateMemoryPages (no heap, no StandardAllocator in nninitStartup), and without the cut its regions start after the node area: the alias region's high-water mark was +1.00 GB at
@@ -123,13 +89,26 @@ CUTS = {
 # 64 GB, where neither matters; the host's is about 4.4 GB:
 # - the AddressRegionManager constructor's node area: 0x3fe00000 (about 1 GB) at the start of the alias region → 0x3e00000 (62 MB, about 1.35 million 0x30-byte nodes; a few hundred
 #   regions are live in measurements). Both instructions change together: the limit, and the length registered as an occupied region.
-# - VammManager::AllocateAddressRegion's alignment of regions of 1 GB and more: 1 GB → 32 MB, what the SDK gives regions from 32 MB up (SDK 19 and 20 have no 1 GB class). With 1 GB a
-#   region of 1 GB or more lost up to 1 GB of the alias region before it (Absolum, Paper Mario, Smash, Pokémon Scarlet); nothing in the SDK or the games measured reads the alignment.
+# - VammManager::AllocateAddressRegion's alignment of the large size classes: the placement aligns a region by its size (64 KB under 2 MB, 2 MB under 4 MB, 4 MB under 32 MB, 32 MB
+#   under 1 GB, else 1 GB) and starts the next region at that alignment past a 4 KB guard; the three classes from 4 MB up take 2 MB, as SDK 19.3.14 and SDK 20 do themselves (they align
+#   to 64 KB or 2 MB only: Cult of the Lamb's, Tears of the Kingdom's, FINAL FANTASY RESONANCE's builds). With 1 GB a region of 1 GB or more lost up to 1 GB of the alias region before it
+#   (Absolum, Paper Mario, Smash, Pokémon Scarlet); with 4 MB and 32 MB, allocators that reserve a little more than a class (Unity's N MB + 252 KB) lose most of the next class to the
+#   gap: Sea of Stars (SDK 16.2.0) had 2.59 GB of live regions with 0.86 GB of gaps between them in the prologue, its alias high-water mark at +4.26 GB of 4.375 GB with a 1.5 GB pool (with the hardware pool Unity got no
+#   region and wrote at NULL + 0x3fffe0, main+0x48b770); Subnautica: Below Zero (SDK 13.3.5) 336 live regions holding 3.45 GB with 0.87 GB of gaps, ending at +4.37 GB. Nothing in the SDK
+#   or the games measured reads a region's alignment. The three constants sit at +0x64 (32 MB, w11), +0x6c (1 GB, w10) and +0x70 (4 MB, w8) in every implementation below.
 # One rule per reviewed implementation: a function size and cut offsets, with the fingerprints of every registered build that has them (the same body, other callees). Each was
 # taken from that build's CUTS above and resolves to exactly the registered cuts there; on the 36 sdk builds on the game drives each rule matched once or not at all (2026-10-28).
 # Older SDKs (Fire Emblem: Three Houses, Bayonetta, Donkey Kong Country: Tropical Freeze, Xenoblade Chronicles 2, Yoshi's Crafted World) have other implementations, not reviewed.
-# Sea of Stars' 2 MB alignment of every large class is that game's own (its CUTS)
-# Builds whose registered rows these rules reproduce exactly (18, checked on the game drive, 2026-10-29 and 2026-10-30), so their rows were removed: what was found on each
+# Builds whose registered rows these rules reproduce exactly (20, checked on the game drive, 2026-10-29, 2026-10-30), so their rows were removed: what was found on each
+# - 3053b229…: Sea of Stars 2.0.59001 (v786432) sdk (SDK 16.2.0, the build of Super Mario Bros. Wonder 1.0.0 / 1.0.1): the node area cut and the 2 MB alignment, measured on Sea of Stars
+#   (above). nninitStartup (main+0x8b66a0) calls StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory, which aborted at sdk+0x126440 (Initialize+0xc0). The
+#   constructor is at sdk+0x134718, the placement at sdk+0x1348b0. Unity 2021.3's virtual allocator (main+0x48deb0 → main+0x12e12c0) reserves N MB + 252 KB and aligns its blocks to 256 KB
+#   itself, so with the SDK's classes each of its 94 regions of 16.25 MB took a 20 MB slot and each 4.25 MB one an 8 MB slot
+# - 3644a676…: AI: THE SOMNIUM FILES - nirvanA Initiative 1.0.2 (v131072) sdk (SDK 13.3.5, Unity 2020.3.30f1; also Pokémon Scarlet 1.0.0 and Subnautica: Below Zero 1.23.55063, Unity
+#   2019.4.36f1): the node area cut and the 2 MB alignment, measured on Below Zero (above, with DM_REGIONS at the crash site of the opening: 92 regions of 2.25 MB, 60 of 4.25 MB, 33 of
+#   16.25 MB, 2 of 32.5 MB). nninitStartup (main+0x493300) calls StandardAllocator::Initialize(nullptr, pool − used) with virtual address memory. Scarlet's 12 GB allocator region gets
+#   4.06 GB from the host's StandardAllocator cap and fits only with the node area cut and a large-class alignment under 1 GB (0x1803 otherwise). The constructor is at sdk+0x37c130, the
+#   placement at sdk+0x37c2d0; Mario + Rabbids Sparks of Hope's SDK 13.3.5 build (43211771…, below) has the same code
 # - b39add63…: Pokémon Legends: Arceus 1.1.1 (SDK 11.4.0, Kirby and the Forgotten Land's sdk build): nninitStartup (main+0x2779d8c) initializes StandardAllocator over 32 GB with virtual
 #   address memory; the host's cap gives it 4.06 GB, which fits the 4.375 GB alias region only after a 62 MB node area and with 32 MB alignment (the region placement at sdk+0x34e1d8 aligns
 #   regions of 1 GB and more to 1 GB; without it, Break at sdk+0x39fb54). The SDK-wide rules' cuts (node area implementation 3, alignment implementation 2), registered because both profiles
@@ -192,7 +171,7 @@ CUTS = {
 # - fed212d6…: EA SPORTS FC 27 1.8d.310c (v393216) sdk (SDK 22.2.0, also Well Dweller's, which has no virtual address memory): the same node area cut, the SDK-wide rule's implementation 6 (the
 #   constructor at sdk+0x14def0), registered because the profile was brought up on this build. Frostbite's VirtualAlloc reserves 264 regions, 2.8 GB, in its first minute (main+0x17f9884,
 #   AllocateAddressRegion), which the 1 GB node area pushed past the alias region. Region placement aligns only to 64 KB or 2 MB (sdk+0x14e060), as SDK 20
-node_area, alignment = 'AddressRegionManager node area 1 GB → 62 MB', 'AllocateAddressRegion: regions of 1 GB and more aligned to 32 MB'
+node_area, alignment = 'AddressRegionManager node area 1 GB → 62 MB', 'AllocateAddressRegion: regions of 4 MB and more aligned to 2 MB, as SDK 20'
 def mov(old, value):   # the original mov / orr of a constant, as the registered reasons name it (its destination register: the word's low 5 bits)
     rd = int(old[:2], 16) & 31
     return f'orr w{rd},wzr,#{value:#x}' if int(old[6:8], 16) == 0x32 else f'mov w{rd},#{value:#x}'
@@ -201,9 +180,11 @@ def node(size, fingerprints, limit, limit_old, limit_new, occupied, occupied_old
         (limit, limit_old, limit_new, f'AddressRegionManager constructor: node area limit {mov(limit_old, 0x3fe00000)} → {mov(limit_new, 0x3e00000)}'),
         (occupied, occupied_old, occupied_new,
          f'AddressRegionManager constructor: length of the node area registered as an occupied region {mov(occupied_old, 0x3fe00000)} → {mov(occupied_new, 0x3e00000)}')]}
-def align(size, fingerprints, at, old):
+def align(size, fingerprints, old_32m, old_1g, old_4m):   # the three large classes' constants, at the same offsets in every implementation
     return {'name': alignment, 'size': size, 'fingerprints': fingerprints, 'cuts': [
-        (at, old, '0a40a052', f'AllocateAddressRegion: alignment of regions of 1 GB and more {mov(old, 0x40000000)} → mov w10,#0x2000000 (32 MB, as from 32 MB up)')]}
+        (0x64, old_32m, '0b04a052', f'AllocateAddressRegion: alignment of regions from 32 MB to 1 GB {mov(old_32m, 0x2000000)} → mov w11,#0x200000 (2 MB, as SDK 20)'),
+        (0x6c, old_1g, '0a04a052', f'AllocateAddressRegion: alignment of regions of 1 GB and more {mov(old_1g, 0x40000000)} → mov w10,#0x200000 (2 MB, as SDK 20)'),
+        (0x70, old_4m, '0804a052', f'AllocateAddressRegion: alignment of regions from 4 MB to 32 MB {mov(old_4m, 0x400000)} → mov w8,#0x200000 (2 MB, as SDK 20)')]}
 MATCH_CUTS = {'sdk': [
     # SDK 7.3.2 (DRAGON QUEST XI S), 8.2.1 (Super Smash Bros. Ultimate), 8.3.1 (Paper Mario: The Origami King)
     node(276, ['5c81bb821d119d00ffcda6c3a4f1b827fc08c084fa53995e3a6262b5bf37cded'], 0x10, 'e9230b32', '097ca052', 0xb0, 'e9230b32', '097ca052'),
@@ -221,34 +202,30 @@ MATCH_CUTS = {'sdk': [
     # SDK 22.2.0 (EA SPORTS FC 27, Well Dweller): the SDK 19 / 20 constructor, instruction for instruction up to its cold path, which gives each failing result its own abort (32 bytes more)
     node(276, ['8960fe237061c387226a3775daf750a646dd0ee12eccf3d1340248683a6a7d78'], 0x10, '08fca752', '087ca052', 0x7c, '09fca752', '097ca052'),
     # SDK 7.3.2 (DRAGON QUEST XI S), 8.2.1 (Super Smash Bros. Ultimate), 8.3.1 (Paper Mario: The Origami King), 10.4.1 (Advance Wars 1+2), 10.4.8 (Pikmin 4)
-    align(352, ['006abd214d94c93386735550cee4fe7708bc1f0d1812663123cfa3b9611f1533', '42167e4d3c710e11937e45a9e420fdd0ed9a410386c17da4d1d896b847d3b0d6'], 0x6c, 'ea030232'),
+    align(352, ['006abd214d94c93386735550cee4fe7708bc1f0d1812663123cfa3b9611f1533', '42167e4d3c710e11937e45a9e420fdd0ed9a410386c17da4d1d896b847d3b0d6'], 'eb030732', 'ea030232', 'e8030a32'),
     # SDK 11.4.0 (Pokémon Legends: Arceus, Kirby and the Forgotten Land): the next rule's size classes with 8 more bytes of body; the 4 GB StandardAllocator region of Arceus's nninitStartup
     # (the host's cap) fits after the 62 MB node area only with it
-    align(360, ['b8c0853dcad6b42ca2d504945c9944dd913a991297499e700a97a85bcf5a77c2'], 0x6c, '0a00a852'),
+    align(360, ['b8c0853dcad6b42ca2d504945c9944dd913a991297499e700a97a85bcf5a77c2'], '0b40a052', '0a00a852', '0808a052'),
     # SDK 12.3.9 (Xenoblade Chronicles 3), 13.3.5 (Mario + Rabbids Sparks of Hope), 15.3.2 (Paper Mario: The Thousand-Year Door)
-    align(352, ['4bec18d9a1f8c73408e95b54d971b2ae87ccb5451b185e3378c05801ad03fa39', '57ad718ebd4e8ebf49a3199c62e1ba2002867df5d124cfee6b4d30aeffee0b8d'], 0x6c, '0a00a852'),
+    align(352, ['4bec18d9a1f8c73408e95b54d971b2ae87ccb5451b185e3378c05801ad03fa39', '57ad718ebd4e8ebf49a3199c62e1ba2002867df5d124cfee6b4d30aeffee0b8d'], '0b40a052', '0a00a852', '0808a052'),
     # SDK 16.2.0 (Sea of Stars), 18.3.2 (Absolum)
-    align(388, ['bb9debe722dc0807c947365b7acfb1aa84f82af125e981f31b1d02b44d8032c8', '58845d068f4e828c39e03f66fbe03487387404183b0bcc14068eb45b571d2c02'], 0x6c, '0a00a852'),
+    align(388, ['bb9debe722dc0807c947365b7acfb1aa84f82af125e981f31b1d02b44d8032c8', '58845d068f4e828c39e03f66fbe03487387404183b0bcc14068eb45b571d2c02'], '0b40a052', '0a00a852', '0808a052'),
 ]}
 
 # How general each patch is and could be (dm/tools/docs_patches.py "Binding", listed in docs/agents/game-patches.md): what, its binding now, the loosest it could have (goal),
 # purpose, why; blocked or kept: why the gap stays open (cannot close yet, or left open on purpose); checked: what was checked on game files (else a judgement)
 BINDING = [
-    {'what': 'node area 1 GB → 62 MB and alignment of regions of 1 GB and more → 32 MB: the SDK-wide rules', 'now': 'sdk', 'goal': 'sdk', 'purpose': 'address space',
-     'checked': '18 registered builds rewritten byte-identical with the rules alone, 2026-10-29 and 2026-10-30',
+    {'what': 'node area 1 GB → 62 MB and regions of 4 MB and more aligned to 2 MB, as SDK 20: the SDK-wide rules', 'now': 'sdk', 'goal': 'sdk', 'purpose': 'address space',
+     'checked': '20 registered builds rewritten byte-identical with the rules alone, 2026-10-29 and 2026-10-30; the 2 MB alignment on every sdk build on the drive, 2026-10-30',
      'why': 'one rule per reviewed implementation; every sdk build without CUTS gets them'},
-    {'what': 'rows the rules would add an alignment cut to (2d369d99, 2aef2cff, 60751516, 12f16103, 311deab1, 5bcf525f)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
-     'checked': "the rules resolved on each build's sdk, 2026-10-29",
-     'why': 'the rules give these builds the same node area cut and one alignment cut more (checked 2026-10-29); each row keeps the alignment out',
-     'blocked': 'run a game shipping each build with the alignment cut'},
-    {'what': 'rows of builds not on the game drive (56ec2474, 9c73fb73, e01950c5, and the node area of 3644a676)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
+    {'what': 'rows the rules would add the alignment cuts to (2d369d99, 2aef2cff, 60751516, 12f16103, 311deab1, 5bcf525f)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
+     'checked': "the rules resolved on each build's sdk, 2026-10-29 and 2026-10-30",
+     'why': 'the rules give these builds the same node area cut and the three alignment cuts more; each row keeps the alignment out',
+     'blocked': 'run a game shipping each build with the alignment cuts'},
+    {'what': 'rows of builds not on the game drive (56ec2474, 9c73fb73, e01950c5)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
      'why': 'likely what the rules give (each names one of their implementations)',
      'blocked': 'no copy on the drive to compare'},
-    {'what': '2 MB alignment of the 4 MB to 1 GB classes (3053b229, 3644a676)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
-     'why': "measured for Sea of Stars and Subnautica: Below Zero (Unity's regions of N MB + 252 KB) and applied to every game shipping those builds: either an SDK-wide rule, or one "
-            "game's choice in its own profile",
-     'blocked': 'which one is open (GitHub issue #635)'},
     {'what': 'VammManager node area and alignment, SDK 4.4.0 (9de92bad)', 'now': 'build', 'goal': 'sdk', 'purpose': 'address space',
-     'why': 'an older implementation no rule covers; a rule once a second game ships it',
+     'why': 'an older implementation no rule covers (its large regions aligned to 32 MB, not the rules\' 2 MB); a rule once a second game ships it',
      'blocked': 'one game ships it'},
 ]

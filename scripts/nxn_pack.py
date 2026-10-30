@@ -1215,8 +1215,14 @@ def env_for(rows):
                   ('present_interval', 'DM_PRESENT_INTERVAL'), ('shader_key_skip', 'DM_SHADER_KEY_SKIP')):
         v = one(rows, k)
         if v: lines.append('%s=%s' % (ev, v.strip()))
-    # ... and the two that are read as atoi != 0, where the profile writes "on" (atoi("on") is 0, which is off)
-    for k, ev in (('core_preempt', 'DM_PREEMPT'), ('vconv_range', 'DM_NVN_VCONV_RANGE')):
+    # ... and the ones that are read as atoi != 0, where the profile writes "on" (atoi("on") is 0, which is off).
+    # enc_thread came with the base move of 2026-10-30 (nvn_rec.h g_rec = atoi(getenv("DM_NVN_ENC_THREAD")) > 0 : DM_GAME_ENC_THREAD),
+    # and only Need For Speed: Hot Pursuit Remastered sets it ("on": encoding on its own thread, 18.1 -> 16.7 ms of its frame).
+    # ue_texture_pool is deliberately NOT here: hle_uecvar.c reads DM_GAME_UE_TEXTURE_POOL on the Mac only and answers 0 on iOS
+    # even when the profile sets it ("on iOS only DM_UE_TEXTURE_POOL turns it on, until an iPhone run shows the memory fits"), so
+    # writing the profile's value would turn on for every Unreal game what upstream keeps off on an iPhone.
+    for k, ev in (('core_preempt', 'DM_PREEMPT'), ('vconv_range', 'DM_NVN_VCONV_RANGE'),
+                  ('enc_thread', 'DM_NVN_ENC_THREAD')):
         v = one(rows, k)
         if v: lines.append('%s=%s' % (ev, '1' if truthy(v) else '0'))
     # The keys whose host read a compiled-in constant and nothing else (no getenv at all: dm/gfx/nvn/hle_nvn.c, dm/gfx/nvn/nvn_mtl.m,

@@ -123,6 +123,34 @@ The game may also write into an NVN object directly, without an NVN call, throug
 - **Fix:** dead serials go to a 512-entry table (`tex_put`, `g_ghost`; the memory line's `finalized textures still referenced`).
 - **Found on:** [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md) (the HUD captures, the 640×360 buffers; found while fixing GitHub issue #9).
 
+### A replay's own objects take serials above a capture's
+
+- **Symptom:** `nvn_replay` aborts on a game's capture with `-[NvProg width]: unrecognized selector` (from `rt_dims`) or `-[NvProg mipmapLevelCount]`: a render target resolves to a program.
+- **Cause:** a capture's textures and programs keep the live run's serials, while the replay layer's own objects (the combined program `bind_stages` makes when a game binds its shader stages from separate programs) took theirs from the replayer's counter, which starts at 1. Textures and programs share the serial table (`tex_get`, `serial_put`), so a combined program could take an early texture's serial and replace it there.
+- **Fix:** `nvn_replay` raises the counter to 2^61 before it loads a capture (`nvn_serial_floor`); a live run's serials stay far below that, and external textures take 2^62 and up. `check_t_capture_live` binds two programs to separate stages to cover it.
+- **Found on:** [Pokemon Scarlet](../../dm/games/0100A3D008C5C000/README.md) (frame 3000 of its regression route).
+
+### A captured texture ID whose memory pool was finalized
+
+- **Symptom:** `DM_NVN_CAPTURE` reports `a record names … (0 bytes), outside every pool … texture registry entry …` for some texture IDs, with addresses that look like data; one capture stopped with `a sparse virtual pool (step 1 does not capture page tables): the capture is incomplete`, another with `straddles a region`.
+- **Cause:** the game finalizes a texture's memory pool, frees the pool object and reuses its memory, and leaves the texture ID registered. The host marks such an ID `gone` (`treg_drop_pool_views`: nothing makes its texture until the ID is registered again), but the capture did not record that state. It walked the entry's texture fields and read the dead pool object through `tex_t.pool`: the bytes now there (Scarlet: a texture's data, such as `0x2492492492497f80`) became the pool's address, size and mode.
+- **Fix:** a registry entry carries `gone` (`cap_treg`), and a gone entry keeps neither its pool nor its storage address and is not read back. `nvn_replay` registers it and then marks it gone (`mtl_reg_tex_gone`), as the live run left it. Captures made before keep working (the byte was padding, 0). `check_t_capture_live` registers a texture on a pool of its own and finalizes that pool, then fills the pool object with such bytes. Without the fix the capture is incomplete.
+- **Found on:** [Pokemon Scarlet](../../dm/games/0100A3D008C5C000/README.md) (texture IDs 1726 to 1786 in the bedroom, each texture with a pool of its own).
+
+### A frame capture runs under the standard thread policy
+
+- **Symptom:** `regress.py capture` stops with `frame N was not captured within … s` although the game reached the frame before it; a capture takes 5 to 20 minutes where an earlier one of the same frame took 2 to 3, and a sample of the host shows the submitting thread in `lzfseEncodeBase` under `nvn_cap_submit`.
+- **Cause:** the capture's steps run on the thread that submits or presents, and that thread can hold a time-constraint (real-time) policy declared for a few milliseconds a frame ([time-constraint computation declared below the thread's peaks](frame-rate.md#time-constraint-computation-declared-below-the-threads-peaks)). A step that runs for minutes far exceeds the declaration, and the kernel lets the thread run only in short slices: Pokemon Scarlet's pool bytes took 1,175 s to compress where the same data takes 55 s outside the host. The harness also counted the capture step's 300 s without a frame as a hang.
+- **Fix:** each capture step runs under the standard policy, and the thread gets its own policy back after it (`cap_policy_standard`, `cap_policy_restore` in `nvn_capture.inc`). Scarlet's frame 3000 now takes 53 s to capture (1,178 s before), Breath of the Wild's frame 5000 34 s (124 s). The log gives each step's time (`submit N: registries and their textures …, records …, pool bytes …`). `regress.py capture` bounds the step by `--capture-limit` instead of the hang time. The pool bytes are also copied last in the step, as the live replay of the submit reads them, and once.
+- **Found on:** [Pokemon Scarlet](../../dm/games/0100A3D008C5C000/README.md) and [Breath of the Wild](../../dm/games/01007EF00011E000/README.md) (their regression route captures).
+
+### A capture refused after a change to the reflection structs
+
+- **Symptom:** `nvn_replay` stops with `program #N (a key …) stage S: the translated shader's bindings or inputs differ from the ones the records were captured against`, and `regress.py replay` reports every game's capture as one the candidate cannot replay, while the shaders' reflection (`<key>_b.json`) is the same in both chains apart from the chain field.
+- **Cause:** the capture compares each program's interface with the replayer's through a hash (`cap_iface`), and that hash was of the reflection structs' bytes (`nvn_rbind`, the vertex inputs). 682fdd26 widened `nvn_rbind.n` to 16 bits and added `soff`, so every shader's hash changed although no binding had.
+- **Fix:** the hash is of the values, field by field, and a field at 0 adds nothing, so a field widened or added later keeps the hash of every shader that does not use it; `t_capture_live` pins the hash of one reflection. A capture records its hash kind (header `iface 2`), and `nvn_replay` refuses one of another kind with `capture again`: the captures made before have to be recorded again once.
+- **Found on:** the regression captures of [Breath of the Wild](../../dm/games/01007EF00011E000/README.md), [Pokemon Scarlet](../../dm/games/0100A3D008C5C000/README.md), [Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md) and [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md) (2026-10-30, all four refused at f5aee5aa).
+
 ## Command memory
 
 ### Host-lent command memory segments
@@ -366,6 +394,15 @@ Games read this count as a position in their own command memory and size their h
 - **Check:** `t_nvn` 6c3 checks region and whole-level copies between textures of different block heights (RGBA8, BC1) and from a strided buffer, byte for byte against a level round trip; `t_readback` copies a cleared render target into a packaged texture and reads the clear colour back from its storage. In the log, `texture→texture copy into ser=… written into the storage as well` or `… read back into the storage when the GPU completes`.
 - **Found on:** [Yoshi's Crafted World](../../dm/games/01006000040C2000/README.md): the Yoshis' 1024² DXT1 base colour and BC5 normal textures, 11 levels; level 4 of one held a pink felt texture, of the others zeros; the speckles began when the opening went dark.
 
+### Render passes into textures uploaded from their storage
+
+- **Symptom:** what the GPU drew into a texture is lost later: a texture re-created from the same memory, or one the game moved with `memcpy`, comes out zero; on the Switch it holds the drawing. Tears of the Kingdom: the grass of a meadow is drawn with no length and the ground under it goes dark, a few seconds after loading, tile by tile around Link.
+- **Cause:** a texture the host uploads from its storage (a packaged layout, CPU-written: a flush over its range is enough) can also be a render target. The hardware's render pass writes the storage; the host's wrote only the host texture, and the storage kept what it held before. Tears of the Kingdom creates the normal maps of its terrain tiles (260×260 RG8, 9 levels, `MINIMAL_LAYOUT`, in a `CPU_CACHED | GPU_CACHED` pool) on zeroed memory, flushes a range covering them (which made them CPU-written), then draws each level. Its resource defragmentation (`main+0x5bc988`, terrain resources with the magic `TERA`) later moves each tile with `memcpy` and re-creates the texture at the new address: uploaded from there, the tile was zero. The grass vertex shader scales each blade by how flat the ground is, from that normal map: a zero normal is horizontal, so every blade got length 0, and the terrain's lighting lost its normals too. The 226 tiles drawn at loading were moved within the first half minute; the 410 the defragmentation created afterwards were never drawn again. Such a texture was also attached for rendering without Metal's render-target usage, which Metal's validation stops at.
+- **Fix:** `attach` (`nvn_mtl.m`) gives a texture made without render-target use that use (`tex_upgrade`, as `clear_tex` does for a clear). A colour attachment whose texture the host uploads from its storage (`tex_storage_dst`) is read back into the storage when its pass ends (`rt_mirror_add` / `rt_mirror_flush`, through `mirror_readback`, as for [GPU copies](#gpu-copies-into-textures-uploaded-from-their-storage)): its whole level, and in a layered or slice-merged pass every layer the pass draws (`rt_mirror_layers`, from `renderTargetArrayLength`); the copy encoder the readbacks open is closed again before `rp_end` returns, since its callers may open an encoder of their own next (left open, the opening of a new game stopped presenting at frame 1983). That write is not a change to upload: the completion handler stamps and protects the storage again and keeps the texture's bytes in its edge pages (`pkg_absorb_note`); at the next resolution the texture keeps its host texture when that is still the one read back, no page wholly inside it was written since and its edge bytes are unchanged (`pkg_absorb_take`), and while a readback is pending it is not uploaded at all (`pkg_absorb_pending`). Without that, the four CPU-written targets Tears of the Kingdom draws into every frame were uploaded again after every readback (31,249 uploads in 200 s instead of 19). A re-upload of such a texture (a CPU write into it) keeps the render-target use its last texture was upgraded to (`pkg_upload`'s `keep`); made without it, every re-upload was followed by another upgrade, a second texture and a copy of every level, at its next attachment.
+- **Open:** not read back: 3D textures (as for GPU copies; `nvn_tex_mirror_b2t` writes 2D layers only), block-compressed targets drawn through a shadow (`bcrt_attach`; the shadow is copied back into the host texture only) and depth targets. A CPU write into the texture made after its pass is replayed and before the readback lands gets a page generation below the readback's stamp, so `pkg_absorb_take` keeps the host texture without it (the storage holds it; the next CPU write to that page uploads it). Telling those writes from the readback's own needs a dirty-tracker query for a generation range; no game is known to write a texture while the GPU draws into it.
+- **Check:** `t_readback` clears a packaged texture through a render pass, reads the clear colour back from its storage, checks that resolving it does not upload it again, then copies the storage to another address with `memcpy` and reads the colour from a texture created there; without the readback both reads fail. In the log, `render→texture copy into ser=… read back into the storage when the GPU completes`.
+- **Found on:** [The Legend of Zelda: Tears of the Kingdom](../../dm/games/0100F2C0115B6000/README.md) on the Mac: meadows lost their grass and went dark within half a minute of loading; with the fix the grass stays through three minutes of standing and walking. Uploads of textures that changed in the pool, same script: 40 before, 449 after, almost all while loading; frame times the same (p50 about 18 ms).
+
 ### Sampled textures in a sparse pool uploaded through the page table
 
 - **Symptom:** textures that should hold CPU-written data come out magenta (ASTC's error colour) or black.
@@ -414,6 +451,13 @@ Games read this count as a position in their own command memory and size their h
 - **Fix:** implement signed and unsigned integer setters with numeric conversion into the sampler's border-colour state. Metal's existing selection among transparent black, opaque black and opaque white then sees integer zero and one correctly; bit-casting integer one to float would select the wrong colour.
 - **Found on:** [FINAL FANTASY X/X-2 HD Remaster](../../dm/games/0100BC300CB48000/README.md), launcher and both games.
 - **Check:** `t_nvn` invokes both setters through the real entry-point lookup and checks initialized sampler state.
+
+### Bound handles are the driver's 32-bit words
+
+- **Symptom:** `[RED] sampler ID 4096 not registered` (or another ID past the sampler pool), once, from the first frames on.
+- **Cause:** NVN's texture, separate texture and sampler handles are 64-bit, but the driver writes each bound one into the c2 handle table as a 32-bit word (texture ID in bits 0-19, sampler ID in bits 20-31), so the GPU never sees the upper half. The host kept the whole 64 bits of the handles of `nvnCommandBufferBindTextures`, `BindSeparateTextures`, `BindSeparateSamplers` and `BindImages`, and took the sampler ID as the handle shifted right by 20. EA SPORTS FC 27 binds separate textures with bit 32 set (`0x1000001d1`, texture 0x1d1): a shader that takes its sampler from that combined word got ID 4096, where the GPU reads sampler 0. The single `nvnCommandBufferBindTexture` record already read its handle as 32 bits.
+- **Fix:** `bind_handles` (`hle_nvn.c`) keeps the low 32 bits of each handle before it moves the IDs to the part of the host's table of the pool the command buffer bound (which may then pass 12 bits).
+- **Found on:** [EA SPORTS FC 27](../../dm/games/0100C49025D3E000/README.md), at the title and in the menus.
 
 ### Version and capability checks that fail quietly
 
@@ -468,6 +512,20 @@ Games read this count as a position in their own command memory and size their h
 - **Symptom:** an abort in device setup when `nvnTexturePoolGetSize` / `nvnSamplerPoolGetSize` returned 0.
 - **Fix:** implemented: `nvnTexturePoolGetSize` / `nvnSamplerPoolGetSize` and their memory pool / offset getters; `nvnCommandBufferFenceSync`, which Unreal's RHI records in its command buffers ([Fence syncs recorded in command buffers](#fence-syncs-recorded-in-command-buffers)); `nvnTextureGetTextureAddress` (pool address + offset, as `nvnMemoryPoolGetBufferAddress`); `nvnCommandBufferGetCommandMemorySize` (used + free, as in NVN; `GetCommandMemoryFree` is what is left in the current segment).
 - **Found on:** [Octopath Traveler 0](../../dm/games/01005270232F2000/README.md) (the pool getters and `nvnCommandBufferFenceSync`, new with Unreal); [DRAGON QUEST XI S](../../dm/games/01006C300E9F0000/README.md) (Unreal Engine 4.18: `nvnTextureGetTextureAddress`, `nvnCommandBufferGetCommandMemorySize`).
+
+### Builder storage getters
+
+- **Symptom:** `[RED] NVN unimplemented function called: nvnTextureBuilderGetMemoryOffset`, then `nvnTextureBuilderGetRawStorageClass`.
+- **Cause:** the renderer reads a texture builder's storage back before it initializes the texture; the host had the texture's getters (`nvnTextureGetMemoryPool` / `Offset` / `RawStorageClass`) but not the builders'.
+- **Fix:** the texture, buffer and event builders return the pool and offset `SetStorage` stored (the pool getters return its address, as `nvnTextureGetMemoryPool` does; the header the prototypes come from declares the builders' by value, so they are `NVN_NOPROTO`), and the texture builder's raw storage class is the texture's (1): it only names the page kind a virtual pool maps (`NVNmappingRequest.storageClass`), which the host's virtual pools do not distinguish.
+- **Found on:** [EA SPORTS FC 27](../../dm/games/0100C49025D3E000/README.md) (SDK 22, Frostbite's NVN renderer NRO).
+
+### `Map` of a pool without CPU access returns NULL
+
+- **Symptom:** `[nvn-mtl] FATAL buffer copy address is in no memory pool src=0x70d08a8b00 dst=0 n=0x29a00` as a match loads: a recorded `CopyBufferToBuffer` whose destination is 0.
+- **Cause:** NVN maps a buffer or pool created with `NVN_MEMORY_POOL_FLAGS_CPU_NO_ACCESS` to NULL, and the game depends on it: Frostbite's renderer (`OpcodeCopySubresource` in `Engine.Render.Core2.PlatformNvn.nro`) takes a buffer's GPU address as `nvnBufferGetAddress + (its data pointer − nvnBufferMap)`, with a null data pointer for a GPU-only buffer. The host's storage is CPU memory, and its `Map` returned the same pointer `GetAddress` does, so the sum came to 0 (traced to a `BufferMap` of a pool with flags `0x21`, CPU_NO_ACCESS | GPU_CACHED, right before the copy).
+- **Fix:** `nvnBufferMap` and `nvnMemoryPoolMap` return NULL when the pool has no CPU access, as in NVN (`hle_nvn.c`). The host's own accesses to the storage go through the pool, not through `Map`.
+- **Found on:** [EA SPORTS FC 27](../../dm/games/0100C49025D3E000/README.md) (SDK 22): the first match load.
 
 ### NVN calls that were red stubs
 
