@@ -668,31 +668,49 @@ jobs:
           # that the only thing that happened is "upstream moved".
           PREV=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
           SUBJ=""
+          PAIRS=""
           MORE_EN=""
+          N=0
           if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null 2>&1; then
-            # This repository's own sync commit says nothing to a user: it moves the packer's internal copies. And the
-            # list is cut at 30 rows, which used to happen silently -- a day of upstream's 51 commits read as 30.
-            ALLS=$(git log --no-merges --pretty='%s' "$PREV"..HEAD 2>/dev/null \
-                   | grep -vxF "Sync the packer's copies with upstream" || true)
-            N=$(printf '%s' "$ALLS" | grep -c . || true)
-            SUBJ=$(printf '%s' "$ALLS" | head -30)
+            # Two commits of this repository are its own bookkeeping and say nothing to a reader: the sync that moves the
+            # packer's internal copies, and the one that adds a Chinese row to this table. Both are dropped here and in
+            # scripts/check_release_notes.py (SKIP_SUBJECTS), so the page and the check never disagree about what shipped.
+            # The list is cut at 30 rows, which used to happen silently -- a day of upstream's 51 commits read as 30.
+            PAIRS=$(git log --no-merges --pretty='%h%x09%s' "$PREV"..HEAD 2>/dev/null \
+                    | awk -F'\t' '$2 !~ /^Sync the packer/ && $2 !~ /^Release notes: /' || true)
+            N=$(printf '%s' "$PAIRS" | grep -c . || true)
+            PAIRS=$(printf '%s\n' "$PAIRS" | head -30)
             if [ "${N:-0}" -gt 30 ]; then MORE_EN="and $((N - 30)) more commit(s) -- the full list is in the commit history"; fi
           fi
-          if [ -z "$SUBJ" ]; then
+          if [ "${N:-0}" -eq 0 ]; then
             CHANGES="- (no commits since ${PREV:-the previous release})"
             CHANGES_ZH="- （上一版之后没有新提交）"
           else
-            CHANGES=$(printf '%s\n' "$SUBJ" | sed 's/^/- /')
+            # Both sections have the same shape: a line naming the commit, then its detail as a numbered list, so neither
+            # language is a one-liner opposite a paragraph. The English detail is the commit body -- the text the commit
+            # already carries, so the two cannot drift -- and the Chinese one is .github/release-notes.zh.tsv, where
+            # "@NL@" starts a new line of the entry (the table is one line per row, so its entries are written with it).
+            CHANGES=$(printf '%s\n' "$PAIRS" | while IFS="$(printf '\t')" read -r h s; do
+              [ -n "$h" ] || continue
+              printf -- '- **%s**\n' "$s"
+              # A body carries its own bullets and paragraphs: dropping the blank lines, numbering its top-level bullets
+              # and indenting by two nests all of it under the commit's line, so the English side reads as the same
+              # numbered list the Chinese one is rather than as a paragraph, and neither is cut mid-sentence.
+              git log -1 --format=%b "$h" 2>/dev/null | sed -e '/^[[:space:]]*$/d' \
+                | awk '{ if ($0 ~ /^- /) { n++; sub(/^- /, n ". ") } print "  " $0 }' | head -60 || true
+            done)
             if [ -n "$MORE_EN" ]; then CHANGES=$(printf '%s\n- %s\n' "$CHANGES" "$MORE_EN"); fi
             # The commit subjects are English, because the history is. Printing them under a Chinese heading is what this
             # used to do, and it read as untranslated boilerplate: the section said 本版变更 and then listed English. Each
-            # subject is looked up in .github/release-notes.zh.tsv instead, one line per commit, and a subject that has no
-            # row says so in the page rather than passing the English off as the translation.
-            CHANGES_ZH=$(printf '%s\n' "$SUBJ" | while IFS= read -r s; do
+            # subject is looked up in .github/release-notes.zh.tsv instead, and a subject that has no row says so in the
+            # page rather than passing the English off as the translation.
+            CHANGES_ZH=$(printf '%s\n' "$PAIRS" | while IFS="$(printf '\t')" read -r h s; do
+              [ -n "$h" ] || continue
               # sub() drops a UTF-8 BOM from the first key: a table saved by a Windows editor starts with one, and the first
               # row would then never match -- which reads as "that commit has no translation" rather than as a table bug.
               t=$(awk -F'\t' -v k="$s" 'BEGIN { sub(/^\xef\xbb\xbf/, "", k) } $1==k { print $2; exit }' .github/release-notes.zh.tsv 2>/dev/null || true)
-              if [ -n "$t" ]; then printf -- '- %s\n' "$t"
+              if [ -n "$t" ]; then
+                printf -- '- %s\n' "$(printf '%s' "$t" | sed 's/@NL@/\n  /g')"
               else printf -- '- %s\n  **未翻译**：这一条还没有中文，补一行到 `.github/release-notes.zh.tsv`\n' "$s"; fi
             done)
             if [ -n "$MORE_EN" ]; then CHANGES_ZH=$(printf '%s\n- %s' "$CHANGES_ZH" "另有 $((N - 30)) 条提交未列出（完整列表见提交历史）"); fi

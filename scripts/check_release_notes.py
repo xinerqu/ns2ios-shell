@@ -25,9 +25,10 @@ import pathlib
 import subprocess
 import sys
 
-# The workflow's own commit. It is in the range every time this repository syncs the packer's copies, and listing it as
-# a change to users says nothing: the files it touches are the packer's internals.
-SKIP_SUBJECTS = ('Sync the packer\'s copies with upstream',)
+# This repository's own bookkeeping commits. They are in the range every time it syncs the packer's copies or adds a row
+# to this table, and listing them as changes to users says nothing: neither touches anything a reader of the page runs.
+# The same two prefixes are dropped by .github/workflows/shell.yml, so the page and this check agree on what shipped.
+SKIP_PREFIXES = ('Sync the packer', 'Release notes: ')
 
 
 def git(*args):
@@ -79,7 +80,7 @@ def main(argv):
     missing, total = [], 0
     if a.rev_from:
         out = git('log', '--no-merges', '--pretty=%s', '%s..%s' % (a.rev_from, a.rev_to))
-        subjects = [s for s in out.splitlines() if s.strip() and s not in SKIP_SUBJECTS]
+        subjects = [s for s in out.splitlines() if s.strip() and not s.startswith(SKIP_PREFIXES)]
         total = len(subjects)
         missing = [s for s in subjects if s not in have]
 
