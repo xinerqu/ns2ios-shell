@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**116 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**120 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -25,6 +25,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 |  |
 | ANIMAL WELL | `010020D01AD24000` | 1.0.10 |  |
 | ASTRAL CHAIN | `01007300020FA000` | 1.0.1 | 60 fps |
+| Atelier Ryza: Ever Darkness & the Secret Hideout DX | `0100199023B2E000` | 1.2.0 |  |
 | Baba Is You | `01002CD00A51C000` | 1.0.12 |  |
 | Balatro | `0100CD801CE5E000` | 1.1.3 | handheld |
 | BALL x PIT | `010086A022444000` | 1.293 |  |
@@ -46,6 +47,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
 | Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 |  |
+| DRAGON QUEST III HD-2D Remake | `01003E601E324000` | 1.1.2 | 60 fps |
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps · 暂不支持 |
 | EA SPORTS FC 27 | `0100C49025D3E000` | 1.8d.310c | 60 fps |
@@ -61,6 +63,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Hades II | `0100A00019DE0000` | 0.0.126424 |  |
 | Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 |  |
 | Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 | 60 fps |
+| Hyrule Warriors: Definitive Edition | `0100AE00096EA000` | 1.0.1 |  |
 | Kirby and the Forgotten Land | `01004D300C5AE000` | 1.1.0 |  |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 | 60 fps |
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
@@ -69,6 +72,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
+| Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
 | Monster Train 2 | `010051701FB46000` | 1.1.1 |  |
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |

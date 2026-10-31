@@ -1,0 +1,36 @@
+diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
+index b2d07fb..9214759 100644
+--- a/dm/host/hle_fpslock.c
++++ b/dm/host/hle_fpslock.c
+@@ -180,12 +180,21 @@ static void fb_tick(int target, const char *src) {
+     }
+ }
+ 
++// The profile's frame-limit variable overridable at run time (DM_UE_FPS_CVAR, written by the packer from the game profile):
++// the shell is compiled against the placeholder profile, where it is t.MaxFPS, so a game whose own variable has another name
++// (SHIN MEGAMI TENSEI V: Vengeance: Project.FrameRateLimit) would otherwise be left with the frame limit it sets itself.
++static const char *ue_fps_cvar(void) {
++    static const char *v; static int once;
++    if (!once) { once = 1; const char *e = getenv("DM_UE_FPS_CVAR"); v = e && *e ? e : DM_GAME_UE_FPS_CVAR; }
++    return v;
++}
++
+ // The Unreal rows of this main: the profile's frame-limit variable and the present intervals, at the objects the rewriter found (0 rows: not an Unreal main). *missing: an Unreal main
+ // (the rewriter found some of its variables) without the profile's frame-limit variable
+ static int ue_rows(const module_t *m, lock_t *out, int *missing) {
+     static char what[3][48]; int n = 0, have = 0;
+     for (int k = 0; k < m->n_ue_cvar && n < 3; k++) {
+-        const char *name = m->ue_cvar[k].name; int fps = !strcmp(name, DM_GAME_UE_FPS_CVAR);
++        const char *name = m->ue_cvar[k].name; int fps = !strcmp(name, ue_fps_cvar());
+         if (!fps && strcmp(name, "rhi.SyncInterval") && strcmp(name, "nvn.SyncInterval")) continue;
+         have |= fps; snprintf(what[n], sizeof what[n], "Unreal %s", name);
+         out[n] = (lock_t){ "", what[n], m->ue_cvar[k].off + 0x10, 0, fps ? FPS_F32 : VSYNCS_I32, 2, 0 }; n++;
+@@ -209,7 +218,7 @@ void dm_fps_lock_tick(void) {
+         fb_find(); if (!nrow && !nier && !fb.n && !ue_missing) return;
+         const char *e = getenv("DM_FPS_TARGET"); int t = e ? atoi(e) : DM_GAME_FPS_TARGET; src = e ? "DM_FPS_TARGET" : "game profile fps_target";
+         if (t != 0 && t != 30 && t != 60) { LOG("[RED] DM_FPS_TARGET=%s: must be 0, 30 or 60; leaving the game's frame limit", e); t = 0; }
+-        if (t && ue_missing) LOG("[RED] main: Unreal %s not found by the rewriter (ue_cvar.py NAMES; game profile ue_fps_cvar): the game's own frame limit stays", DM_GAME_UE_FPS_CVAR);
++        if (t && ue_missing) LOG("[RED] main: Unreal %s not found by the rewriter (ue_cvar.py NAMES; game profile ue_fps_cvar): the game's own frame limit stays", ue_fps_cvar());
+         if (!nrow && !nier && !fb.n) return;
+         if (!t) { for (int r = 0; r < nrow; r++) LOG("main: %s left as the game sets it (%s)", rows[r]->what, src); if (nier) LOG("main: NieR frame interval left as the game sets it (%s)", src);
+                   if (fb.n) LOG("main: Frostbite simulation rate left as the game sets it (%s)", src); return; }

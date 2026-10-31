@@ -32,6 +32,20 @@ To enroll a cut for any game's own module:
 3. Add the rule under `MATCH_CUTS = {'main': [rule]}` (or the appropriate non-SDK module) in that game's `patches.py`. Record the evidence and remaining runtime validation in the game's note. Do not transplant a workaround into unrelated games.
 4. Verify an unregistered build-ID copy through the rewriter, comparing its output with the known fixed cut, and run `test_nso_match.py`, `test_patches.py` and `test_nro_pack.py`. The matching tests use synthetic modules from two profiles to check relocation, rejection and isolation without game files.
 
+### Cheats carried across game updates
+
+- **Symptom:** after a game update, the Cheats menu lists only `Cheats for build … (another version of the game)`, and nothing runs. Or a cheat file converted to the new build by hand writes into the wrong place: a table instead of a variable, or code that moved.
+- **Cause:** Atmosphère cheats name fixed offsets into the main NSO, valid for the one build the file is named after. An update moves code and data by different amounts in different parts of the image; a single shift is a guess.
+- **Fix:** `scripts/cheat_anchor.py` anchors each address to the game's code and compiles the cheats for any build ([Cheats that survive game updates](../development.md#cheats-that-survive-game-updates)):
+  - data through the adrp pairs (and relocated `.data` slots) that reference the nearest address at or below it;
+  - code sites through `nso_match.py`'s function fingerprints, then the tool's own fallbacks (the body digest, then a unique masked window), with a code site's original words always checked;
+  - ASM code caves through the padding before the read-only data.
+
+  The result is plain Atmosphère text, so it runs on any engine.
+- **Found on:**
+  - FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition: the 1.0.1 cheatslips file, anchored on the cartridge's `main`, compiles to exactly the hand-verified +0x43680 on 1.0.3 (12 of 12 cheats, 4 of 4 references each). The 1.0.3 file (5 ASM cheats with a code cave, 7 stat cheats, Mog's fatigue) compiles back to identical writes on 1.0.3 and to all 18 entries on the cartridge's build (code sites: 4 exact, 3 by body digest, 2 by window).
+  - [13 Sentinels: Aegis Rim](../../dm/games/01003FC01670C000/README.md#cheats): a 1.10 Ryujinx list compiles back to identical writes and to 1.00, where every site lies 0x330 lower and the hook site was found by its body digest.
+
 ## Jump tables
 
 ### Offset jump tables through x18 read at rewrite time
@@ -224,12 +238,16 @@ To enroll a cut for any game's own module:
 
 ## Cuts and observation gates
 
-### Observation gates where x9–x17 are dead
+### Observation gates on any relocatable instruction
 
 - **Symptom:** `observation gate neither at a function entry nor after a bl`; `observation gate neither at a function entry, after a bl nor before a call` on an epilogue.
-- **Cause:** the host may change x9–x17 in a gate, so a gate sat only where they carry nothing (a function entry, after a `bl`).
-- **Fix:** a site is also accepted when the straight-line code from it to the next `bl` reads none of x9–x17 before writing it (`scratch_dead`); it is tried only after the other two rules fail. `ret` ends the code ahead as a `bl` does: under AAPCS64 none of x9–x17 carries a result, so the straight-line scan (`scratch_dead`) accepts a `ret` too.
-- **Found on:** [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md): the gate on `mov x0, x19` at `main+0x32758e4`, after a cut `bl` and an `adrp`. [Pikmin 4](../../dm/games/0100B7C00933A000/README.md): the gate on `ldp x29, x30, [sp, #0x10]` right after the cut allocator constructor call, `main+0x353f78c`; the rule checks the image after the cuts, so the `bl` before it is a `nop` by then (the `ret` case). Both gates were removed on 2026-10-30: the engine-wide allocator rule puts its gate on the cut call itself, where the call would have clobbered x9–x17 ([Unreal's FMallocBinned3 replaced by the host allocator](memory.md#unreals-fmallocbinned3-replaced-by-the-host-allocator)); the SDK's address-region gates still take this rule.
+- **Cause:** the rewriter assumed the host may change x9–x17 in a gate. So a gate was placed only where they carry nothing: a function entry, after a `bl`, or (from 2026-10-22, `scratch_dead`) where the straight-line code ahead writes them before reading them. The assumption never held. Since the first host, the gate frame (`dm/host/entry.S`, `_dm_gate`) has saved x0–x28, the vector registers and the flags and restored them, and the gate block borrows only x29 and x30, which it restores from the stack.
+- **Fix:** since 2026-10-31 there is no placement rule: any instruction `site_obs` can relocate takes a gate. A register changes only when the callback writes it (`OBS_STDALLOC_INIT`'s x2, `OBS_UE_REGION`'s size register and x1).
+- **Found on:**
+  - [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md): the gate on `mov x0, x19` at `main+0x32758e4`, after a cut `bl` and an `adrp`.
+  - [Pikmin 4](../../dm/games/0100B7C00933A000/README.md): the gate on `ldp x29, x30, [sp, #0x10]` right after the cut allocator constructor call, `main+0x353f78c`.
+  - Both gates were removed on 2026-10-30: the engine-wide allocator rule puts its gate on the cut call itself ([Unreal's FMallocBinned3 replaced by the host allocator](memory.md#unreals-fmallocbinned3-replaced-by-the-host-allocator)).
+  - The engine region's gate sits on a store that reads x10 (`str x1, [x10, #0x280]`, Octopath Traveler 0 `main+0x12e20`), which the old rule refused: [Unreal's engine address region and its options](memory.md#unreals-engine-address-region-and-its-options).
 - **Note:** the gate table takes the original instruction as a word value (`aa1303e0`), the cut table as bytes (`e00313aa`).
 
 ## Functions, unwind entries and data in text

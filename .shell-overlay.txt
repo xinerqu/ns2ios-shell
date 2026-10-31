@@ -45,6 +45,7 @@
 ~ dm/host/hle_oe.c              # profile perf_mode overridable at run time (DM_PERF_BOOST): the shell compiles the placeholder's 0
 ~ dm/host/hle_os.c              # profile alloc_big_align overridable at run time (DM_ALLOC_BIG_ALIGN): likewise
 ~ dm/host/main.c                # profile game_args overridable at run time (DM_GAME_ARGS): the shell compiles the placeholder's empty string
+~ dm/host/hle_fpslock.c         # profile ue_fps_cvar overridable at run time (DM_UE_FPS_CVAR): the shell compiles the placeholder's t.MaxFPS
 ~ dm/gfx/nvn/nvn_mtl.m          # compile MSL source on the device; chain version read from the msl directory name; render_cond / tex_dyn_slots / tex_dirty_upload read from the environment
 ~ dm/gfx/nvn/hle_nvn.c          # profile tex_flush_upload / tex_dirty_upload / render_cond overridable at run time: the shell compiles the placeholder's 0
 ~ dm/gfx/gl/hle_gl.m            # a shader library the packing computer could not compile is compiled on the device instead

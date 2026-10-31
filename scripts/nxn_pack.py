@@ -1216,7 +1216,8 @@ def env_for(rows):
     # Same again for the keys whose environment name does not follow the profile's: each host reads its own spelling and
     # takes the profile's text as it stands (a list of shader keys, "segment", "display").
     for k, ev in (('feedback_snap', 'DM_NVN_FB_SNAP'), ('gpu_timestamps', 'DM_NVN_GPU_TS'),
-                  ('present_interval', 'DM_PRESENT_INTERVAL'), ('shader_key_skip', 'DM_SHADER_KEY_SKIP')):
+                  ('present_interval', 'DM_PRESENT_INTERVAL'), ('shader_key_skip', 'DM_SHADER_KEY_SKIP'),
+                  ('ue_fps_cvar', 'DM_UE_FPS_CVAR')):
         v = one(rows, k)
         if v: lines.append('%s=%s' % (ev, v.strip()))
     # ... and the ones that are read as atoi != 0, where the profile writes "on" (atoi("on") is 0, which is off).
