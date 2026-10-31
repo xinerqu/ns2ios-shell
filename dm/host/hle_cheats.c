@@ -126,6 +126,7 @@ typedef struct {
 
 static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
 static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
+static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
 static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
 static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                // cheat files name it (dmnt matches the file name case-insensitively on disk)
@@ -1856,7 +1857,17 @@ static void folder_flags(void) {
 
 // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
 // (main.c host_preload): the build ID to pick the file by comes from the modules them
+//
+// Called twice on iOS: the host's loading starts at app launch, while the settings screen is still up, so the first call
+// runs before the player has chosen anything and finds no file. front_ios.m calls it again when Play is pressed, after the
+// launcher has put DM_CHEATS_ON and the file in place. It re-reads every switch and reloads, so it has to be repeatable:
+// the name list is cleared first (it is appended to) and the exit handler is registered once.
 void dm_cheats_init(void) {
+    static int exit_registered;
+    // iOS sets DM_CHEATS_DEFER: the host loads at app launch, before the settings screen can put the file and the switches
+    // in place, so the call from host_preload would only log "no file for build". dm_cheats_after_launcher runs the real
+    // one when Play is pressed.
+    if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
     atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
     const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
     e = getenv("DM_CHEATS");
@@ -1870,6 +1881,7 @@ void dm_cheats_init(void) {
         for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
         g_build[16] = 0;
     }
+    g_non = 0;   // a second call reads the switches as they are now, not on top of the first call's list
     e = getenv("DM_CHEATS_ON");
     if (e && *e) {   // one-off names turned on at launch, split on ','; the saves' own <build>.enabled states stay too
         char *dup = strdup(e), *s = dup;
@@ -1886,8 +1898,15 @@ void dm_cheats_init(void) {
         for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
         folder_flags();
         if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
-        atexit(dm_cheats_exit);   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
+        if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
     }
+}
+
+// iOS: the settings screen has been dismissed with Play, so the file and the switches are final. Runs the load that
+// dm_cheats_init skipped at launch (DM_CHEATS_DEFER).
+void dm_cheats_after_launcher(void) {
+    g_after_launcher = 1;
+    dm_cheats_init();
 }
 
 // A clean exit: no cheat runs any more, so the safe-mode flag goes (atexit, and dm_host_exit before its _exit)

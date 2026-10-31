@@ -64,5 +64,6 @@
 ~ dm/gfx/tools/dmsh_build.py    # atomic_json retries a Windows sharing violation: keys sharing a digest publish the same .json at once
 ~ dm/ios/Sources/main.m         # modules from the Guest library, relaxed romfs lookup, shader preparation before the host
 ~ dm/ios/Sources/Launcher.swift # the Cheats section in the settings list (its view: dm/ios/Sources/CheatsView.swift)
+~ dm/ios/Sources/front_ios.m     # reads the cheats switches again when Play is pressed: the host loads at launch, before the screen
 ~ dm/ios/Sources/DmGamepad.m    # profile pad_layout overridable at run time (DM_PAD_LAYOUT), for the first launch only
 ~ dm/ios/tools/pack_ipa.py      # keep the executable bit when packing on Windows

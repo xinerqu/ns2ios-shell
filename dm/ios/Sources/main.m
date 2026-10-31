@@ -179,6 +179,9 @@ static int boot_env(void) {
     // NSO's build ID (hle_cheats.c logs the one it is looking for). Nothing else on iOS sets these switches, so without
     // this line every cheat is off with "cheats: off (neither DM_CHEATS nor DM_ROOT is set)"; an env.txt line still wins.
     setenv("DM_CHEATS", [doc stringByAppendingPathComponent:@"cheats"].fileSystemRepresentation, 0);
+    // The host loads at launch, before the settings screen exists, so the cheat load waits for Play (front_ios.m calls
+    // dm_cheats_after_launcher): otherwise it would only log "no file for build" and never see the panel's file.
+    setenv("DM_CHEATS_DEFER", "1", 1);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);

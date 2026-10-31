@@ -65,7 +65,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
      if (!gpu.supportsBCTextureCompression) {
          snprintf(g_device_message, sizeof g_device_message, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
-@@ -156,6 +175,10 @@
+@@ -156,6 +175,13 @@
      setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
      setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
      setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
@@ -73,10 +73,13 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    // NSO's build ID (hle_cheats.c logs the one it is looking for). Nothing else on iOS sets these switches, so without
 +    // this line every cheat is off with "cheats: off (neither DM_CHEATS nor DM_ROOT is set)"; an env.txt line still wins.
 +    setenv("DM_CHEATS", [doc stringByAppendingPathComponent:@"cheats"].fileSystemRepresentation, 0);
++    // The host loads at launch, before the settings screen exists, so the cheat load waits for Play (front_ios.m calls
++    // dm_cheats_after_launcher): otherwise it would only log "no file for build" and never see the panel's file.
++    setenv("DM_CHEATS_DEFER", "1", 1);
      NSString *dm = [res stringByAppendingPathComponent:@"dm"];
      setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
      setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
-@@ -166,6 +189,12 @@
+@@ -166,6 +192,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -89,7 +92,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -178,11 +207,19 @@
+@@ -178,11 +210,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

@@ -1,0 +1,21 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -21,6 +21,7 @@
+ const char *front_ios_boot_message(void);   // main.m: why a build that keeps the game files off the IPA found none usable (NULL = the generic hint)
+ const char *front_ios_device_message(void);   // main.m: why this device cannot run the games (its GPU has no BC textures; NULL = supported)
+ bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
++void dm_cheats_after_launcher(void);   // hle_cheats.c: the load dm_cheats_init skipped at launch, run now that the screen is done
+ 
+ static CAMetalLayer *g_layer;
+ static void front_ios_power_watch(void);
+@@ -108,6 +109,9 @@
+     [self.view setNeedsLayout]; [self.view layoutIfNeeded];
+     UIApplication.sharedApplication.idleTimerDisabled = YES;
+     tv_attach();   // a TV connected while the launcher showed
++    // The host's loading began at launch (main.m), so the cheat load is deferred (DM_CHEATS_DEFER) until here: this screen
++    // has just written the file and DM_CHEATS_ON, and those are what it reads.
++    dm_cheats_after_launcher();
+     front_ios_boot();
+ }
+ - (void)viewDidLayoutSubviews {

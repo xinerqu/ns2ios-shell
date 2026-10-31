@@ -1,7 +1,15 @@
 diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
 --- a/dm/host/hle_cheats.c
 +++ b/dm/host/hle_cheats.c
-@@ -133,7 +133,10 @@
+@@ -126,6 +126,7 @@
+ 
+ static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
+ static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
++static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
+ static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
+ static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
+                                // cheat files name it (dmnt matches the file name case-insensitively on disk)
+@@ -133,7 +134,10 @@
  static char g_others[OTHER_MAX][17]; static int g_nothers;   // builds on disk that are not this game's build
  static char g_other_ver[OTHER_MAX][24];                      // their display versions, from their meta files ("" unknown)
  static char g_version[24];     // this build's display version (the profile's build rows, else the meta file), "" unknown
@@ -13,7 +21,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static char g_skip_name[SKIP_MAX][NAME_MAX], g_skip_why[SKIP_MAX][160]; static int g_nskip;   // the compiler's left-outs
  static char g_src[SRC_MAX][256]; static int g_nsrc;          // *.cheats.toml sources in the folder
  static char g_report[4096];    // the load report (dm_cheats_report)
-@@ -1766,9 +1769,14 @@
+@@ -1766,9 +1770,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -28,7 +36,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1793,7 @@
+@@ -1785,6 +1794,7 @@
              g_nothers++;
          }
      }
@@ -36,7 +44,29 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1864,7 +1873,7 @@
+@@ -1847,7 +1857,17 @@
+ 
+ // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
+ // (main.c host_preload): the build ID to pick the file by comes from the modules them
++//
++// Called twice on iOS: the host's loading starts at app launch, while the settings screen is still up, so the first call
++// runs before the player has chosen anything and finds no file. front_ios.m calls it again when Play is pressed, after the
++// launcher has put DM_CHEATS_ON and the file in place. It re-reads every switch and reloads, so it has to be repeatable:
++// the name list is cleared first (it is appended to) and the exit handler is registered once.
+ void dm_cheats_init(void) {
++    static int exit_registered;
++    // iOS sets DM_CHEATS_DEFER: the host loads at app launch, before the settings screen can put the file and the switches
++    // in place, so the call from host_preload would only log "no file for build". dm_cheats_after_launcher runs the real
++    // one when Play is pressed.
++    if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
+     atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
+     const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
+     e = getenv("DM_CHEATS");
+@@ -1861,10 +1881,11 @@
+         for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
+         g_build[16] = 0;
+     }
++    g_non = 0;   // a second call reads the switches as they are now, not on top of the first call's list
      e = getenv("DM_CHEATS_ON");
      if (e && *e) {   // one-off names turned on at launch, split on ','; the saves' own <build>.enabled states stay too
          char *dup = strdup(e), *s = dup;
@@ -45,3 +75,21 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
+@@ -1877,8 +1898,15 @@
+         for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
+         folder_flags();
+         if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
+-        atexit(dm_cheats_exit);   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
+-    }
++        if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
++    }
++}
++
++// iOS: the settings screen has been dismissed with Play, so the file and the switches are final. Runs the load that
++// dm_cheats_init skipped at launch (DM_CHEATS_DEFER).
++void dm_cheats_after_launcher(void) {
++    g_after_launcher = 1;
++    dm_cheats_init();
+ }
+ 
+ // A clean exit: no cheat runs any more, so the safe-mode flag goes (atexit, and dm_host_exit before its _exit)
