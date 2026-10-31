@@ -57,7 +57,22 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <mach/mach.h>       // vm_read_overwrite / vm_write: guest pages the game maps and unmaps while a pass runs (guest_page_read / _write)
-#include <mach/mach_vm.h>   // mach_vm_remap / mach_vm_protect: the writable alias of main below (present on iOS too, whatever upstream's note says)
+#if TARGET_OS_IPHONE
+// The iOS SDK ships mach/mach_vm.h as a one-line stub ("mach_vm.h unsupported"), which is why upstream concluded the
+// iPhone cannot map main's image twice. The header is gone; the traps are not: libsystem_kernel exports them and the
+// kernel implements the 64-bit calls for its own use, so they are declared here against the same ABI as <mach/mach_vm.h>
+// on macOS. VM_FLAGS_ANYWHERE / VM_PROT_* / VM_INHERIT_SHARE come from <mach/vm_map.h>, which iOS does keep.
+#include <mach/vm_map.h>
+extern kern_return_t mach_vm_remap(vm_map_t target_task, mach_vm_address_t *address, mach_vm_size_t size,
+                                   mach_vm_offset_t mask, int flags, vm_map_t src_task, mach_vm_address_t src_address,
+                                   boolean_t copy, vm_prot_t *cur_protection, vm_prot_t *max_protection,
+                                   vm_inherit_t inheritance);
+extern kern_return_t mach_vm_protect(vm_map_t target_task, mach_vm_address_t address, mach_vm_size_t size,
+                                     boolean_t set_maximum, vm_prot_t new_protection);
+extern kern_return_t mach_vm_deallocate(vm_map_t target_task, mach_vm_address_t address, mach_vm_size_t size);
+#else
+#include <mach/mach_vm.h>
+#endif
 #if !TARGET_OS_IPHONE
 #include <mach/mach_vm.h>    // the alias mapping of main's pages (mach_vm_remap), below; the iPhone SDK has no mach_vm.h
 #include <mach/vm_prot.h>
