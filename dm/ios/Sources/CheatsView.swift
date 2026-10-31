@@ -1,9 +1,9 @@
 // Cheats on the iPhone, in the launcher itself: paste Atmosphère codes, switch on the entries wanted, play.
 //
 // The text goes to Documents/cheats/cheats.txt and the switched-on names to DM_CHEATS_ON, which hle_cheats.c reads at
-// startup (dm/host/hle_cheats.c: it parses the file, then turns on the entries named in that variable). The file is named
-// cheats.txt rather than by this build's ID, so DM_CHEATS_ANY_BUILD is set too: the host takes the folder's one .txt when
-// it has no file of its own build. The panel therefore never has to know the build ID.
+// startup (dm/host/hle_cheats.c: it parses the file, then turns on the entries named in that variable). Upstream's loader
+// only reads a .txt named after a build ID, so this fork's copy also accepts that fixed name under DM_CHEATS_ANY_BUILD
+// (and only as the fallback: a real <build>.txt still wins). The panel therefore never has to know the build ID.
 //
 // One app holds one game, so the codes cannot be handed to a different game by accident. They CAN belong to a different
 // VERSION of this game -- the addresses in them are absolute -- which is why the footer names the version the app carries.
@@ -16,7 +16,7 @@ struct CheatsSection: View {
     @State private var expanded = false
 
     private var names: [String] { Self.entryNames(text) }
-    private var selected: Set<String> { Set(onNames.split(separator: "\n").map(String.init)) }
+    private var selected: Set<String> { Self.selectedSet(onNames) }
     private var version: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?" }
 
     var body: some View {
@@ -45,11 +45,6 @@ struct CheatsSection: View {
         } footer: {
             Text("Atmosphère format. The addresses belong to the version this app carries (\(version)), so codes written for another version can crash the game. On the iPhone only memory values apply: codes that change instructions do nothing.")
         }
-        .onAppear {
-            // A launch that goes straight through (no editing) still needs last time's file and names in place.
-            if !text.isEmpty { write(text) }
-            applyEnv(log: false)
-        }
     }
 
     // MARK: - state changes
@@ -59,8 +54,7 @@ struct CheatsSection: View {
         let live = Set(Self.entryNames(v))
         let kept = Set(names.filter { live.contains($0) && selected.contains($0) })
         if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: "\n") }
-        write(v)
-        applyEnv(log: false)
+        Self.apply(text: v, on: names.filter { kept.contains($0) }, log: false)
         fputs("launcher: cheats \(names.count) entries, \(kept.count) on\n", stderr)
     }
 
@@ -68,26 +62,35 @@ struct CheatsSection: View {
         var s = selected
         if on { s.insert(name) } else { s.remove(name) }
         onNames = names.filter { s.contains($0) }.joined(separator: "\n")
-        applyEnv(log: true)
+        Self.apply(text: text, on: names.filter { s.contains($0) }, log: true)
     }
 
-    // MARK: - the two things the host reads
+    // MARK: - what the host reads
 
-    /// DM_CHEATS_ON is the entries to switch on; ANY_BUILD lets a file that is not named after this build be used.
+    /// Called from the Play button: the section sits below the fold, so onAppear alone cannot be relied on to have run
+    /// before the game starts. Reads what was saved and puts it in place.
+    static func applySaved() {
+        let d = UserDefaults.standard
+        let text = d.string(forKey: "cheats.text") ?? ""
+        let want = selectedSet(d.string(forKey: "cheats.on") ?? "")
+        apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false)
+    }
+
+    /// DM_CHEATS_ON is the entries to switch on; ANY_BUILD lets the fixed file name be read without the build ID.
     /// Overwrites what an env file set: this panel is the switch for these two, and it shows the state it applied.
-    private func applyEnv(log: Bool) {
-        let on = names.filter { selected.contains($0) }
+    private static func apply(text: String, on: [String], log: Bool) {
         if on.isEmpty { unsetenv("DM_CHEATS_ON") } else { setenv("DM_CHEATS_ON", on.joined(separator: ","), 1) }
         setenv("DM_CHEATS_ANY_BUILD", "1", 1)
+        write(text)
         if log {
-            fputs("launcher: cheats \(names.count) entries, \(on.count) on\(on.isEmpty ? "" : ": " + on.joined(separator: ", "))\n", stderr)
+            fputs("launcher: cheats \(entryNames(text).count) entries, \(on.count) on\(on.isEmpty ? "" : ": " + on.joined(separator: ", "))\n", stderr)
         }
     }
 
     /// The codes themselves, where hle_cheats.c looks first (DM_CHEATS points at Documents/cheats). Empty text removes
     /// the file, so a cleared panel cannot quietly keep applying last time's codes.
-    private func write(_ v: String) {
-        let f = Self.dir.appendingPathComponent("cheats.txt")
+    private static func write(_ v: String) {
+        let f = dir.appendingPathComponent("cheats.txt")
         do {
             if v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if FileManager.default.fileExists(atPath: f.path) { try FileManager.default.removeItem(at: f) }
@@ -109,9 +112,11 @@ struct CheatsSection: View {
         return d
     }
 
-    /// The entry names in Atmosphère's format: a line that is only "[name]". The host's parser is the authority — it also
-    /// refuses a name glued to a previous line's code word — so this list is what the panel offers, not what is applied.
-    private static func entryNames(_ text: String) -> [String] {
+    private static func selectedSet(_ s: String) -> Set<String> { Set(s.split(separator: "\n").map(String.init)) }
+
+    /// The entry names in Atmosphère's format: a line that is only "[name]". The host's parser is the authority -- it also
+    /// refuses a name glued to a previous line's code word -- so this list is what the panel offers, not what is applied.
+    static func entryNames(_ text: String) -> [String] {
         var out: [String] = []
         for raw in text.split(whereSeparator: { $0.isNewline }) {
             let line = String(raw).trimmingCharacters(in: .whitespaces)

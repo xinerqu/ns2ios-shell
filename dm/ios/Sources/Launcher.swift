@@ -178,6 +178,7 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
         guard let h = host else { return }
         host = nil
         model.apply()
+        CheatsSection.applySaved()   // the section can sit below the fold: what it saves is put in place here, not on appear
         h.dismiss(animated: false) { done() }
     }
     let h = UIHostingController(rootView: view)

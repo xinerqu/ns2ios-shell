@@ -1769,9 +1769,14 @@ static void load_all(void) {
     int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
     int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                 // single such file, never a readme.txt that collect_dir listed beside it
+    int plain = -1;             // Documents/cheats/cheats.txt: this app's own file (see the loop)
     for (int i = 0; i < g_ncand; i++) {   // the whole list is walked: the build's file may lie after an "another version" one
         const char *nm = strrchr(g_cand[i], '/') + 1;
         int hex = name_hex16(nm);
+        // The launcher's file, with DM_CHEATS_ANY_BUILD on: one app holds one game, so cheats.txt is this game's file and
+        // the panel never has to know the build ID. It is only the fallback -- a real <build>.txt, if the player put one
+        // there, still wins below, and nothing is logged as "another build" because it is not one.
+        if (!hex && g_any && !strcasecmp(nm, "cheats.txt")) { if (plain < 0) plain = i; continue; }
         if (!hex) continue;
         nbuild++; lone = i;
         if (name_is_build(nm, g_build)) {
@@ -1788,6 +1793,7 @@ static void load_all(void) {
             g_nothers++;
         }
     }
+    if (pick < 0) pick = plain;   // the launcher's cheats.txt, when no file is named after this build
     if (pick < 0 && !(g_any && nbuild == 1)) {
         LOG("cheats: %s: no file for build %s", g_dir, g_build);
         if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context

@@ -9,3 +9,11 @@ diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
                      Section {
                          Button("Reset to tested defaults") { m.reset() }
                              .disabled(!m.changed)
+@@ -177,6 +178,7 @@
+         guard let h = host else { return }
+         host = nil
+         model.apply()
++        CheatsSection.applySaved()   // the section can sit below the fold: what it saves is put in place here, not on appear
+         h.dismiss(animated: false) { done() }
+     }
+     let h = UIHostingController(rootView: view)
