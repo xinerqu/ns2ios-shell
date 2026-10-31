@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
 --- a/dm/gfx/gl/hle_gl.m
 +++ b/dm/gfx/gl/hle_gl.m
-@@ -132,6 +132,7 @@
+@@ -133,6 +133,7 @@
  static id<MTLTexture> g_tex0, g_cube0, g_tex3d0, g_arr0;   // bound where a sampler's unit has no texture (or an unusable one): opaque black, as GL samples an incomplete texture
  static id<MTLSamplerState> g_samp0;
  static id<MTLLibrary> g_lib, g_util;             // the game's shaders; the layer's own (clears)
@@ -9,7 +9,7 @@ diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
  static uint64_t g_serial = 1;                    // serial of the command buffer being recorded (g_cb); committed ones have lower serials
  static _Atomic uint64_t g_done;                  // highest serial whose command buffer has completed
  static id<MTLCommandBuffer> g_cb;
-@@ -185,12 +186,57 @@
+@@ -187,12 +188,57 @@
      }
      fclose(f);
      qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);
@@ -68,9 +68,9 @@ diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
 +    return f;
 +}
  
- // The layer's own shaders: a quad that clears what a scissored or masked glClear covers (a render pass can only clear its attachments whole)
- static const char *const g_util_src =
-@@ -1628,8 +1674,16 @@
+ 
+ static void dev_init_once(void) {
+@@ -1705,8 +1751,16 @@
      sh_capture(s);
      int frag = s->type == GL_FRAGMENT_SHADER;
      s->si = sh_find(s->key, frag); s->compiled = 1;
