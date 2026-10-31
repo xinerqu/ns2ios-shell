@@ -55,6 +55,7 @@
 ~ dm/gfx/tools/vk_shaders.py    # --source-only: translate SPIR-V without Apple's Metal compiler (Windows)
 ~ dm/gfx/tools/shader_split.py  # posix separators in the recorded RomFS paths (Windows)
 ~ dm/games/game.py              # DM_GAMES_DIR split with os.pathsep: ':' cannot hold a Windows path
+~ dm/tools/patch_nso.py            # the fork-based scan falls back to serial where there is no fork (Windows): the script works at import time, so spawn cannot stand in
 ~ dm/tools/nx_extract/Program.cs      # wraps the stacked storage in AlignedReadStorage
 
 ~ dm/gfx/tools/dmsh_chain.py    # SPIRV_CROSS: the release's .exe on Windows, not the in-repo macOS build

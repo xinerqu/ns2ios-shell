@@ -1,0 +1,18 @@
+diff --git a/dm/tools/patch_nso.py b/dm/tools/patch_nso.py
+--- a/dm/tools/patch_nso.py
++++ b/dm/tools/patch_nso.py
+@@ -582,7 +582,13 @@
+     The workers are forked on each call, so they see the module's state as it is at that point."""
+     if WORKERS < 2 or len(jobs) < 2:
+         return [fn(*job) for job in jobs]
+-    with multiprocessing.get_context('fork').Pool(min(WORKERS, len(jobs))) as pool:
++    try:
++        ctx = multiprocessing.get_context('fork')
++    except ValueError:
++        # Windows has no fork, and spawn cannot stand in for it here: this script does its work at import time, so every
++        # worker would re-run the whole rewrite instead of one piece of it. Serial there, which is slower and correct.
++        return [fn(*job) for job in jobs]
++    with ctx.Pool(min(WORKERS, len(jobs))) as pool:
+         return pool.starmap(fn, jobs)
+ 
+ def find_x18_words():
