@@ -133,7 +133,10 @@ static char g_tid[17];         // this game's title ID (the profile's DM_GAME_PR
 static char g_others[OTHER_MAX][17]; static int g_nothers;   // builds on disk that are not this game's build
 static char g_other_ver[OTHER_MAX][24];                      // their display versions, from their meta files ("" unknown)
 static char g_version[24];     // this build's display version (the profile's build rows, else the meta file), "" unknown
-static char g_on[16][NAME_MAX]; static int g_non;            // the names of DM_CHEATS_ON, turned on at load time
+// The names DM_CHEATS_ON switches on. Upstream's 16 was set by the Mac panel, which turns a handful on by hand; the
+// iPhone has no panel and the launcher's list is the switch, where a community file's twenty-odd entries are ordinary.
+#define CHEATS_ON_MAX 64
+static char g_on[CHEATS_ON_MAX][NAME_MAX]; static int g_non;  // the names of DM_CHEATS_ON, turned on at load time
 static char g_skip_name[SKIP_MAX][NAME_MAX], g_skip_why[SKIP_MAX][160]; static int g_nskip;   // the compiler's left-outs
 static char g_src[SRC_MAX][256]; static int g_nsrc;          // *.cheats.toml sources in the folder
 static char g_report[4096];    // the load report (dm_cheats_report)
@@ -1864,7 +1867,7 @@ void dm_cheats_init(void) {
     e = getenv("DM_CHEATS_ON");
     if (e && *e) {   // one-off names turned on at launch, split on ','; the saves' own <build>.enabled states stay too
         char *dup = strdup(e), *s = dup;
-        while (s && g_non < 16) {
+        while (s && g_non < CHEATS_ON_MAX) {
             char *t = strchr(s, ',');
             if (t) *t = 0;
             if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);

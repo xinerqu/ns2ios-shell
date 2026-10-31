@@ -15,6 +15,7 @@
 + dm/tools/guest_dylib.py                 # writes Frameworks/Guest.framework (pure standard library, any OS)
 + dm/gfx/tools/nometal_run.py             # runs the shader chain without Apple's compiler
 + dm/gfx/tools/gl_prebuilt.py              # a LOVE game's GLSL from its own files: what DM_GL_CAPTURE would have written
++ dm/ios/Sources/CheatsView.swift          # the launcher's Cheats section: paste the codes, switch the entries on (no settings row: the list is not known until the text is parsed)
 + dm/ios/Sources/dm_shader_prep.m         # first-launch shader compilation page
 + dm/ios/Sources/dm_shader_learn.h        # what the host learns about a shader's output types, from a refused pipeline
 + dm/ios/Sources/dm_shader_learn.m        # the rewrite that makes a colour output integer, and the rows it keeps
@@ -45,6 +46,7 @@
 ~ dm/host/hle_oe.c              # profile perf_mode overridable at run time (DM_PERF_BOOST): the shell compiles the placeholder's 0
 ~ dm/host/hle_os.c              # profile alloc_big_align overridable at run time (DM_ALLOC_BIG_ALIGN): likewise
 ~ dm/host/main.c                # profile game_args overridable at run time (DM_GAME_ARGS): the shell compiles the placeholder's empty string
+~ dm/host/hle_cheats.c          # DM_CHEATS_ON carries 64 entries, not 16: the launcher's own list is the switch (no Mac panel)
 ~ dm/host/hle_fpslock.c         # profile ue_fps_cvar overridable at run time (DM_UE_FPS_CVAR): the shell compiles the placeholder's t.MaxFPS
 ~ dm/gfx/nvn/nvn_mtl.m          # compile MSL source on the device; chain version read from the msl directory name; render_cond / tex_dyn_slots / tex_dirty_upload read from the environment
 ~ dm/gfx/nvn/hle_nvn.c          # profile tex_flush_upload / tex_dirty_upload / render_cond overridable at run time: the shell compiles the placeholder's 0
@@ -60,5 +62,6 @@
 ~ dm/gfx/tools/dmsh_mtlcache.py # ctypes.CDLL(None) is POSIX-only
 ~ dm/gfx/tools/dmsh_build.py    # atomic_json retries a Windows sharing violation: keys sharing a digest publish the same .json at once
 ~ dm/ios/Sources/main.m         # modules from the Guest library, relaxed romfs lookup, shader preparation before the host
+~ dm/ios/Sources/Launcher.swift # the Cheats section in the settings list (its view: dm/ios/Sources/CheatsView.swift)
 ~ dm/ios/Sources/DmGamepad.m    # profile pad_layout overridable at run time (DM_PAD_LAYOUT), for the first launch only
 ~ dm/ios/tools/pack_ipa.py      # keep the executable bit when packing on Windows

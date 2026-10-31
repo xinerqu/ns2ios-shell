@@ -122,6 +122,7 @@ private struct LauncherView: View {
                             }
                         }
                     }
+                    CheatsSection()
                     Section {
                         Button("Reset to tested defaults") { m.reset() }
                             .disabled(!m.changed)

@@ -1,0 +1,11 @@
+diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
+--- a/dm/ios/Sources/Launcher.swift
++++ b/dm/ios/Sources/Launcher.swift
+@@ -122,6 +122,7 @@
+                             }
+                         }
+                     }
++                    CheatsSection()
+                     Section {
+                         Button("Reset to tested defaults") { m.reset() }
+                             .disabled(!m.changed)
