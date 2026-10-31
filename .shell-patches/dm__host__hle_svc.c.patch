@@ -1,5 +1,4 @@
 diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
-index 4f440a0..e0b4422 100644
 --- a/dm/host/hle_svc.c
 +++ b/dm/host/hle_svc.c
 @@ -16,7 +16,27 @@
@@ -31,7 +30,7 @@ index 4f440a0..e0b4422 100644
  static uint8_t *g_as;              // ASLR region base = the whole block
  static size_t g_reserve;           // its size: RESERVE, or more with a DM_ALIAS_SIZE alias region
  static uint8_t *g_heap; static _Atomic size_t g_heap_cur; static size_t g_heap_cap;
-@@ -40,16 +60,22 @@ int dm_guest_as_contains(uintptr_t a) { uintptr_t b = (uintptr_t)g_as; return g_
+@@ -40,16 +60,22 @@
  static void *alias_windows_thread(void *arg);
  static void *regions_thread(void *arg);
  static void mem_init_once(void) {
@@ -59,7 +58,7 @@ index 4f440a0..e0b4422 100644
      g_as = mmap(NULL, g_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
      if (g_as == MAP_FAILED) die("reserve guest AS");
      // Fixed partition (all inside the reserved block): alias 2.875 GB, stack 256 MB, heap the remaining 1.625 GB.
-@@ -59,7 +85,7 @@ static void mem_init_once(void) {
+@@ -59,7 +85,7 @@
      //   got no address, were skipped, and crashed on a null pointer when used (main +0x373e04). So alias = node area + 1.75 GB + slack; the heap needs only 1.47 GB, and 2.625 GB is plenty.
      // The alias and stack sizes come from the game profile (mem_alias / mem_stack), the heap takes the rest; Mario: alias 0xB8000000, stack 0x10000000 → stack at +0xC8000000, heap at +0xD8000000
      g_alias = g_as + 0x10000000; g_alias_cap = alias;
@@ -68,7 +67,7 @@ index 4f440a0..e0b4422 100644
      g_heap  = g_stack + g_stack_cap; g_heap_cap  = g_reserve - (size_t)(g_heap - g_as);
      if (!(g_alias_bits = calloc((g_alias_cap >> 18) + 1, sizeof *g_alias_bits))) die("alias region page bitmap calloc");
      if (!(g_alias_exposed = calloc(g_alias_cap / pg / 64 + 1, sizeof *g_alias_exposed))) die("alias exposure bitmap calloc");
-@@ -78,7 +104,7 @@ static void mem_init(void) {
+@@ -78,7 +104,7 @@
  // and hands the whole block to its own StandardAllocator (main+0x32137a0) -- so heap size = pool − image footprint, it has only as much as the host reports.
  // Previously 3 GB was reported here and SetHeapSize never failed: the heap was about 150 MB smaller than on the real device, at the run entry peak the main heap had only about 18 MB left, and under high local load a timing shift made a 128 KB request return null,
  // which the guest writes to without a null check (CRASH main+0x1b36138, re-verified after merge with inv_tap).
@@ -77,7 +76,7 @@ index 4f440a0..e0b4422 100644
  static size_t image_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (!g_mod[i].nro) n += g_mod[i].size;   // an NRO lives in memory the game allocated (its image and bss buffers)
      return (n + 0x1fffff) & ~(size_t)0x1fffff; }
  // Giant bss (modules with the patch area before the base, patch_nso.py FAR): the image bytes beyond the file part. Used memory was reported as "heap + 64 MB", where the 64 MB covers ordinary modules' code and data (Mario's two modules are about 74 MB together,
-@@ -354,6 +380,14 @@ static void region_free(uint64_t *r, int param) {
+@@ -354,6 +380,14 @@
  // it instead (Absolum's .NET garbage collector takes 1.5 GB after it). The SDK lays the region out from that size, so it holds; the pool, not the region, bounds what the heap
  // can map. A workaround for the iPhone's address space, not the game: with room for the request (a Switch-sized DM_ALIAS_SIZE) nothing changes. Found by symbol in every sdk
  #define STDALLOC_LATER 0x10000000ull
@@ -92,7 +91,7 @@ index 4f440a0..e0b4422 100644
  // What the alias region has room for in one more region: past the end of the regions made so far, less STDALLOC_LATER for those made later, in 32 MB steps (0 = none)
  static uint64_t alias_room(void) {
      mem_init();
-@@ -366,11 +400,12 @@ static uint64_t alias_room(void) {
+@@ -366,11 +400,12 @@
  static void stdalloc_init(uint64_t *r, int param) {
      (void)param;
      if (r[1]) return;   // a heap over memory the game passes in: no address region
@@ -107,7 +106,7 @@ index 4f440a0..e0b4422 100644
      r[2] = cap;
  }
  // ---- Unreal's engine region ----
-@@ -459,11 +494,11 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+@@ -459,11 +494,11 @@
              // Logged once (Mario's retries would repeat it): a game that sizes its heap as pool − used memory and does not retry stops here when its modules are larger than the used memory reported
              // (profile mem_used; the NSP script's probe boot reads this line, and sets mem_used when no SetHeapSize succeeds afterwards)
              static int once; if (!once++) LOG("[mem] SetHeapSize %#zx + modules %#zx > app pool %#llx (used memory reported %#llx + bss %#zx)", size, image_bytes() - big_bss_bytes(),
@@ -122,7 +121,7 @@ index 4f440a0..e0b4422 100644
              pthread_mutex_unlock(&g_map_lock); regs[0] = 0x10801; return 0;
          }
          int rc = 0;
-@@ -607,8 +642,8 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+@@ -607,8 +642,8 @@
          // and maps new ones for later allocations, until a map fails: then it unmaps the cached block and retries (measured on the Mac: the refused 4 MB map at +0x43e2c000 was followed by
          // UnmapPhysicalMemory of the 3.15 GB block and the same map again). Without the limit the mapped total went past the pool in the first minute and the freed block stayed mapped.
          // Off by default: Ace Attorney Investigations Collection maps a little more than the 1 GB pool its profile reports
@@ -133,7 +132,7 @@ index 4f440a0..e0b4422 100644
              if (need && need > room) {
                  pthread_mutex_unlock(&g_map_lock);
                  static _Atomic int nref; if (atomic_fetch_add(&nref, 1) < 8) LOG("[mem] MapPhysicalMemory +%#zx refused: %.2f GB mapped, the application pool is full (ResultLimitReached, the SDK frees cached pages and retries)",
-@@ -670,13 +705,13 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+@@ -670,13 +705,13 @@
          case I_StackAddr: v = (uint64_t)g_stack; break;   case I_StackSize: v = g_stack_cap; break;
          case I_TotalMem: case I_TotalNonSys: v = APP_POOL; break;
          case I_UsedMem:  case I_UsedNonSys:  pthread_mutex_lock(&g_map_lock);

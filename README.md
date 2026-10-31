@@ -255,6 +255,13 @@ Every other game on the supported list packs and plays from its own files, LÖVE
 - **First launch takes a while**: the phone compiles every shader once. Hades II's 140 shaders take about 5 s; bigger titles
   take minutes (the progress page estimates). The system caches the result, so later launches start immediately.
 - To change a setting on the device without repacking, put `KEY=VALUE` lines in the app's `Documents/env.txt`.
+- **Cheats** (Atmosphère format): drop the `.txt` files into the app's `Documents/cheats`, named by the **build ID** of the
+  game's main module — `<build ID>.txt`. The log prints the build ID it is looking for (`cheats: … no file for build …`),
+  so it is found by playing once with an empty folder. A file that is there is loaded but every cheat starts **off**: there
+  is no cheats panel on the iPhone, so name the ones you want in `Documents/env.txt` as `DM_CHEATS_ON=<name>,<name>` (up to
+  16, comma-separated), the same names the file uses. Only data writes take effect — the app's code pages are signed, so a
+  cheat that patches instructions does nothing and says so. Use the flat files; the Atmosphère tree
+  (`cheats/<title ID>/cheats/…`) does not apply here. `DM_CHEATS_DEBUG=1` logs every write.
 - If it crashes, the host writes `Documents/log.txt` — in almost every case that file names the reason.
 - Packing needs **disk space of roughly twice the NSP size**: the extracted RomFS, the staged app and the IPA coexist. The
   temporary files are then removed automatically (`--keep-work` / `--clean`, see above).

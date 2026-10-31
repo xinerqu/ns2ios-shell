@@ -42,6 +42,15 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
+@@ -99,7 +111,7 @@
+     NSFileManager *fm = NSFileManager.defaultManager;
+     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+     NSString *res = NSBundle.mainBundle.resourcePath;
+-    for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
++    for (NSString *d in @[@"save", @"temp", @"cheats"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
+     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
+     for (NSString *d in [@[@"romfs", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
+         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
 @@ -144,6 +156,13 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
@@ -56,7 +65,18 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
      if (!gpu.supportsBCTextureCompression) {
          snprintf(g_device_message, sizeof g_device_message, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
-@@ -166,6 +185,12 @@
+@@ -156,6 +175,10 @@
+     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
+     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
+     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
++    // Atmosphère cheat files the player drops in from the Files app: Documents/cheats/<build ID>.txt, named by the main
++    // NSO's build ID (hle_cheats.c logs the one it is looking for). Nothing else on iOS sets these switches, so without
++    // this line every cheat is off with "cheats: off (neither DM_CHEATS nor DM_ROOT is set)"; an env.txt line still wins.
++    setenv("DM_CHEATS", [doc stringByAppendingPathComponent:@"cheats"].fileSystemRepresentation, 0);
+     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
+     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
+     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
+@@ -166,6 +189,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -69,7 +89,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -178,11 +203,19 @@
+@@ -178,11 +207,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
