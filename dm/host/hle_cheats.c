@@ -57,6 +57,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <mach/mach.h>       // vm_read_overwrite / vm_write: guest pages the game maps and unmaps while a pass runs (guest_page_read / _write)
+#include <mach/mach_vm.h>   // mach_vm_remap / mach_vm_protect: the writable alias of main below (present on iOS too, whatever upstream's note says)
 #if !TARGET_OS_IPHONE
 #include <mach/mach_vm.h>    // the alias mapping of main's pages (mach_vm_remap), below; the iPhone SDK has no mach_vm.h
 #include <mach/vm_prot.h>
@@ -174,11 +175,13 @@ static uint8_t *g_alias;       // the alias mapping of main's image (same layout
 
 // Map main's image a second time, writable. Called once a cheat file is actually picked (at init that is before the
 // guest starts, so nothing protects or tracks these pages yet); the mapping stays for the process's lifetime, the
-// loader's per-page protections never change after load. Not on the iPhone: its SDK has no mach_vm.h, and its code pages
-// are the app's signed pages, which no mapping can make writable; cheats write only data there
-#if TARGET_OS_IPHONE
-static void alias_setup(void) { g_alias = NULL; }
-#else
+// loader's per-page protections never change after load.
+//
+// Upstream refuses this on the iPhone ("its SDK has no mach_vm.h, and its code pages are the app's signed pages"). The
+// second half is not true here: loader.c maps every module from MAP_ANON memory, fills it and then mprotects it to
+// RX, so the pages are this process's own anonymous memory and a second read+write mapping of them is what a JIT-less
+// app does every day. If the kernel refuses anyway, the remap or the protect fails and g_alias stays NULL, which is
+// exactly the behaviour upstream ships: cheats then write data only.
 static void alias_setup(void) {
     module_t *m = g_main_mod;
     long pg = sysconf(_SC_PAGESIZE); if (pg <= 0) pg = 0x4000;   // 16 KB on Apple Silicon, a safe floor elsewhere
@@ -188,14 +191,13 @@ static void alias_setup(void) {
     kern_return_t kr = mach_vm_remap(mach_task_self(), &dst, size, 0, VM_FLAGS_ANYWHERE,
                                      mach_task_self(), (mach_vm_address_t)(uintptr_t)m->base, FALSE,
                                      &cur, &mx, VM_INHERIT_SHARE);
-    if (kr) { g_alias = NULL; return; }
+    if (kr) { g_alias = NULL; LOG("cheats: no writable alias of main (mach_vm_remap %d): cheats write data only", kr); return; }
     // The alias's protections are independent of the original mapping's: make everything writable once. The key page
     // stays refused by the write path; the alias is only ever used by a check-passing write
     kr = mach_vm_protect(mach_task_self(), dst, size, 0, VM_PROT_READ | VM_PROT_WRITE);
-    if (kr) { mach_vm_deallocate(mach_task_self(), dst, size); g_alias = NULL; return; }
+    if (kr) { mach_vm_deallocate(mach_task_self(), dst, size); g_alias = NULL; LOG("cheats: no writable alias of main (mach_vm_protect %d): cheats write data only", kr); return; }
     g_alias = (uint8_t *)(uintptr_t)dst;
 }
-#endif
 
 // The cheats list, the toggles and one VM pass at a time
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -591,7 +593,7 @@ static int main_write_check(cheat_t *c, uint64_t addr, uint64_t len) {
     }
     if (off < main_rx_end()) {   // the text, to its last page as the loader sealed it
         if (!g_alias) {
-            cheat_kill(c, "%s", TARGET_OS_IPHONE ? "code writes are not possible on the iPhone (the app's signed code pages)" : "code write without the writable alias of main");
+            cheat_kill(c, "code write without the writable alias of main: no file of this build is loaded, or the remap failed (see the cheats line above)");
             return -1;
         }
         int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
@@ -1815,8 +1817,7 @@ static void load_all(void) {
     if (g_main_mod && !g_alias) {
         alias_setup();
         if (g_alias) LOG("cheats: writable alias of main mapped");
-        else if (TARGET_OS_IPHONE) LOG("cheats: the iPhone's code pages are signed: cheats write data only");
-        else LOG("[RED] cheats: no writable alias of main (mach_vm_remap failed): cheats write data only");
+        // alias_setup logged why it could not be mapped; this line is the consequence the player sees
     }
     if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
     parse_file(g_path);
