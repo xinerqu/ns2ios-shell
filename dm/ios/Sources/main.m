@@ -110,9 +110,18 @@ static void aoc_locate(void) {
 static char g_boot_message[640];
 const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
 // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
-// GitHub issue #704). Checked before the host's early loading, so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device
-static char g_device_message[320];
-const char *front_ios_device_message(void) { return g_device_message[0] ? g_device_message : NULL; }
+// GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
+// its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
+const char *front_ios_device_check(void) {
+    static char msg[320]; static int done;
+    if (done++) return msg[0] ? msg : NULL;
+    id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
+    if (gpu.supportsBCTextureCompression) return NULL;
+    snprintf(msg, sizeof msg, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
+             gpu ? gpu.name.UTF8String : "no Metal device");
+    fprintf(stderr, "[RED] boot: %s\n", msg);
+    return msg;
+}
 static void romfs_identity_report(NSString *doc) {
     romfs_id want, got;
     int rc = romfs_id_check([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation,
@@ -165,7 +174,7 @@ static int boot_env(void) {
     }
     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
-    front_hud_env();   // before the early loading below can make a device
+    front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
     // (or the launcher, which replaces this default before the game starts)
     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
@@ -175,15 +184,10 @@ static int boot_env(void) {
     // signature it is several GB (6-8 on a 12 GB phone); without it, about 3,375 MB, which the bigger games fill exactly to the
     // limit and are then killed for, with no crash log to explain it. One line, so that case can be told apart from a crash.
     { unsigned long long av = os_proc_available_memory();
-      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
+      fprintf(stderr, "boot: memory limit %llu MB (%s)
+", av >> 20,
               av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
                                 : "entitlement in effect"); }
-    id<MTLDevice> gpu = MTLCreateSystemDefaultDevice();   // the system default device, the one the graphics layers take (mtl_init repeats this check for the other routes)
-    if (!gpu.supportsBCTextureCompression) {
-        snprintf(g_device_message, sizeof g_device_message, "This device's GPU (%s) cannot read BC-compressed textures, which the games use. It needs an iPhone 15 Pro or newer (A17 Pro chip or later) or an iPad with an M1 chip or later.",
-                 gpu ? gpu.name.UTF8String : "no Metal device");
-        fprintf(stderr, "[RED] boot: %s\n", g_device_message); return 0;
-    }
     NSString *romfs = romfs_locate();
     if (!romfs) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
