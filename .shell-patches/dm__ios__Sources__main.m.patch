@@ -51,7 +51,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
      for (NSString *d in [@[@"romfs", @"aoc", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
-@@ -168,12 +180,27 @@
+@@ -168,12 +180,26 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -59,8 +59,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    // signature it is several GB (6-8 on a 12 GB phone); without it, about 3,375 MB, which the bigger games fill exactly to the
 +    // limit and are then killed for, with no crash log to explain it. One line, so that case can be told apart from a crash.
 +    { unsigned long long av = os_proc_available_memory();
-+      fprintf(stderr, "boot: memory limit %llu MB (%s)
-+", av >> 20,
++      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
 +              av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
 +                                : "entitlement in effect"); }
      NSString *romfs = romfs_locate();
@@ -79,7 +78,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dm = [res stringByAppendingPathComponent:@"dm"];
      setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
      setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
-@@ -183,6 +210,12 @@
+@@ -183,6 +209,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -92,7 +91,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -195,11 +228,19 @@
+@@ -195,11 +227,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

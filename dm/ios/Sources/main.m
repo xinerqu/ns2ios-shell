@@ -184,8 +184,7 @@ static int boot_env(void) {
     // signature it is several GB (6-8 on a 12 GB phone); without it, about 3,375 MB, which the bigger games fill exactly to the
     // limit and are then killed for, with no crash log to explain it. One line, so that case can be told apart from a crash.
     { unsigned long long av = os_proc_available_memory();
-      fprintf(stderr, "boot: memory limit %llu MB (%s)
-", av >> 20,
+      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
               av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
                                 : "entitlement in effect"); }
     NSString *romfs = romfs_locate();
