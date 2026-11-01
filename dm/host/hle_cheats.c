@@ -145,6 +145,7 @@ static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats),
 static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
 static void save_last_run(void);   // what this load made of every entry, for the launcher (defined below dm_cheats_init)
 static int g_loaded;               // a load has finished: before that a kill is a parse problem, not a state the launcher wants
+static int g_panel;                // DM_CHEATS_PANEL: the launcher panel owns every switch, {Name} masters included (see dm_cheats_init)
 static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
 static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                // cheat files name it (dmnt matches the file name case-insensitively on disk)
@@ -607,6 +608,13 @@ static int main_write_check(cheat_t *c, uint64_t addr, uint64_t len) {
     module_t *m = g_main_mod; uint64_t off = addr - (uint64_t)(uintptr_t)m->base;
     if (off + len > m->key_page_off) {
         cheat_kill(c, "write at main+0x%llX is past the game's image (the host's key page and patch area)", (unsigned long long)off);
+        return -1;
+    }
+    // The second patch area (patch_nso.py TWO) sits inside the image, so the key-page check above does not cover it: it is
+    // code the rewriter added, never game data, and a write there breaks a moved window instead of changing a value.
+    if (m->back_len && off < m->back_off + m->back_len && off + len > m->back_off) {
+        cheat_kill(c, "writes main+0x%llX, which is the rewriter's second patch area (main+0x%llX..+0x%llX): not game code",
+                   (unsigned long long)off, (unsigned long long)m->back_off, (unsigned long long)(m->back_off + m->back_len));
         return -1;
     }
     if (off < main_rx_end()) {   // the text, to its last page as the loader sealed it
@@ -1138,7 +1146,7 @@ static void running_update(void) {
     for (int i = 0; i < g_ncheat && !any; i++) {
         const cheat_t *c = &g_cheat[i];
         if (c->label || c->broken) continue;
-        any = c->master ? !g_safe : c->on;
+        any = (c->master && !g_panel) ? !g_safe : c->on;
     }
     char p[1100]; flag_file(p, sizeof p, "running");
     int want = any && atomic_load(&g_master);
@@ -1259,7 +1267,7 @@ static void states_load(void) {
     }
     for (int k = 0; k < g_non; k++)
         for (int i = 0; i < g_ncheat; i++)
-            if (!g_cheat[i].master && !g_cheat[i].label && !strcasecmp(g_cheat[i].name, g_on[k])) g_cheat[i].on = 1;
+            if ((!g_cheat[i].master || g_panel) && !g_cheat[i].label && !strcasecmp(g_cheat[i].name, g_on[k])) g_cheat[i].on = 1;
 }
 
 // ---------- typed values the panel may set ("ask") ----------
@@ -1483,7 +1491,10 @@ static void parse_file(const char *path) {
             if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
             snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
             cur->master = end == '}';
-            cur->on = cur->master;
+            // A {Name} entry is Atmosphère's always-on header. With the launcher panel driving (DM_CHEATS_PANEL) it is an
+            // ordinary switch instead: the phone has no menu to turn a master off, and a file whose master breaks the game
+            // would otherwise be unusable, with the reason invisible.
+            cur->on = cur->master && !g_panel;
             char sec[NAME_MAX];
             int mark = section_marker(cur->name, sec, sizeof sec);
             if (mark == 1) snprintf(section, sizeof section, "%s", sec);
@@ -1888,6 +1899,7 @@ void dm_cheats_init(void) {
     // one when Play is pressed.
     if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
     atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
+    g_panel = getenv("DM_CHEATS_PANEL") && *getenv("DM_CHEATS_PANEL") && atoi(getenv("DM_CHEATS_PANEL"));
     const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
     e = getenv("DM_CHEATS");
     if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);

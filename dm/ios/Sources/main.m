@@ -200,6 +200,9 @@ static int boot_env(void) {
     // The host loads at launch, before the settings screen exists, so the cheat load waits for Play (front_ios.m calls
     // dm_cheats_after_launcher): otherwise it would only log "no file for build" and never see the panel's file.
     setenv("DM_CHEATS_DEFER", "1", 1);
+    // The panel is the only switch there is on a phone, so it owns every entry -- including a "{Name}" master, which
+    // Atmosphère always runs: with no menu to turn one off, a file whose master breaks the game would be unusable.
+    setenv("DM_CHEATS_PANEL", "1", 1);
     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);

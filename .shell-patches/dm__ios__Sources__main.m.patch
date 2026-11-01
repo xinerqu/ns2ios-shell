@@ -51,7 +51,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
      for (NSString *d in [@[@"romfs", @"aoc", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
-@@ -168,12 +180,26 @@
+@@ -168,12 +180,29 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -75,10 +75,13 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    // The host loads at launch, before the settings screen exists, so the cheat load waits for Play (front_ios.m calls
 +    // dm_cheats_after_launcher): otherwise it would only log "no file for build" and never see the panel's file.
 +    setenv("DM_CHEATS_DEFER", "1", 1);
++    // The panel is the only switch there is on a phone, so it owns every entry -- including a "{Name}" master, which
++    // Atmosphère always runs: with no menu to turn one off, a file whose master breaks the game would be unusable.
++    setenv("DM_CHEATS_PANEL", "1", 1);
      NSString *dm = [res stringByAppendingPathComponent:@"dm"];
      setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
      setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
-@@ -183,6 +209,12 @@
+@@ -183,6 +212,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -91,7 +94,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -195,11 +227,19 @@
+@@ -195,11 +230,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

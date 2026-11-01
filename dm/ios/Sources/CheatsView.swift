@@ -24,8 +24,9 @@ struct CheatsSection: View {
 
     struct RunState { let state: String; let why: String }
 
-    private var names: [String] { Self.entryNames(text) }      // [Name]: a switch of its own
-    private var masters: [String] { Self.masterNames(text) }    // {Name}: always on, not toggleable (the host's master)
+    // [Name] and {Name} are both switches here: the panel is the only menu a phone has, and DM_CHEATS_PANEL makes the
+    // host treat a {Name} master as an ordinary entry instead of always running it.
+    private var names: [String] { Self.entryNames(text) }
     private var selected: Set<String> { Self.selectedSet(onNames) }
     private var version: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?" }
     private var declared: String? { Self.declaredBuild(text) }  // the BID the pasted file says it was written for
@@ -35,15 +36,9 @@ struct CheatsSection: View {
 
     var body: some View {
         Section {
-            if names.isEmpty && masters.isEmpty && !expanded {
+            if names.isEmpty && !expanded {
                 Text("Paste the codes below, then switch on the entries you want.")
                     .font(.footnote).foregroundStyle(.secondary)
-            }
-            ForEach(masters, id: \.self) { name in
-                VStack(alignment: .leading, spacing: 2) {
-                    Toggle(name, isOn: .constant(true)).font(.callout).disabled(true)
-                    Text("Always on (a {…} entry), not switchable").font(.caption2).foregroundStyle(.secondary)
-                }
             }
             ForEach(names, id: \.self) { name in
                 VStack(alignment: .leading, spacing: 2) {
@@ -186,17 +181,13 @@ struct CheatsSection: View {
     /// The entry names in Atmosphère's format: a line that is only "[name]". The host's parser is the authority -- it also
     /// refuses a name glued to a previous line's code word -- so this list is what the panel offers, not what is applied.
     /// "[--SectionStart:Name--]" markers are dropped; a "{}" line is a master (see masterNames).
-    static func entryNames(_ text: String) -> [String] { names(in: text, open: "[", close: "]") }
-
-    /// "{name}" entries: always on and not toggleable (hle_cheats.c: master), so the panel shows them without a switch
-    /// that would do nothing. Shown rather than hidden, because a player who pasted one wants to see that it is there.
-    static func masterNames(_ text: String) -> [String] { names(in: text, open: "{", close: "}") }
-
-    private static func names(in text: String, open: Character, close: Character) -> [String] {
+    static func entryNames(_ text: String) -> [String] {
         var out: [String] = []
         for raw in text.split(whereSeparator: { $0.isNewline }) {
             let line = String(raw).trimmingCharacters(in: .whitespaces)
-            guard line.count > 2, line.first == open, line.last == close else { continue }
+            guard line.count > 2 else { continue }
+            let open = line.first, close = line.last
+            guard (open == "[" && close == "]") || (open == "{" && close == "}") else { continue }
             let name = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
             if name.isEmpty || name.hasPrefix("--") || out.contains(name) { continue }   // [--SectionStart:Foo--] markers
             out.append(name)

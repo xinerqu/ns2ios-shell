@@ -24,17 +24,18 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  #if !TARGET_OS_IPHONE
  #include <mach/mach_vm.h>    // the alias mapping of main's pages (mach_vm_remap), below; the iPhone SDK has no mach_vm.h
  #include <mach/vm_prot.h>
-@@ -126,6 +142,9 @@
+@@ -126,6 +142,10 @@
  
  static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
  static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
 +static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
 +static void save_last_run(void);   // what this load made of every entry, for the launcher (defined below dm_cheats_init)
 +static int g_loaded;               // a load has finished: before that a kill is a parse problem, not a state the launcher wants
++static int g_panel;                // DM_CHEATS_PANEL: the launcher panel owns every switch, {Name} masters included (see dm_cheats_init)
  static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
  static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                 // cheat files name it (dmnt matches the file name case-insensitively on disk)
-@@ -133,7 +152,10 @@
+@@ -133,7 +153,10 @@
  static char g_others[OTHER_MAX][17]; static int g_nothers;   // builds on disk that are not this game's build
  static char g_other_ver[OTHER_MAX][24];                      // their display versions, from their meta files ("" unknown)
  static char g_version[24];     // this build's display version (the profile's build rows, else the meta file), "" unknown
@@ -46,7 +47,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static char g_skip_name[SKIP_MAX][NAME_MAX], g_skip_why[SKIP_MAX][160]; static int g_nskip;   // the compiler's left-outs
  static char g_src[SRC_MAX][256]; static int g_nsrc;          // *.cheats.toml sources in the folder
  static char g_report[4096];    // the load report (dm_cheats_report)
-@@ -170,11 +192,13 @@
+@@ -170,11 +193,13 @@
  
  // Map main's image a second time, writable. Called once a cheat file is actually picked (at init that is before the
  // guest starts, so nothing protects or tracks these pages yet); the mapping stays for the process's lifetime, the
@@ -65,7 +66,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static void alias_setup(void) {
      module_t *m = g_main_mod;
      long pg = sysconf(_SC_PAGESIZE); if (pg <= 0) pg = 0x4000;   // 16 KB on Apple Silicon, a safe floor elsewhere
-@@ -184,14 +208,13 @@
+@@ -184,14 +209,13 @@
      kern_return_t kr = mach_vm_remap(mach_task_self(), &dst, size, 0, VM_FLAGS_ANYWHERE,
                                       mach_task_self(), (mach_vm_address_t)(uintptr_t)m->base, FALSE,
                                       &cur, &mx, VM_INHERIT_SHARE);
@@ -82,7 +83,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  
  // The cheats list, the toggles and one VM pass at a time
  static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-@@ -225,6 +248,7 @@
+@@ -225,6 +249,7 @@
      c->noted = 0;   // why now holds the kill reason, which note_settle must never erase as a stale failed-access note
      snprintf(c->why, sizeof c->why, " (off: %s)", msg);
      LOG("[RED] cheat \"%s\": %s, turning it off", c->name, msg);
@@ -90,8 +91,17 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // A memory access of a cheat failed (what: "read" / "write", at the guest address the VM computed; why: the page's state).
-@@ -587,7 +611,7 @@
+@@ -585,9 +610,16 @@
+         cheat_kill(c, "write at main+0x%llX is past the game's image (the host's key page and patch area)", (unsigned long long)off);
+         return -1;
      }
++    // The second patch area (patch_nso.py TWO) sits inside the image, so the key-page check above does not cover it: it is
++    // code the rewriter added, never game data, and a write there breaks a moved window instead of changing a value.
++    if (m->back_len && off < m->back_off + m->back_len && off + len > m->back_off) {
++        cheat_kill(c, "writes main+0x%llX, which is the rewriter's second patch area (main+0x%llX..+0x%llX): not game code",
++                   (unsigned long long)off, (unsigned long long)m->back_off, (unsigned long long)(m->back_off + m->back_len));
++        return -1;
++    }
      if (off < main_rx_end()) {   // the text, to its last page as the loader sealed it
          if (!g_alias) {
 -            cheat_kill(c, "%s", TARGET_OS_IPHONE ? "code writes are not possible on the iPhone (the app's signed code pages)" : "code write without the writable alias of main");
@@ -99,7 +109,37 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -1766,9 +1790,14 @@
+@@ -1114,7 +1146,7 @@
+     for (int i = 0; i < g_ncheat && !any; i++) {
+         const cheat_t *c = &g_cheat[i];
+         if (c->label || c->broken) continue;
+-        any = c->master ? !g_safe : c->on;
++        any = (c->master && !g_panel) ? !g_safe : c->on;
+     }
+     char p[1100]; flag_file(p, sizeof p, "running");
+     int want = any && atomic_load(&g_master);
+@@ -1235,7 +1267,7 @@
+     }
+     for (int k = 0; k < g_non; k++)
+         for (int i = 0; i < g_ncheat; i++)
+-            if (!g_cheat[i].master && !g_cheat[i].label && !strcasecmp(g_cheat[i].name, g_on[k])) g_cheat[i].on = 1;
++            if ((!g_cheat[i].master || g_panel) && !g_cheat[i].label && !strcasecmp(g_cheat[i].name, g_on[k])) g_cheat[i].on = 1;
+ }
+ 
+ // ---------- typed values the panel may set ("ask") ----------
+@@ -1459,7 +1491,10 @@
+             if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
+             snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
+             cur->master = end == '}';
+-            cur->on = cur->master;
++            // A {Name} entry is Atmosphère's always-on header. With the launcher panel driving (DM_CHEATS_PANEL) it is an
++            // ordinary switch instead: the phone has no menu to turn a master off, and a file whose master breaks the game
++            // would otherwise be unusable, with the reason invisible.
++            cur->on = cur->master && !g_panel;
+             char sec[NAME_MAX];
+             int mark = section_marker(cur->name, sec, sizeof sec);
+             if (mark == 1) snprintf(section, sizeof section, "%s", sec);
+@@ -1766,9 +1801,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -114,7 +154,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1814,7 @@
+@@ -1785,6 +1825,7 @@
              g_nothers++;
          }
      }
@@ -122,7 +162,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +1835,7 @@
+@@ -1805,8 +1846,7 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -132,7 +172,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,7 +1876,17 @@
+@@ -1847,8 +1887,19 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -148,9 +188,11 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
 +    // one when Play is pressed.
 +    if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
      atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
++    g_panel = getenv("DM_CHEATS_PANEL") && *getenv("DM_CHEATS_PANEL") && atoi(getenv("DM_CHEATS_PANEL"));
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
-@@ -1861,10 +1900,11 @@
+     if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);
+@@ -1861,10 +1912,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -163,7 +205,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +1917,42 @@
+@@ -1877,8 +1929,42 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
