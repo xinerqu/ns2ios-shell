@@ -29,6 +29,11 @@ struct CheatsSection: View {
 
     static let nl = String(UnicodeScalar(10))
 
+    /// The shell's own screens are English (nothing here has a localization table); this section is the one a player reads
+    /// before starting, so it speaks the phone's language. zh-Hans/zh-Hant both count as Chinese.
+    private static var isChinese: Bool { (Locale.preferredLanguages.first ?? "").hasPrefix("zh") }
+    private static func L(_ en: String, _ cn: String) -> String { isChinese ? cn : en }
+
     // [Name] and {Name} are both switches here: the panel is the only menu a phone has, and DM_CHEATS_PANEL makes the
     // host treat a {Name} master as an ordinary entry instead of always running it.
     private var names: [String] { Self.entryNames(text) }
@@ -50,11 +55,12 @@ struct CheatsSection: View {
     var body: some View {
         Section {
             if !crashed.isEmpty {
-                Text("The last run crashed with these on, so they are off now: \(crashed.joined(separator: ", ")). Switch one back on only if you want to try it again.")
+                Text(Self.L("The last run crashed with these on, so they are off now: \(crashed.joined(separator: ", ")). Switch one back on only if you want to try it again.",
+                             "上次开着这些时崩溃了，已自动关闭：\(crashed.joined(separator: "、"))。想再试请手动打开。"))
                     .font(.caption2).foregroundStyle(.orange)
             }
             if names.isEmpty && !expanded {
-                Text("Paste the codes below, then switch on the entries you want.")
+                Text(Self.L("Paste the codes below, then switch on the entries you want.", "把金手指文本粘贴到下面，然后打开你要的条目。"))
                     .font(.footnote).foregroundStyle(.secondary)
             }
             ForEach(names, id: \.self) { name in
@@ -63,19 +69,20 @@ struct CheatsSection: View {
                         .font(.callout)
                         .disabled(isCode(name) && !allowCode)
                     if isCode(name) {
-                        Text("Patches instructions — the iPhone crashes on these, so they start off. Turn on \"Allow code patches\" to try one.")
+                        Text(Self.L("Patches instructions — the iPhone crashes on these, so they start off. Turn on \"Allow code patches\" to try one.",
+                                    "改代码的条目 —— iPhone 上会崩，所以默认关闭。想试请先打开下面的「允许改代码」。"))
                             .font(.caption2).foregroundStyle(.orange)
                     } else if lastRun[name]?.measured == "data" {
-                        Text("Changes values — safe").font(.caption2).foregroundStyle(.secondary)
+                        Text(Self.L("Changes values — safe", "改数值 —— 安全")).font(.caption2).foregroundStyle(.secondary)
                     }
                     if let st = lastRun[name], st.state == "dead" || st.state == "unsupported" {
-                        Text(st.state == "dead" ? "Turned off on the last run: \(Self.reason(st.why))" : "Not supported: \(Self.reason(st.why))")
+                        Text(st.state == "dead" ? Self.L("Turned off on the last run: ", "上次被关闭：") + Self.reason(st.why) : Self.L("Not supported: ", "不支持：") + Self.reason(st.why))
                             .font(.caption2).foregroundStyle(.orange)
                     }
                 }
             }
             if !names.isEmpty {
-                Toggle("Allow code patches (they crash the game on the iPhone)", isOn: $allowCode)
+                Toggle(Self.L("Allow code patches (they crash the game on the iPhone)", "允许改代码（iPhone 上会崩，谨慎）"), isOn: $allowCode)
                     .font(.callout)
             }
             DisclosureGroup(isExpanded: $expanded) {
@@ -86,27 +93,32 @@ struct CheatsSection: View {
                     .autocorrectionDisabled()
                     .accessibilityLabel("Cheat codes")
             } label: {
-                Text(names.isEmpty ? "Paste cheat codes" : "Cheat codes (\(names.count) entries)")
+                Text(names.isEmpty ? Self.L("Paste cheat codes", "粘贴金手指") : Self.L("Cheat codes (\(names.count) entries)", "金手指（\(names.count) 条）"))
                     .font(.callout)
             }
         } header: {
-            Text("Cheats")
+            Text(Self.L("Cheats", "金手指"))
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 if let d = declared, !lastBuild.isEmpty, d != lastBuild {
-                    Text("These codes are for build \(d), this app has \(lastBuild). Addresses from another version can crash the game: paste the codes for this version.")
+                    Text(Self.L("These codes are for build \(d), this app has \(lastBuild). Addresses from another version can crash the game: paste the codes for this version.",
+                                "这份金手指是给 \(d) 写的，本机是 \(lastBuild)。别的版本的地址可能导致崩溃，请粘贴对应版本的金手指。"))
                         .foregroundStyle(.orange)
                 }
                 if !offLastRun.isEmpty {
-                    Text("Last run: \(offLastRun.count) of \(names.count) entries were turned off (the reason is under each one). Codes that rewrite an instruction the iOS rewriter replaced cannot work here; codes that change values do.")
+                    Text(Self.L("Last run: \(offLastRun.count) of \(names.count) entries were turned off (the reason is under each one). Codes that rewrite an instruction the iOS rewriter replaced cannot work here; codes that change values do.",
+                             "上次运行：\(names.count) 条里有 \(offLastRun.count) 条被关闭（原因写在各自下面）。改写器改过的地方改不了；改数值的条目可以正常工作。"))
                 }
-                Text("Atmosphère format. The addresses belong to the version this app carries (\(version)).")
+                Text(Self.L("Atmosphère format. The addresses belong to the version this app carries (\(version)).",
+                          "Atmosphère 格式。地址属于本 App 携带的版本（\(version)）。"))
             }.font(.caption2)
         }
         .onAppear {
-            loadArmed()            // a run died with these on: they are off from now, and why is on screen
-            loadLastRun()          // what the host made of the last run, for the notes under the switches
-            Self.applySaved()      // puts the saved text and switches in place, for a launch that goes straight to Play
+            loadArmed()                          // a run died with these on: they are off from now, and why is on screen
+            guessedCode = Self.codeSet(text)     // its own estimate first: it needs no run, and last-run.txt may not exist yet
+            loadLastRun()                        // what the host made of the last run; the measured column overrides the estimate
+            pruneCode()
+            Self.applySaved()                    // puts the saved text and switches in place, for a launch that goes straight to Play
         }
         .onChange(of: allowCode) { _, on in
             if !on { pruneCode() }   // the switch that allowed them is gone: so are they
@@ -117,10 +129,12 @@ struct CheatsSection: View {
 
     private func setText(_ v: String) {
         text = v
+        guessedCode = Self.codeSet(v)   // new text, new estimate: the badges and the kept switches follow it
         let live = Set(Self.entryNames(v))
         let kept = Set(names.filter { live.contains($0) && selected.contains($0) })
         if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: "\n") }
-        Self.apply(text: v, on: names.filter { kept.contains($0) }, log: false)
+        pruneCode()
+        Self.apply(text: v, on: names.filter { kept.contains($0) && (allowCode || !isCode($0)) }, log: false)
         fputs("launcher: cheats \(names.count) entries, \(kept.count) on\n", stderr)
     }
 
@@ -294,9 +308,10 @@ struct CheatsSection: View {
         guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         for line in s.split(whereSeparator: { $0.isNewline }) where line.hasPrefix("#") {
             let p = line.split(separator: "\t")
-            if p.count >= 2, p[0].contains("TEXT_END") {
-                return UInt64(p[1].trimmingCharacters(in: .whitespaces), radix: 16)
-            }
+            guard p.count >= 2, p[0].contains("TEXT_END") else { continue }
+            var v = p[1].trimmingCharacters(in: .whitespaces)
+            if v.hasPrefix("0x") || v.hasPrefix("0X") { v.removeFirst(2) }   // the table writes 0x2836550
+            return UInt64(v, radix: 16)
         }
         return nil
     }
