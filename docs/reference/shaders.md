@@ -468,10 +468,18 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 ### Metal compiler of a newer Xcode
 
 - **Symptom:** after an Xcode update the build stops with `[RED] this Mac's Metal compiler is not the one the shaders were tested with (dm/gfx/tools/dmsh_chain.lock): metal_macosx Apple metal version 32023.922 …`; `xcodebuild -downloadComponent MetalToolchain`, as the message said, downloads the same untested compiler again.
-- **Cause:** since Xcode 26 the Metal toolchain is a system asset that each Xcode downloads in its own build and `xcrun` takes for the selected Xcode (`xcodebuild -showComponent MetalToolchain` names it), whatever the macOS version: macOS 27.2 with Xcode 27.1 selected gives the tested 32023.921, with Xcode 27.2 selected 32023.922. The message named the Xcode to install but not that it must be the selected one, and README linked the App Store, which offers only the newest Xcode.
+- **Cause:** since Xcode 26 the Metal toolchain is a system asset that each Xcode downloads in its own build and `xcrun` takes for the selected Xcode (`xcodebuild -showComponent MetalToolchain` names it), whatever the macOS version. When #717 was reported, macOS 27.2 with Xcode 27.1 selected gave the then-pinned 32023.921, with Xcode 27.2 selected 32023.922. The message named the Xcode to install but not that it must be the selected one, and README linked the App Store, which offers only the newest Xcode.
 - **Fix:** the stop message names the selected Xcode and its folder, and says to install the tested Xcode from Apple's download page (beside a newer one as `Xcode-<version>.app`), select it (`xcode-select -s` or `DEVELOPER_DIR`), then download its Metal toolchain; README says the same. The lock stays at the one tested compiler: another one needs a regression run before it is recorded, and the lock is part of the chain version. Whether two installed toolchain assets each follow their own Xcode is inferred from `-showComponent`, not yet tried with both installed (**open**).
 - **Found on:** no game: [GitHub issue #717](https://github.com/seedds/nxnative/issues/717), on macOS 27.2 with Xcode 27.2 (Metal Toolchain 27B47).
 - **Check:** `test_own_compilers.py` (the selection step before the download), `test_ci_toolchain.py` (the message's and README's Xcode are CI's).
+
+### Idle MSBuild workers block regression measurements
+
+- **Symptom:** `regress.py` waits for other jobs to end while the only reported jobs are sleeping `MSBuild.dll /nodemode:1 /nodeReuse:true` workers using 0% CPU.
+- **Cause:** the busy-machine check treated every `dotnet` process as an active build. Reusable MSBuild workers can remain asleep after their build exits, and later builds can recreate them after a build-server shutdown.
+- **Fix:** exclude only sleeping, zero-CPU MSBuild reuse workers whose parent has exited. Active workers, I/O-blocked workers, workers still attached to a parent, and build commands remain busy jobs.
+- **Check:** `test_regress.py` supplies the process census that blocked the measurement, with active, I/O-blocked and parented controls.
+- **Found on:** no game: Xcode 27.2 toolchain validation on an M4 Pro.
 
 ### SPIRV-Cross parse failures
 
@@ -1025,6 +1033,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Found on:** [The Legend of Zelda: Echoes of Wisdom](../../dm/games/01008CF01BAAC000/README.md#rendering-and-shaders), update 1.1.0: a 308.4 ms frame, 283.5 ms of it pipeline acquisition and 5.9 ms GPU work; with the tables the offline prebuild built all 7,495 bases. [The Legend of Zelda: Breath of the Wild](../../dm/games/01007EF00011E000/README.md#pipelines-on-a-cold-start): frames of 100–546 ms before, none of its bases compiled on the first start after.
 - **Check:** `test_nsp_mac_app`: `App.test_pipeline_pair_tables`, `App.test_split_pso_pairs` and `App.test_layout` fail without the tables in the packer; `Script.test_pack_command` checks the split's copy is passed only when the profile has no `pso_pairs.tsv`.
 
+### Offline pipeline archive missing for the device GPU
+
+- **Symptom:** `pipeline archive bundled with the app: none for this GPU (...)`: the device builds the bases itself although the app carries an offline archive.
+- **Cause:** each archive targets one GPU architecture. The iOS packers defaulted to `g18p` for profiles with `pso_mtl4 on`; another GPU family needed an explicit build override.
+- **Fix:** both packers also read the optional profile key `pso_gpu` behind the existing `pso_mtl4 on` gate. It names the families to build for; explicit build overrides still win. Without the new key, opted-in profiles retain `g18p`; profiles with Metal 4 off retain no archive. See [archive target selection](../development.md#the-pipeline-archive-made-offline).
+- **Found on:** [Super Mario Bros. Wonder](../../dm/games/010015100B514000/README.md#offline-pipeline-archive-probe). Its note records the contributor's Mac build probe and the outstanding device checks.
+- **Check:** `dm/tools/tests/test_game_profile.py` validates the key; `dm/tools/tests/test_pso_offline.py` exercises both packers' selection and override precedence with synthetic profiles.
+
 ### Offline pipeline archive reuse and fallback
 
 - **Symptom:** a truncated `.mtl4a` reaches `MTL4ArchiveImpl::loadFromURL`; the bundle reports coverage with `0 of 0 probed bases found`; rebuilt shader libraries reuse an archive of their old binaries; or packing fails with `pso_offline: no base to build` when every eligible pair has function constants, or when the profile's `shader_pairs.tsv` holds only its header (`--platform mac-app`, [GitHub issue #338](https://github.com/seedds/nxnative/issues/338)).
@@ -1080,6 +1096,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Cause:** `dmsh_build.py`'s shader cache was keyed without the pairs.
 - **Fix:** the per-shader key covers the pairs, and a paired vertex shader's key also covers its pixel shaders' keys (`shader_key`, `pair_keyed`), so a change to a profile's pairs rebuilds what it affects ([Pixel shader inputs the vertex shader does not write](#pixel-shader-inputs-the-vertex-shader-does-not-write)).
 - **Found on:** [13 Sentinels: Aegis Rim](../../dm/games/01003FC01670C000/README.md).
+
+### Partial vertex builds missing paired pixel sources
+
+- **Symptom:** a full build reports successful shaders, but `metal-tt` rejects its pipeline archive with fragment inputs not written by the vertex shader. Fifteen cached vertices lacked default outputs in DRAGON QUEST I & II.
+- **Cause:** a partial build requested only its vertex keys. `vs_pad` skipped absent paired pixel MSL, then cached the incomplete vertex under a key that already included those pixel shaders' input digests. A later full build restored it before pixel-first finishing and never padded that cache hit again.
+- **Fix:** include available paired pixel shaders in partial build keys and output cleanup, then finish pixels before vertices. Do not publish a paired vertex cache entry while any paired pixel MSL is missing. The code fingerprint excludes the old incomplete cache entries; the Metal source cache still reuses unchanged complete libraries.
+- **Found on:** [DRAGON QUEST I & II HD-2D Remake](../../dm/games/0100D7C01F254000/README.md#found-on-this-game), while building its Mac pipeline archive.
+- **Check:** `test_shader_toolchain_cache.py` requests a vertex alone, exercises dependency cleanup and pixel-first finishing, and checks that padding survives publication and a later full-cache restore. A missing pixel source prevents publication.
 
 ### Target selection keeps the shader analysis files in the cache
 

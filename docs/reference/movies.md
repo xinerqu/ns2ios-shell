@@ -217,6 +217,13 @@ A decoder hands out as many outputs as it has slots, and while every slot is tak
 
 - Movie sound in [The Legend of Zelda: Link's Awakening](../../dm/games/01006BB00C6F0000/README.md) (SDK 8.2.0): the decoder is asked for type 5 (Vorbis) with output format 1 (PCM16); see the other entries in this file and `hle_movie.c`.
 
+### Vorbis sound stops for good after a Flush
+
+- **Symptom:** a movie with a Vorbis track plays its first seconds with sound; after the game flushes and restarts it (a seek, a loop, or the app losing and regaining focus) the picture goes on but the sound does not come back, for the rest of the movie. The log shows `[movie] Flush`, `Flush`, `Start`, `Start` and no more `GetOutputBuffer … → PCM` lines. With `DM_AUDIO_DUMP`, the game's mix is real audio up to the flush and exact zeros from then on, so the AudioUnit is not at fault (0 underruns).
+- **Cause:** `h_movie_Flush` called `stb_vorbis_flush_pushdata` on the Vorbis decoder, which puts it into its page search mode. The packets `md_vorbis` hands it afterwards (each wrapped as one whole Ogg page) gave no sample: in a test on a generated stream, none of the next 100 packets did, whether the stream went on or started again from its first packet.
+- **Fix:** a Flush closes the Vorbis decoder, and the next packet opens it again from the headers (`md_vorbis_open`), as at the start of a stream. `t_movie_vpx` builds a small Vorbis stream, flushes twice and checks that the same samples come again.
+- **Found on:** [Super Smash Bros. Ultimate](../../dm/games/01006A800016E000/README.md) (13.0.5, iPhone: the opening movie, after the app lost focus once. [#505](https://github.com/seedds/nxnative/issues/505) reported the same silence and was closed after a reinstall, with the app having been backgrounded once in the silent session).
+
 ## Movie players
 
 ### Unity's video planes and checking the movie path
