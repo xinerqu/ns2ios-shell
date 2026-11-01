@@ -24,7 +24,15 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  #if !TARGET_OS_IPHONE
  #include <mach/mach_vm.h>    // the alias mapping of main's pages (mach_vm_remap), below; the iPhone SDK has no mach_vm.h
  #include <mach/vm_prot.h>
-@@ -126,6 +142,10 @@
+@@ -109,6 +125,7 @@
+     uint8_t nd;                // meta never-decrease: the host keeps the highest value of (nd_region, nd_off), no program
+     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
+     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
++    uint8_t dbg_read;          // DM_CHEATS_DEBUG: its first code write has been read back once (see cheat_write)
+     uint8_t pair_off;          // the off (restore) half of an on / off pair
+     int pair;                  // the other half of an on / off pair, -1 none
+     int dup;                   // how many earlier entries carry the same name (its <build>.enabled key is "Name #dup+1")
+@@ -126,6 +143,10 @@
  
  static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
  static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
@@ -35,7 +43,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
  static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                 // cheat files name it (dmnt matches the file name case-insensitively on disk)
-@@ -133,7 +153,10 @@
+@@ -133,7 +154,10 @@
  static char g_others[OTHER_MAX][17]; static int g_nothers;   // builds on disk that are not this game's build
  static char g_other_ver[OTHER_MAX][24];                      // their display versions, from their meta files ("" unknown)
  static char g_version[24];     // this build's display version (the profile's build rows, else the meta file), "" unknown
@@ -47,7 +55,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static char g_skip_name[SKIP_MAX][NAME_MAX], g_skip_why[SKIP_MAX][160]; static int g_nskip;   // the compiler's left-outs
  static char g_src[SRC_MAX][256]; static int g_nsrc;          // *.cheats.toml sources in the folder
  static char g_report[4096];    // the load report (dm_cheats_report)
-@@ -170,11 +193,13 @@
+@@ -170,11 +194,13 @@
  
  // Map main's image a second time, writable. Called once a cheat file is actually picked (at init that is before the
  // guest starts, so nothing protects or tracks these pages yet); the mapping stays for the process's lifetime, the
@@ -66,7 +74,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static void alias_setup(void) {
      module_t *m = g_main_mod;
      long pg = sysconf(_SC_PAGESIZE); if (pg <= 0) pg = 0x4000;   // 16 KB on Apple Silicon, a safe floor elsewhere
-@@ -184,14 +209,13 @@
+@@ -184,14 +210,13 @@
      kern_return_t kr = mach_vm_remap(mach_task_self(), &dst, size, 0, VM_FLAGS_ANYWHERE,
                                       mach_task_self(), (mach_vm_address_t)(uintptr_t)m->base, FALSE,
                                       &cur, &mx, VM_INHERIT_SHARE);
@@ -83,7 +91,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  
  // The cheats list, the toggles and one VM pass at a time
  static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-@@ -225,6 +249,7 @@
+@@ -225,6 +250,7 @@
      c->noted = 0;   // why now holds the kill reason, which note_settle must never erase as a stale failed-access note
      snprintf(c->why, sizeof c->why, " (off: %s)", msg);
      LOG("[RED] cheat \"%s\": %s, turning it off", c->name, msg);
@@ -91,7 +99,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // A memory access of a cheat failed (what: "read" / "write", at the guest address the VM computed; why: the page's state).
-@@ -585,9 +610,16 @@
+@@ -585,9 +611,16 @@
          cheat_kill(c, "write at main+0x%llX is past the game's image (the host's key page and patch area)", (unsigned long long)off);
          return -1;
      }
@@ -109,7 +117,28 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -1003,6 +1035,10 @@
+@@ -680,6 +713,20 @@
+         case WH_HEAP: bad = dm_guest_heap_write(addr, &val, len) != 0; break;
+         case WH_MODULE: dm_guest_write_prepare((void *)(uintptr_t)addr, (size_t)len); memcpy((void *)(uintptr_t)addr, &val, len); break;
+         default: bad = guest_page_write(addr, &val, len) != 0; break;
++    }
++    // Once per cheat, the first code write is read back through the game's own mapping. A second mapping of main is only
++    // worth anything if the write lands in the same physical pages; a copy-on-write view would have every code cheat report
++    // success while the game keeps executing the old bytes.
++    if (atomic_load(&g_dbg) && !c->dbg_read && w.kind == WH_MAIN &&
++        (addr - (uint64_t)(uintptr_t)g_main_mod->base) < main_rx_end()) {
++        c->dbg_read = 1;
++        size_t n = len < 4 ? (size_t)len : 4;
++        uint32_t want = 0, back = 0;
++        memcpy(&want, &val, n);
++        memcpy(&back, (void *)(uintptr_t)addr, n);
++        LOG("cheat \"%s\": read back main+0x%llX = 0x%x (%s)", c->name,
++            (unsigned long long)(addr - (uint64_t)(uintptr_t)g_main_mod->base), back,
++            back == want ? "the game's mapping sees the write" : "THE GAME DOES NOT SEE IT: the alias is copy-on-write");
+     }
+     if (bad) cheat_fail(c, "write", addr, "page not mapped writable");
+ }
+@@ -1003,6 +1050,10 @@
      if (c->broken || c->dead || c->label) return 0;
      if ((half == 0) != (c->master != 0)) return 0;
      if (half == 0 && g_safe) return 0;
@@ -120,7 +149,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (half && !c->on) return 0;
      return 1;
  }
-@@ -1100,6 +1136,69 @@
+@@ -1100,6 +1151,69 @@
  }
  static void files_drain(void) { dispatch_sync(files_queue(), ^{}); }
  
@@ -190,7 +219,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  // The safe-mode flag: <dir>/.cheats-running-<title> exists while some cheat runs (a plain cheat on, or the masters while
  // not in safe mode, with the master switch on); a clean exit removes it (dm_cheats_exit), a crash leaves it for the next
  // launch. Not on iOS: an iOS app usually ends killed (swiped away, or while suspended), and the app has no cheats panel
-@@ -1114,7 +1213,7 @@
+@@ -1114,7 +1228,7 @@
      for (int i = 0; i < g_ncheat && !any; i++) {
          const cheat_t *c = &g_cheat[i];
          if (c->label || c->broken) continue;
@@ -199,7 +228,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      char p[1100]; flag_file(p, sizeof p, "running");
      int want = any && atomic_load(&g_master);
-@@ -1235,7 +1334,7 @@
+@@ -1235,7 +1349,7 @@
      }
      for (int k = 0; k < g_non; k++)
          for (int i = 0; i < g_ncheat; i++)
@@ -208,7 +237,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // ---------- typed values the panel may set ("ask") ----------
-@@ -1459,7 +1558,10 @@
+@@ -1459,7 +1573,10 @@
              if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
              snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
              cur->master = end == '}';
@@ -220,7 +249,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char sec[NAME_MAX];
              int mark = section_marker(cur->name, sec, sizeof sec);
              if (mark == 1) snprintf(section, sizeof section, "%s", sec);
-@@ -1766,9 +1868,14 @@
+@@ -1766,9 +1883,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -235,7 +264,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1892,7 @@
+@@ -1785,6 +1907,7 @@
              g_nothers++;
          }
      }
@@ -243,7 +272,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +1913,7 @@
+@@ -1805,8 +1928,7 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -253,7 +282,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,8 +1954,19 @@
+@@ -1847,8 +1969,19 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -273,7 +302,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
      if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);
-@@ -1861,10 +1979,11 @@
+@@ -1861,10 +1994,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -286,7 +315,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +1996,44 @@
+@@ -1877,8 +2011,44 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked

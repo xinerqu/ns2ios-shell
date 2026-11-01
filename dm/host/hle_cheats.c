@@ -125,6 +125,7 @@ typedef struct {
     uint8_t nd;                // meta never-decrease: the host keeps the highest value of (nd_region, nd_off), no program
     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
+    uint8_t dbg_read;          // DM_CHEATS_DEBUG: its first code write has been read back once (see cheat_write)
     uint8_t pair_off;          // the off (restore) half of an on / off pair
     int pair;                  // the other half of an on / off pair, -1 none
     int dup;                   // how many earlier entries carry the same name (its <build>.enabled key is "Name #dup+1")
@@ -712,6 +713,20 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
         case WH_HEAP: bad = dm_guest_heap_write(addr, &val, len) != 0; break;
         case WH_MODULE: dm_guest_write_prepare((void *)(uintptr_t)addr, (size_t)len); memcpy((void *)(uintptr_t)addr, &val, len); break;
         default: bad = guest_page_write(addr, &val, len) != 0; break;
+    }
+    // Once per cheat, the first code write is read back through the game's own mapping. A second mapping of main is only
+    // worth anything if the write lands in the same physical pages; a copy-on-write view would have every code cheat report
+    // success while the game keeps executing the old bytes.
+    if (atomic_load(&g_dbg) && !c->dbg_read && w.kind == WH_MAIN &&
+        (addr - (uint64_t)(uintptr_t)g_main_mod->base) < main_rx_end()) {
+        c->dbg_read = 1;
+        size_t n = len < 4 ? (size_t)len : 4;
+        uint32_t want = 0, back = 0;
+        memcpy(&want, &val, n);
+        memcpy(&back, (void *)(uintptr_t)addr, n);
+        LOG("cheat \"%s\": read back main+0x%llX = 0x%x (%s)", c->name,
+            (unsigned long long)(addr - (uint64_t)(uintptr_t)g_main_mod->base), back,
+            back == want ? "the game's mapping sees the write" : "THE GAME DOES NOT SEE IT: the alias is copy-on-write");
     }
     if (bad) cheat_fail(c, "write", addr, "page not mapped writable");
 }
