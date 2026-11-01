@@ -80,6 +80,28 @@ on the phone.
 - `--clean <game folder>` clears out what an earlier run left
 - a cartridge dump (`.xci`) gets a `<file>.xci.tid` next to it on the first pack, so the next one does not unpack it again
 
+## Cheats (Atmosphère format)
+
+The launcher has a Cheats section; nothing extra to install:
+
+1. **Get a cheat file**: the usual Atmosphère `.txt` — entries start with `[Name]` and carry lines like `040A0000 address value`.
+2. **Paste** it into launcher → Cheats → "Paste cheat codes".
+3. **Switch on the entries you want.** The switches are remembered; clearing the text deletes the file from the phone too.
+4. **Press Play.** The panel writes `Documents/cheats/cheats.txt` and hands the switched-on names to the game.
+
+**Two kinds of entry, and the panel marks which is which:**
+
+| Mark | Meaning | On the iPhone |
+|---|---|---|
+| Changes values — safe | follows a pointer and changes a number in a game object (moon jump, infinite echoes) | works |
+| Patches instructions | rewrites an instruction of the game's program | **crashes on device**, so it starts off |
+
+To try an instruction patch, turn on **Allow code patches** at the bottom of the section and switch on one entry.
+
+**Two protections:** a run that dies within 30 s of starting with a set of entries on turns those entries off next launch, with the reason under each one (one crash costs one launch); and addresses the rewriter itself changed are refused outright — those words are what makes the game run on iOS at all.
+
+**Versions must match:** the addresses belong to one version of the game. The panel compares the `BID:` in the pasted text with this build and says so in the footer when they differ.
+
 ## Requirements
 
 On the **packing machine**:
