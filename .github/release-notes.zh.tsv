@@ -98,3 +98,6 @@ Fix the cheats panel's onAppear: the rename to applySaved left two stale calls	�
 Base to d138ee87: the BC device check moves to Play, so main.m keeps only the memory line	基座推进到 `d138ee87`：上游把 BC 设备检查从 `main.m` 挪到 Play，冲突处取上游、保留我们的内存上限打印。
 Declare the mach_vm traps on the iPhone: its SDK drops the header, not the calls	在 iPhone 上自己声明 `mach_vm_*` 原型：iOS SDK 把 `mach_vm.h` 做成空壳，但 trap 还在，按 macOS ABI 声明即可编译链接。
 Release notes: the table's rows for this release	补齐这一版的全部中文说明（23 条提交 0 条缺翻译），并修掉一行里混入的制表符——TSV 变成 4 列会让发布卡在检查上。@NL@金手指的用法、两类标注和保护机制见 README 的「金手指」章节；**改代码的条目实测会崩**，欢迎大家到 issue #7 反馈你们的测试结果。
+The packer is now one exe: download ns2ios-packer.exe and pack in a few clicks	一个新文件就够了：`ns2ios-packer.exe`，每个 release 的第 5 个资产。壳、五个可执行文件、打包器全由它从同一个 release 里取，不用再下源码包、不用再下工具包，也不用自己保持两边同步。@NL@窗口一打开就查最新 release，缺什么就下到 `ns2ios-packer-data\versions\<tag>\`；自动找到你的 Python，装一次依赖，然后把参数做成带说明的勾选项，点几下就能打包。@NL@不往系统里装任何东西：不写注册表、不改 PATH。删掉那一个文件夹就等于没装过，不想留的旧版本可以单独删。@NL@打包本身需要 Python 3.9+——exe 只是它的窗口。那一行一般能自动找到，找不到就手动指一次，之后就记住了。@NL@命令行一点没变：窗口只是替 `scripts/nxn_pack.py` 拼参数，脚本照旧在源码包里，用法和以前完全一样。@NL@窗口支持中英文，一个按钮切换。
+Release pages: one language at a time, and a heading that says what's new	发布页改成一种语言说完再换另一种，标题也直说「本版更新」
+Release pages list what changed instead of printing every commit body	发布页只列改了什么，不再把每条提交的正文照搬上去
