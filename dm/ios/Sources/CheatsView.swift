@@ -21,6 +21,7 @@ struct CheatsSection: View {
     @State private var expanded = false
     @State private var lastRun: [String: RunState] = [:]
     @State private var lastBuild: String = ""
+    @State private var crashed: [String] = []   // the entries the previous run died with (its armed file), off this launch
 
     struct RunState { let state: String; let why: String }
 
@@ -36,6 +37,10 @@ struct CheatsSection: View {
 
     var body: some View {
         Section {
+            if !crashed.isEmpty {
+                Text("The last run crashed with these on, so they are off now: \(crashed.joined(separator: ", ")). Switch one back on only if you want to try it again.")
+                    .font(.caption2).foregroundStyle(.orange)
+            }
             if names.isEmpty && !expanded {
                 Text("Paste the codes below, then switch on the entries you want.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -76,6 +81,7 @@ struct CheatsSection: View {
             }.font(.caption2)
         }
         .onAppear {
+            loadArmed()            // a run died with these on: they are off from now, and why is on screen
             loadLastRun()          // what the host made of the last run, for the notes under the switches
             Self.applySaved()      // puts the saved text and switches in place, for a launch that goes straight to Play
         }
@@ -138,6 +144,33 @@ struct CheatsSection: View {
             fputs("launcher: cheats written to \(f.path) (\(v.count) characters)\n", stderr)
         } catch {
             fputs("[RED] launcher: cannot write \(f.path): \(error.localizedDescription)\n", stderr)
+        }
+    }
+
+    /// The host arms a file while a set of entries is on and removes it once the run has lasted long enough (hle_cheats.c
+    /// armed_write). Finding it here means the previous run died with those entries on, and this screen is the first thing
+    /// that runs in this one: it turns them off and says so, instead of leaving the panel showing switches the game will not
+    /// honour until the launch after next.
+    private func loadArmed() {
+        guard let items = try? FileManager.default.contentsOfDirectory(at: Self.dir, includingPropertiesForKeys: nil) else { return }
+        for f in items where f.lastPathComponent.hasPrefix(".cheats-armed-") {
+            guard let s = try? String(contentsOf: f, encoding: .utf8) else { continue }
+            var names: [String] = []
+            for (i, line) in s.split(whereSeparator: { $0.isNewline }).enumerated() where i > 0 {   // line 0 is the build
+                let n = String(line).trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { names.append(n) }
+            }
+            guard !names.isEmpty else { continue }
+            crashed = names
+            let live = Set(names)
+            let kept = selected.subtracting(live)
+            if kept != selected {
+                onNames = self.names.filter { kept.contains($0) }.joined(separator: "\n")
+                fputs("launcher: cheats \(selected.count - kept.count) entries turned off (the last run died with them on)\n", stderr)
+            }
+            // Consumed here, so the host does not turn them off again at Play: after this banner the player may switch one
+            // back on to try it, and that has to be the last word.
+            try? FileManager.default.removeItem(at: f)
         }
     }
 
