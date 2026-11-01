@@ -24,15 +24,17 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  #if !TARGET_OS_IPHONE
  #include <mach/mach_vm.h>    // the alias mapping of main's pages (mach_vm_remap), below; the iPhone SDK has no mach_vm.h
  #include <mach/vm_prot.h>
-@@ -126,6 +142,7 @@
+@@ -126,6 +142,9 @@
  
  static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
  static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
 +static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
++static void save_last_run(void);   // what this load made of every entry, for the launcher (defined below dm_cheats_init)
++static int g_loaded;               // a load has finished: before that a kill is a parse problem, not a state the launcher wants
  static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
  static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                 // cheat files name it (dmnt matches the file name case-insensitively on disk)
-@@ -133,7 +150,10 @@
+@@ -133,7 +152,10 @@
  static char g_others[OTHER_MAX][17]; static int g_nothers;   // builds on disk that are not this game's build
  static char g_other_ver[OTHER_MAX][24];                      // their display versions, from their meta files ("" unknown)
  static char g_version[24];     // this build's display version (the profile's build rows, else the meta file), "" unknown
@@ -44,7 +46,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static char g_skip_name[SKIP_MAX][NAME_MAX], g_skip_why[SKIP_MAX][160]; static int g_nskip;   // the compiler's left-outs
  static char g_src[SRC_MAX][256]; static int g_nsrc;          // *.cheats.toml sources in the folder
  static char g_report[4096];    // the load report (dm_cheats_report)
-@@ -170,11 +190,13 @@
+@@ -170,11 +192,13 @@
  
  // Map main's image a second time, writable. Called once a cheat file is actually picked (at init that is before the
  // guest starts, so nothing protects or tracks these pages yet); the mapping stays for the process's lifetime, the
@@ -63,7 +65,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  static void alias_setup(void) {
      module_t *m = g_main_mod;
      long pg = sysconf(_SC_PAGESIZE); if (pg <= 0) pg = 0x4000;   // 16 KB on Apple Silicon, a safe floor elsewhere
-@@ -184,14 +206,13 @@
+@@ -184,14 +208,13 @@
      kern_return_t kr = mach_vm_remap(mach_task_self(), &dst, size, 0, VM_FLAGS_ANYWHERE,
                                       mach_task_self(), (mach_vm_address_t)(uintptr_t)m->base, FALSE,
                                       &cur, &mx, VM_INHERIT_SHARE);
@@ -80,7 +82,15 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  
  // The cheats list, the toggles and one VM pass at a time
  static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-@@ -587,7 +608,7 @@
+@@ -225,6 +248,7 @@
+     c->noted = 0;   // why now holds the kill reason, which note_settle must never erase as a stale failed-access note
+     snprintf(c->why, sizeof c->why, " (off: %s)", msg);
+     LOG("[RED] cheat \"%s\": %s, turning it off", c->name, msg);
++    if (g_loaded) save_last_run();   // the launcher shows this reason the next time it opens (save_last_run is a no-op before the first load finishes)
+ }
+ 
+ // A memory access of a cheat failed (what: "read" / "write", at the guest address the VM computed; why: the page's state).
+@@ -587,7 +611,7 @@
      }
      if (off < main_rx_end()) {   // the text, to its last page as the loader sealed it
          if (!g_alias) {
@@ -89,7 +99,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -1766,9 +1787,14 @@
+@@ -1766,9 +1790,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -104,7 +114,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1811,7 @@
+@@ -1785,6 +1814,7 @@
              g_nothers++;
          }
      }
@@ -112,7 +122,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +1832,7 @@
+@@ -1805,8 +1835,7 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -122,7 +132,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,7 +1873,17 @@
+@@ -1847,7 +1876,17 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -140,7 +150,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
-@@ -1861,10 +1897,11 @@
+@@ -1861,10 +1900,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -153,12 +163,14 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +1914,15 @@
+@@ -1877,8 +1917,42 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
 -        atexit(dm_cheats_exit);   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
 -    }
++        g_loaded = 1;
++        save_last_run();   // for the launcher's next open: the phone has no cheats menu to show this in
 +        if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
 +    }
 +}
@@ -168,6 +180,31 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
 +void dm_cheats_after_launcher(void) {
 +    g_after_launcher = 1;
 +    dm_cheats_init();
++}
++
++// What this load made of every entry, for the launcher to show the next time it opens: the phone has no cheats menu, so
++// "this one was turned off and why" would otherwise exist only in the log. One line per entry, "state<TAB>name<TAB>why",
++// under a header naming this build (the launcher compares it with the BID the pasted text claims).
++// states: on / off (what the switches said), master ({Name}: always on, not toggleable), unsupported (broken opcode or
++// malformed), dead (its program failed at run time), refused (a code write the host would not make).
++static void save_last_run(void) {
++    if (!g_dir[0] || !g_ncheat) return;
++    char p[1400]; snprintf(p, sizeof p, "%s/last-run.txt", g_dir);
++    FILE *f = fopen(p, "w");
++    if (!f) { LOG("[RED] cheats: cannot write %s (errno %d): the launcher will show no last-run states", p, errno); return; }
++    fprintf(f, "# build %s%s%s\n", g_build, g_version[0] ? " " : "", g_version);
++    for (int i = 0; i < g_ncheat; i++) {
++        const cheat_t *c = &g_cheat[i];
++        if (c->label) continue;
++        const char *st = c->master ? "master" : c->broken ? "unsupported" : c->dead ? "dead" : c->on ? "on" : "off";
++        // why holds the reason with the menu's leading " (…)" and trailing ")"; the launcher wants the sentence alone
++        const char *why = c->why;
++        while (*why == ' ') why++;
++        if (*why == '(') why++;
++        size_t L = strlen(why);
++        fprintf(f, "%s\t%s\t%.*s\n", st, c->name, (int)(L && why[L - 1] == ')' ? L - 1 : L), why);
++    }
++    fclose(f);
  }
  
  // A clean exit: no cheat runs any more, so the safe-mode flag goes (atexit, and dm_host_exit before its _exit)

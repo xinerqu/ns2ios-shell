@@ -143,6 +143,8 @@ typedef struct {
 static cheat_t g_cheat[CHEAT_MAX]; static int g_ncheat;
 static char g_dir[1024];       // cheats folder (DM_CHEATS or <DM_ROOT>/cheats), "" when neither is set
 static int g_after_launcher;    // set by dm_cheats_after_launcher: the deferred call is under way (see dm_cheats_init)
+static void save_last_run(void);   // what this load made of every entry, for the launcher (defined below dm_cheats_init)
+static int g_loaded;               // a load has finished: before that a kill is a parse problem, not a state the launcher wants
 static char g_path[2048];      // the loaded file (logged; "Reload cheats" re-reads exactly this path)
 static char g_build[17];       // the loaded file's build ID: main's build ID cut to 16 hex digits, upper case as the
                                // cheat files name it (dmnt matches the file name case-insensitively on disk)
@@ -246,6 +248,7 @@ static void cheat_kill(cheat_t *c, const char *fmt, ...) {
     c->noted = 0;   // why now holds the kill reason, which note_settle must never erase as a stale failed-access note
     snprintf(c->why, sizeof c->why, " (off: %s)", msg);
     LOG("[RED] cheat \"%s\": %s, turning it off", c->name, msg);
+    if (g_loaded) save_last_run();   // the launcher shows this reason the next time it opens (save_last_run is a no-op before the first load finishes)
 }
 
 // A memory access of a cheat failed (what: "read" / "write", at the guest address the VM computed; why: the page's state).
@@ -1914,6 +1917,8 @@ void dm_cheats_init(void) {
         for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
         folder_flags();
         if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
+        g_loaded = 1;
+        save_last_run();   // for the launcher's next open: the phone has no cheats menu to show this in
         if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
     }
 }
@@ -1923,6 +1928,31 @@ void dm_cheats_init(void) {
 void dm_cheats_after_launcher(void) {
     g_after_launcher = 1;
     dm_cheats_init();
+}
+
+// What this load made of every entry, for the launcher to show the next time it opens: the phone has no cheats menu, so
+// "this one was turned off and why" would otherwise exist only in the log. One line per entry, "state<TAB>name<TAB>why",
+// under a header naming this build (the launcher compares it with the BID the pasted text claims).
+// states: on / off (what the switches said), master ({Name}: always on, not toggleable), unsupported (broken opcode or
+// malformed), dead (its program failed at run time), refused (a code write the host would not make).
+static void save_last_run(void) {
+    if (!g_dir[0] || !g_ncheat) return;
+    char p[1400]; snprintf(p, sizeof p, "%s/last-run.txt", g_dir);
+    FILE *f = fopen(p, "w");
+    if (!f) { LOG("[RED] cheats: cannot write %s (errno %d): the launcher will show no last-run states", p, errno); return; }
+    fprintf(f, "# build %s%s%s\n", g_build, g_version[0] ? " " : "", g_version);
+    for (int i = 0; i < g_ncheat; i++) {
+        const cheat_t *c = &g_cheat[i];
+        if (c->label) continue;
+        const char *st = c->master ? "master" : c->broken ? "unsupported" : c->dead ? "dead" : c->on ? "on" : "off";
+        // why holds the reason with the menu's leading " (…)" and trailing ")"; the launcher wants the sentence alone
+        const char *why = c->why;
+        while (*why == ' ') why++;
+        if (*why == '(') why++;
+        size_t L = strlen(why);
+        fprintf(f, "%s\t%s\t%.*s\n", st, c->name, (int)(L && why[L - 1] == ')' ? L - 1 : L), why);
+    }
+    fclose(f);
 }
 
 // A clean exit: no cheat runs any more, so the safe-mode flag goes (atexit, and dm_host_exit before its _exit)
