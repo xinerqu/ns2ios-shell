@@ -1,7 +1,8 @@
 diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
+index 81981ad..31e97ef 100644
 --- a/dm/gfx/tools/shader_split.py
 +++ b/dm/gfx/tools/shader_split.py
-@@ -86,12 +86,20 @@
+@@ -90,12 +90,20 @@ def span(d, at, n, where):
      if not (0 <= at and 0 <= n <= len(d) - at): red(f'{where}: {n:#x} bytes at {at:#x} lie outside the {len(d):#x} bytes there are')
      return d[at:at + n]
  
@@ -24,8 +25,8 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
 +    if zstd is None: red(f'Python {sys.version_info[0]}.{sys.version_info[1]} has no compression.zstd (3.14+): pip install backports.zstd')
      return zstd
  
- def ctl_len(ctl):
-@@ -1949,11 +1957,17 @@
+ NVN2_KEY_CTL = 0x48
+@@ -2133,11 +2141,17 @@ def unzs_dict(d, did, where):
      return zstd.decompress(d, zstd_dict=_ZD[did])
  
  def unzs(path):
@@ -46,7 +47,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return unzs_dict(d, did, path)
  
  def frame_size(f):
-@@ -2369,7 +2383,10 @@
+@@ -2651,7 +2665,10 @@ def main():
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''
