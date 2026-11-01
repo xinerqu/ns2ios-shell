@@ -1191,7 +1191,9 @@ void front_run(void (*guest)(void)) {
         g_layer.device = MTLCreateSystemDefaultDevice();
         g_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         g_layer.contentsScale = win.backingScaleFactor;
-        if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) { g_layer.developerHUDProperties = @{@"mode": @"default"}; LOG("front end: Metal performance HUD on (DM_METAL_HUD)"); }   // Apple's HUD over the game: frame rate, frame and GPU time, memory
+        // Apple's HUD over the game (frame rate, frame and GPU time, memory): front_hud_env turns it on before the first device. The layer's developerHUDProperties
+        // stay unset: mode=default forces this layer's HUD on, so the Metal HUD menu's Hide HUD left it on screen
+        if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) LOG("front end: Metal performance HUD on (DM_METAL_HUD)");
         v.layer = g_layer; [(DmGameView *)v fitDrawable];
         [win center];
         [win makeKeyAndOrderFront:nil];
