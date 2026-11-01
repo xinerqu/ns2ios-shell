@@ -109,7 +109,77 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -1114,7 +1146,7 @@
+@@ -1100,6 +1132,69 @@
+ }
+ static void files_drain(void) { dispatch_sync(files_queue(), ^{}); }
+ 
++// iOS: which cheats were on when a run died. Upstream's safe mode cannot be used here -- its test is "the last run ended
++// without a clean exit", and on a phone every swiped-away app ends that way, so it would turn everything off after an
++// ordinary session. Time separates the two: a run that dies within CHEAT_ARMED_SECONDS of starting with a set of cheats on
++// is the run to blame. The armed file holds this build and the names that were on; it is deleted when that window passes,
++// so a swipe after a normal session leaves nothing behind.
++#define CHEAT_ARMED_SECONDS 30
++static void armed_write(void) {
++    if (!g_dir[0] || !g_build[0]) return;
++    char p[1100]; flag_file(p, sizeof p, "armed");
++    char *path = strdup(p), *text = malloc((size_t)g_ncheat * (NAME_MAX + 2) + 64);
++    if (!path || !text) { free(path); free(text); return; }
++    size_t o = 0; o += (size_t)snprintf(text + o, (size_t)g_ncheat * (NAME_MAX + 2) + 64 - o, "%s\n", g_build);
++    int any = 0;
++    for (int i = 0; i < g_ncheat; i++) {
++        const cheat_t *c = &g_cheat[i];
++        if (c->label || c->broken || !c->on) continue;
++        any = 1; o += (size_t)snprintf(text + o, (size_t)g_ncheat * (NAME_MAX + 2) + 64 - o, "%s\n", c->name);
++    }
++    if (!any) { free(text); free(path); return; }
++    dispatch_async(files_queue(), ^{
++        if (!atomic_load(&g_exiting)) { FILE *f = fopen(path, "w"); if (f) { fputs(text, f); fclose(f); } }
++        free(text); free(path);
++    });
++    // the window passes: this run was not a crash, so the next launch must not blame these names.
++    // (A block captures its variables by value, and a stack array cannot be captured, so the path is owned by the block.)
++    char *disarm = strdup(p);
++    if (disarm) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)CHEAT_ARMED_SECONDS * NSEC_PER_SEC), files_queue(), ^{
++        unlink(disarm);
++        free(disarm);
++    });
++}
++
++// The previous run died inside the armed window: every name it had on starts off, with the reason the panel shows.
++// The file is removed here, so one crash costs one launch and not every launch after it.
++static void armed_apply(void) {
++    if (!g_dir[0]) return;
++    char p[1100]; flag_file(p, sizeof p, "armed");
++    FILE *f = fopen(p, "r");
++    if (!f) return;
++    char line[NAME_MAX + 8]; int first = 1, n = 0;
++    while (fgets(line, sizeof line, f)) {
++        size_t L = strlen(line); while (L && (line[L - 1] == '\n' || line[L - 1] == '\r')) line[--L] = 0;
++        if (!L) continue;
++        if (first) {   // another build's window says nothing about these addresses
++            first = 0;
++            if (strcmp(line, g_build)) { fclose(f); unlink(p); return; }
++            continue;
++        }
++        for (int i = 0; i < g_ncheat; i++) {
++            cheat_t *c = &g_cheat[i];
++            if (c->label || c->broken || strcmp(c->name, line)) continue;
++            if (!c->on) continue;
++            c->on = 0; c->dead = 1; c->noted = 0;
++            snprintf(c->why, sizeof c->why, " (off: the last run crashed within %d s of starting with it on)", CHEAT_ARMED_SECONDS);
++            LOG("[RED] cheats: \"%s\" is off: the last run crashed within %d s of starting with it on", c->name, CHEAT_ARMED_SECONDS);
++            n++;
++        }
++    }
++    fclose(f);
++    unlink(p);
++    if (n) LOG("cheats: %d entr%s switched off after the crash of the last run: turn them back on in the launcher when you want to try again", n, n == 1 ? "y was" : "ies were");
++}
++
+ // The safe-mode flag: <dir>/.cheats-running-<title> exists while some cheat runs (a plain cheat on, or the masters while
+ // not in safe mode, with the master switch on); a clean exit removes it (dm_cheats_exit), a crash leaves it for the next
+ // launch. Not on iOS: an iOS app usually ends killed (swiped away, or while suspended), and the app has no cheats panel
+@@ -1114,7 +1209,7 @@
      for (int i = 0; i < g_ncheat && !any; i++) {
          const cheat_t *c = &g_cheat[i];
          if (c->label || c->broken) continue;
@@ -118,7 +188,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      char p[1100]; flag_file(p, sizeof p, "running");
      int want = any && atomic_load(&g_master);
-@@ -1235,7 +1267,7 @@
+@@ -1235,7 +1330,7 @@
      }
      for (int k = 0; k < g_non; k++)
          for (int i = 0; i < g_ncheat; i++)
@@ -127,7 +197,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // ---------- typed values the panel may set ("ask") ----------
-@@ -1459,7 +1491,10 @@
+@@ -1459,7 +1554,10 @@
              if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
              snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
              cur->master = end == '}';
@@ -139,7 +209,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char sec[NAME_MAX];
              int mark = section_marker(cur->name, sec, sizeof sec);
              if (mark == 1) snprintf(section, sizeof section, "%s", sec);
-@@ -1766,9 +1801,14 @@
+@@ -1766,9 +1864,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -154,7 +224,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1825,7 @@
+@@ -1785,6 +1888,7 @@
              g_nothers++;
          }
      }
@@ -162,7 +232,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +1846,7 @@
+@@ -1805,8 +1909,7 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -172,7 +242,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,8 +1887,19 @@
+@@ -1847,8 +1950,19 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -192,7 +262,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
      if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);
-@@ -1861,10 +1912,11 @@
+@@ -1861,10 +1975,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -205,14 +275,16 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +1929,42 @@
+@@ -1877,8 +1992,44 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
 -        atexit(dm_cheats_exit);   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
 -    }
 +        g_loaded = 1;
++        armed_apply();     // the last run died inside the armed window: those entries start off (see above)
 +        save_last_run();   // for the launcher's next open: the phone has no cheats menu to show this in
++        armed_write();     // ... and this run arms itself, cleared once it has lasted CHEAT_ARMED_SECONDS
 +        if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
 +    }
 +}

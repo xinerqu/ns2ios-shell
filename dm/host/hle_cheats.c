@@ -1132,6 +1132,69 @@ static dispatch_queue_t files_queue(void) {
 }
 static void files_drain(void) { dispatch_sync(files_queue(), ^{}); }
 
+// iOS: which cheats were on when a run died. Upstream's safe mode cannot be used here -- its test is "the last run ended
+// without a clean exit", and on a phone every swiped-away app ends that way, so it would turn everything off after an
+// ordinary session. Time separates the two: a run that dies within CHEAT_ARMED_SECONDS of starting with a set of cheats on
+// is the run to blame. The armed file holds this build and the names that were on; it is deleted when that window passes,
+// so a swipe after a normal session leaves nothing behind.
+#define CHEAT_ARMED_SECONDS 30
+static void armed_write(void) {
+    if (!g_dir[0] || !g_build[0]) return;
+    char p[1100]; flag_file(p, sizeof p, "armed");
+    char *path = strdup(p), *text = malloc((size_t)g_ncheat * (NAME_MAX + 2) + 64);
+    if (!path || !text) { free(path); free(text); return; }
+    size_t o = 0; o += (size_t)snprintf(text + o, (size_t)g_ncheat * (NAME_MAX + 2) + 64 - o, "%s\n", g_build);
+    int any = 0;
+    for (int i = 0; i < g_ncheat; i++) {
+        const cheat_t *c = &g_cheat[i];
+        if (c->label || c->broken || !c->on) continue;
+        any = 1; o += (size_t)snprintf(text + o, (size_t)g_ncheat * (NAME_MAX + 2) + 64 - o, "%s\n", c->name);
+    }
+    if (!any) { free(text); free(path); return; }
+    dispatch_async(files_queue(), ^{
+        if (!atomic_load(&g_exiting)) { FILE *f = fopen(path, "w"); if (f) { fputs(text, f); fclose(f); } }
+        free(text); free(path);
+    });
+    // the window passes: this run was not a crash, so the next launch must not blame these names.
+    // (A block captures its variables by value, and a stack array cannot be captured, so the path is owned by the block.)
+    char *disarm = strdup(p);
+    if (disarm) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)CHEAT_ARMED_SECONDS * NSEC_PER_SEC), files_queue(), ^{
+        unlink(disarm);
+        free(disarm);
+    });
+}
+
+// The previous run died inside the armed window: every name it had on starts off, with the reason the panel shows.
+// The file is removed here, so one crash costs one launch and not every launch after it.
+static void armed_apply(void) {
+    if (!g_dir[0]) return;
+    char p[1100]; flag_file(p, sizeof p, "armed");
+    FILE *f = fopen(p, "r");
+    if (!f) return;
+    char line[NAME_MAX + 8]; int first = 1, n = 0;
+    while (fgets(line, sizeof line, f)) {
+        size_t L = strlen(line); while (L && (line[L - 1] == '\n' || line[L - 1] == '\r')) line[--L] = 0;
+        if (!L) continue;
+        if (first) {   // another build's window says nothing about these addresses
+            first = 0;
+            if (strcmp(line, g_build)) { fclose(f); unlink(p); return; }
+            continue;
+        }
+        for (int i = 0; i < g_ncheat; i++) {
+            cheat_t *c = &g_cheat[i];
+            if (c->label || c->broken || strcmp(c->name, line)) continue;
+            if (!c->on) continue;
+            c->on = 0; c->dead = 1; c->noted = 0;
+            snprintf(c->why, sizeof c->why, " (off: the last run crashed within %d s of starting with it on)", CHEAT_ARMED_SECONDS);
+            LOG("[RED] cheats: \"%s\" is off: the last run crashed within %d s of starting with it on", c->name, CHEAT_ARMED_SECONDS);
+            n++;
+        }
+    }
+    fclose(f);
+    unlink(p);
+    if (n) LOG("cheats: %d entr%s switched off after the crash of the last run: turn them back on in the launcher when you want to try again", n, n == 1 ? "y was" : "ies were");
+}
+
 // The safe-mode flag: <dir>/.cheats-running-<title> exists while some cheat runs (a plain cheat on, or the masters while
 // not in safe mode, with the master switch on); a clean exit removes it (dm_cheats_exit), a crash leaves it for the next
 // launch. Not on iOS: an iOS app usually ends killed (swiped away, or while suspended), and the app has no cheats panel
@@ -1930,7 +1993,9 @@ void dm_cheats_init(void) {
         folder_flags();
         if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
         g_loaded = 1;
+        armed_apply();     // the last run died inside the armed window: those entries start off (see above)
         save_last_run();   // for the launcher's next open: the phone has no cheats menu to show this in
+        armed_write();     // ... and this run arms itself, cleared once it has lasted CHEAT_ARMED_SECONDS
         if (!exit_registered) { exit_registered = 1; atexit(dm_cheats_exit); }   // exit() paths (⌘Q, closing the window); dm_host_exit's _exit calls it itself
     }
 }
