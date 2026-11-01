@@ -81,9 +81,8 @@ struct CheatsSection: View {
             }.font(.caption2)
         }
         .onAppear {
-            if !text.isEmpty { write(text) }
-            applyEnv(log: false)
-            loadLastRun()
+            loadLastRun()          // what the host made of the last run, for the notes under the switches
+            Self.applySaved()      // puts the saved text and switches in place, for a launch that goes straight to Play
         }
     }
 
