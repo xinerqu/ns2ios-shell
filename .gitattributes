@@ -1,0 +1,2 @@
+# The packer is a compiled binary: never let a checkout rewrite its line endings, and never diff it as text.
+packer/*.exe binary

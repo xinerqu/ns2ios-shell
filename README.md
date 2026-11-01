@@ -19,55 +19,38 @@ repository or CI.
 
 ## Quick start (Windows)
 
-**You need four things:**
+**Download one file: `ns2ios-packer.exe`** — the fifth asset of the newest release. That is the whole tool. It fetches the
+shell, the five executables and the packer itself **from that same release**, which is why the three can never fall out of
+step with each other.
 
-| What | Where from | Where it goes |
-|---|---|---|
-| **The packer** | `Source code (zip)` on the [Releases page](https://github.com/xinerqu/ns2ios-shell/releases) — a release carries the whole repository, not just the shell | anywhere, e.g. `D:\nxn` |
-| **The shell** | `shell-<date>-<commit>.zip` on the Releases page | e.g. `D:\nxn\shell.zip` |
-| **The five executables** | `nxnative-windows-tools.zip` on the Releases page (self-contained, no .NET SDK, nothing else to install) | unpack to e.g. `D:\nxn-tools` |
-| **Your game files + `prod.keys`** | your own machine | e.g. `D:\games\hades2\` |
+What the machine still needs: **Python 3.9 or newer** (the packer is Python; the `.exe` is only its window), your own game
+files, and `prod.keys`.
 
-> **Why the whole source, and not just `nxn_pack.py`?**
-> The script is only the entry point; the work is done by `dm/` beside it. Each supported game's parameters (module list,
-> memory layout, rewriter tables, shader tables) live in `dm/games/<title ID>/`, and the rewriter and shader tools in
-> `dm/tools/` and `dm/gfx/tools/`. Without `dm/` it says so immediately rather than failing halfway.
->
-> **Everything comes from one place.** The same release carries the shell, the tools and this source snapshot, so there is
-> nothing else to download and nothing to keep in step by hand. If you mean to work on the packer itself, clone the
-> repository — a release is that repository's snapshot, and both run the same code.
+| Step | What you do |
+|---|---|
+| **1** | Run `ns2ios-packer.exe`. It looks up the newest release as soon as the window opens. |
+| **2** | Press **Check and download**. The shell zip, the five tools and the packer's source land in `ns2ios-packer-data\versions\v0.0.00xx\`. |
+| **3** | The **Python** row finds your interpreter by itself; if it does not, press **Browse…**. Then press **Install deps** once — the packages go into that interpreter and nothing else. |
+| **4** | Pick the game folder (the one holding the NSP/XCI), your `prod.keys`, and a folder for the IPA if you want one somewhere specific. |
+| **5** | Press **Start packing**. Every step and its output appear in the log; the IPA is written when it finishes. |
+| **6** | Sideload it (SideStore, [Sideloadly](#notes-and-caveats) — which drops an entitlement, see the notes — or LiveContainer). The first launch compiles the shaders once, with a progress page. |
 
-**Which games work**: see [docs/SUPPORTED.md](docs/SUPPORTED.md) — every one with its title ID and the version it was verified on, so you can match the hex in your file name against it.
+**Where does it put things?** Everything downloaded lives beside the exe in `ns2ios-packer-data\`, one folder per release.
+Nothing is installed system-wide and the registry is untouched: delete that folder and the tool is gone.
 
-**1. Install the packages** (into **the interpreter you will run the packer with** — they are per interpreter):
+**Which games work**: see [docs/SUPPORTED.md](docs/SUPPORTED.md) — every one with its title ID and the version it was
+verified on, so you can match the hex in your file name against it.
 
-```bash
-python -m pip install lz4 capstone fonttools backports.zstd pillow
+**Prefer the command line?** The window does nothing but assemble arguments for `scripts/nxn_pack.py`, which lives in the
+source the tool downloaded. From `ns2ios-packer-data\versions\v0.0.00xx\src\ns2ios-shell-*`:
+
+```bat
+python scripts\nxn_pack.py ..\..\..\shell-<date>-<commit>.zip D:\games\hades2 ^
+    -k D:\keys\prod.keys --tools ..\..\..\tools
 ```
 
-**2. Put one game's files in a folder.** The name does not matter: the game is identified from the package's contents (see
-"File names do not matter" below).
-
-```
-D:\games\hades2\
-  Hades II.nsp          ← or .xci, any name
-  (optional) update.nsp ← same folder; the newest version present is the one packed
-```
-
-**3. Run it from the unpacked source folder:**
-
-```bash
-cd D:\nxn
-python scripts\nxn_pack.py shell.zip D:\games\hades2 ^
-    -k D:\keys\prod.keys --tools D:\nxn-tools
-```
-
-The IPA is written next to the game files by default (`-o` to choose). The run unpacks the game, rewrites the modules,
-translates the shaders, assembles the app and packs the IPA, reporting each step and how long it took.
-
-**4. Sideload the IPA** (SideStore, [Sideloadly](#notes-and-caveats) — which drops an entitlement, see the notes — or
-LiveContainer). The first launch compiles the shaders once, with a progress
-page that estimates how long it will take.
+`python scripts\nxn_pack.py --help` lists every option; the window exposes the useful ones with a one-line explanation
+each. The GUI never invents anything the script cannot do.
 
 ### After the pack
 

@@ -737,15 +737,35 @@ jobs:
 
           | File | What it is |
           |---|---|
+          | **`ns2ios-packer.exe`** | **One file, the whole tool.** It downloads the shell, the tools and the packer below by itself, then packs your game with a few clicks. Windows 10 or newer; see *Use it*. |
           | `<version>.zip` | The shell: an unsigned iOS app with no game content. Pack your own game files into it. |
           | `nxnative-windows-tools.zip` | `nx_extract.exe`, `dmsh_xlate.exe`, `spirv-cross.exe`, `glslangValidator.exe`, `zstd.exe` — self-contained; no .NET SDK or C++ toolchain needed, and nothing else to install. |
 
           ## Use it
 
-          1. Take the **whole repository** (`git clone` or the source zip) — the packer needs `dm/` beside `scripts/`, so the script alone cannot work. Unpack the tools too, e.g. to `D:/nxn-tools`.
-          2. Put one game's files in a folder. **File names do not matter** — the game is identified from inside the package, so any naming scheme works. NSP and XCI both work, and an update or DLC can sit in the same folder; the newest version present is the one packed.
-          3. `cd` into the repository, then `python scripts/nxn_pack.py <version>.zip <game folder> -k <prod.keys> --tools D:/nxn-tools`
-          4. Sideload the IPA it writes (SideStore, Sideloadly, LiveContainer) and launch it once to compile the shaders.
+          **1. Download `ns2ios-packer.exe` and run it.** Windows warns about an unknown publisher — it is an unsigned
+          open-source tool, so choose *More info → Run anyway*. The exe is the only thing you download by hand: it takes
+          the shell, the five executables and the packer **from this same release**, so they can never be mismatched.
+
+          **2. Press *Check and download*.** Everything lands in `ns2ios-packer-data\versions\<tag>\` beside the exe. No
+          registry entries, nothing installed system-wide: delete that folder and the tool is gone.
+
+          **3. Point it at a Python 3.9+** (the row usually finds yours; press *Browse…* otherwise) and press
+          *Install deps* once. The packages go into that interpreter and nowhere else.
+
+          **4. Choose the game folder, your `prod.keys`, and where the IPA should go — then press *Start packing*.**
+          **File names do not matter** — the game is identified from inside the package, so any naming scheme works, and
+          NSP and XCI both work. An update or DLC can sit in the same folder; the newest version present is the one packed.
+
+          **5. Sideload the IPA** (SideStore, Sideloadly, LiveContainer) and launch it once to compile the shaders.
+
+          ## Use it from the command line
+
+          Everything above is just arguments for `scripts/nxn_pack.py`, which lives in the source the exe downloads. If
+          you would rather drive it yourself, take the **whole repository** (`git clone` or the source zip) — the packer
+          needs `dm/` beside `scripts/`, so the script alone cannot work — unpack the tools too, then:
+
+          `python scripts/nxn_pack.py <version>.zip <game folder> -k <prod.keys> --tools D:/nxn-tools`
 
           Temporary files (the extraction, the rewritten modules, the split shaders, the assembled app tree) are removed once the IPA exists — together they are several times the size of the game. Only a few-KB log per step stays, in `<title ID>_pack/logs/`. `--keep-work` keeps the whole tree for a faster repack; `--clean <game folder>` clears out an earlier run.
 
@@ -767,15 +787,27 @@ jobs:
 
           | 文件 | 说明 |
           |---|---|
+          | **`ns2ios-packer.exe`** | **一个文件就是全部工具。** 它自己去下壳、下工具、下打包器，然后点几下就把游戏打出来。Windows 10 及以上，用法见下。 |
           | `<version>.zip` | 壳：不含游戏内容的未签名 iOS 应用，把自己的游戏文件打进去。 |
           | `nxnative-windows-tools.zip` | `nx_extract.exe`、`dmsh_xlate.exe`、`spirv-cross.exe`、`glslangValidator.exe`、`zstd.exe`——自包含，不需要 .NET SDK 或 C++ 工具链，也不用另装任何东西。 |
 
           ## 用法
 
-          1. 下载**完整仓库**（`git clone` 或源码压缩包）——打包器需要 `scripts/` 旁边的 `dm/`，只拷那个脚本跑不了。工具也解压出来，比如放到 `D:/nxn-tools`。
-          2. 把一个游戏的文件放进一个目录。**文件名不重要**——游戏是从包内容里认出来的，随便怎么命名都行。NSP 和 XCI 都支持，更新包和 DLC 可以放进同一个目录；会打包目录里最新的那个版本。
-          3. 进仓库目录，执行 `python scripts/nxn_pack.py <version>.zip <游戏文件夹> -k <prod.keys> --tools D:/nxn-tools`
-          4. 用自签工具（SideStore、Sideloadly、LiveContainer）装上它产出的 IPA，首次启动会编译一遍着色器。
+          **1. 下载 `ns2ios-packer.exe`，双击运行。** Windows 会提示"未知发布者"——这是未签名的开源工具，点「更多信息 → 仍要运行」即可。**你需要手动下载的只有这一个文件**：壳、五个工具、打包器都由它**从同一个 release** 里取，所以不可能出现版本对不上。
+
+          **2. 点「检查更新并下载」。** 所有东西落到 exe 旁边的 `ns2ios-packer-data\versions\<tag>\`。不写注册表、不装进系统目录，删掉这个文件夹就等于没装过。
+
+          **3. 指向一个 Python 3.9+**（那一行一般能自动找到，找不到就点「浏览…」），然后点一次「装依赖」。包装进那个解释器，别处不动。
+
+          **4. 选游戏目录、`prod.keys`、IPA 放在哪，点「开始打包」。** **文件名不重要**——游戏是从包内容里认出来的，随便怎么命名都行；NSP 和 XCI 都支持，更新包和 DLC 可以放同一个目录，会打包最新的那个版本。
+
+          **5. 用自签工具装 IPA**（SideStore、Sideloadly、LiveContainer），首次启动会编译一遍着色器。
+
+          ## 用命令行
+
+          上面那些操作，本质上都是替 `scripts/nxn_pack.py` 拼参数，那个脚本就在 exe 下载的源码里。想自己驱动也行：下载**完整仓库**（`git clone` 或源码压缩包）——打包器需要 `scripts/` 旁边的 `dm/`，只拷脚本跑不了——工具也解压出来，然后：
+
+          `python scripts/nxn_pack.py <version>.zip <游戏文件夹> -k <prod.keys> --tools D:/nxn-tools`
 
           IPA 写好后临时文件会自动删除（解包、改写后的模块、拆出的着色器、拼装好的 app 树，加起来是游戏体积的好几倍），只留每步几 KB 的日志在 `<title ID>_pack/logs/`。`--keep-work` 保留整棵树以便快速重打包；`--clean <游戏文件夹>` 单独清掉之前留下的。
 
@@ -800,6 +832,12 @@ jobs:
           TAG="${{ needs.shell.outputs.tag }}"                  # v0.0.0001, v0.0.0002, ... the list sorts by this
           VER="${{ needs.shell.outputs.version }}"              # shell-<date>-<upstream>-<fork>, the asset file stem
           TITLE="Game-free shell ${VER#shell-}"                 # the page's heading keeps the date and both commits
+          # The packer exe is one of the assets, and the release notes tell people to download it. Publishing without
+          # it would ship a page pointing at a file that is not there, so refuse instead of shipping half a release.
+          ls packer/*.exe > /dev/null 2>&1 || {
+            echo "::error::packer/ns2ios-packer.exe is missing: run toolsrc/nxn-packer/publish-exe.cmd and commit it"
+            exit 1
+          }
           # Say on the page whether this shell was actually packed with a real game before it went out. The smoke job sets
           # verified=1 only when it managed to pack and inspect one; when the test data is unreachable the build is still
           # published, but nobody should have to guess whether it was tested.
@@ -824,12 +862,12 @@ jobs:
               echo "::error::$TAG already names another release ($EXIST): the version number was reused, not overwritten"
               exit 1
             fi
-            gh release upload "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" dist/*.zip dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
           else
             # --target: without it the tag lands on whatever main is at this moment, which is not the commit the
             # shell was built from (the sync step pushes its own commit, and anyone may push in between).
-            gh release create "$TAG" dist/*.zip dist/*.tsv --repo "$GITHUB_REPOSITORY" \
+            gh release create "$TAG" dist/*.zip dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" --notes-file body.md --target "${{ needs.shell.outputs.sha }}"
           fi
           echo "published $TAG" >> "$GITHUB_STEP_SUMMARY"

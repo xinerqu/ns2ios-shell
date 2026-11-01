@@ -17,50 +17,34 @@ macOS 皆可，不需要 Xcode。
 
 ## 快速开始（Windows）
 
-**需要四样东西：**
+**只下载一个文件：`ns2ios-packer.exe`** —— 最新 release 的第 5 个资产。这就是全部工具。壳、五个可执行文件、打包器
+源码，全部由它从**同一个 release** 里取，所以这三样永远不会版本对不上。
 
-| 要什么 | 从哪来 | 放哪 |
-|---|---|---|
-| **打包器** | Releases 页面的 `Source code (zip)`——发布包带的是**整个仓库**，不只是壳 | 任意位置，例 `D:\nxn` |
-| **壳** | Releases 页面的 `shell-<日期>-<提交>.zip` | 例 `D:\nxn\shell.zip` |
-| **五个可执行文件** | Releases 页面的 `nxnative-windows-tools.zip`（自包含，不需要 .NET SDK，也不用另装任何东西） | 解压到例 `D:\nxn-tools` |
-| **你的游戏文件 + `prod.keys`** | 你自己的机器 | 例 `D:\games\hades2\` |
+机器上仍然需要：**Python 3.9 或更高**（打包器是 Python 写的，exe 只是它的窗口）、你自己的游戏文件、`prod.keys`。
 
-> **为什么必须整份源码，不能只拷 `nxn_pack.py`？**
-> 脚本只是入口，真正的活靠旁边的 `dm/`：每个游戏的支持参数（模块列表、内存布局、改写表、着色器表）在
-> `dm/games/<title ID>/`，改写器和着色器工具在 `dm/tools/`、`dm/gfx/tools/`。缺了 `dm/` 它会当场说清楚，不会跑一半才崩。
->
-> **一切都从同一个地方拿。** 同一个 release 里既有壳、又有工具、还有这份源码快照——不用另找地方下、也不用自己
-> 保持两边同步。如果你是要改打包器本身，那就 clone 仓库：release 就是那个仓库的快照，两边跑的是同一份代码。
+| 步骤 | 做什么 |
+|---|---|
+| **1** | 双击 `ns2ios-packer.exe`。窗口一打开，它就去查最新 release。 |
+| **2** | 点「**检查更新并下载**」。壳 zip、五个工具、打包器源码落到 `ns2ios-packer-data\versions\v0.0.00xx\`。 |
+| **3** | 「**Python**」那一行会自动找到你的解释器；找不到就点「浏览…」。然后点一次「**装依赖**」——只装进这个 Python。 |
+| **4** | 选游戏目录（放着 NSP/XCI 的那个）、`prod.keys`；想指定 IPA 放在哪就再选个输出目录。 |
+| **5** | 点「**开始打包**」。每一步和输出都在日志里，打完 IPA 写到你指定的位置。 |
+| **6** | 侧载（SideStore、[Sideloadly](#注意事项)（会丢一个权限，见下面注意事项）、LiveContainer 都行）。**首次启动会编译一遍着色器**，屏幕上有进度页。 |
 
-**支持哪些游戏**：见 [docs/SUPPORTED.md](docs/SUPPORTED.md)——每一款都列出 title ID 和已验证版本，拿你文件名里的那一串十六进制对上即可。
+**东西都放在哪？** 下载的一切都在 exe 旁边的 `ns2ios-packer-data\`，一个版本一个文件夹。不写注册表、不装进系统目录：
+删掉这个文件夹，就等于没装过。
 
-**1. 装依赖**（装给**你将要用的那个** Python —— 打包器用哪个解释器，包装进哪个）：
+**支持哪些游戏**：见 [docs/SUPPORTED.md](docs/SUPPORTED.md)——每款都列了 title ID 和已验证版本，拿文件名里那串十六进制对上即可。
 
-```bash
-python -m pip install lz4 capstone fonttools backports.zstd pillow
+**喜欢命令行？** 窗口只干一件事：替 `scripts/nxn_pack.py` 拼参数，那个脚本就在工具下载的源码里。在
+`ns2ios-packer-data\versions\v0.0.00xx\src\ns2ios-shell-*` 下：
+
+```bat
+python scripts\nxn_pack.py ..\..\..\shell-<日期>-<提交>.zip D:\games\hades2 ^
+    -k D:\keys\prod.keys --tools ..\..\..\tools
 ```
 
-**2. 把一个游戏的文件放进一个目录。** 文件名随便，游戏是从**包内容**里认出来的（见下文「文件名无所谓」）：
-
-```
-D:\games\hades2\
-  Hades II.nsp          ← 或者 .xci，名字随意
-  (可选) 更新包.nsp      ← 同目录，会打包里面最新的版本
-```
-
-**3. 在解压出来的源码目录里运行：**
-
-```bash
-cd D:\nxn
-python scripts\nxn_pack.py shell.zip D:\games\hades2 ^
-    -k D:\keys\prod.keys --tools D:\nxn-tools
-```
-
-IPA 默认写在游戏文件旁边（`-o` 可指定）。过程会解开游戏、改写程序、翻译着色器、拼装 app、压成 IPA，进度和耗时都会打印。
-
-**4. 侧载**（SideStore、[Sideloadly](#注意事项)（会丢一个权限，见下面的注意事项）、LiveContainer 都行）。
-**首次启动会编译一遍着色器**，屏幕上有进度页，会告诉你还要多久。
+`python scripts\nxn_pack.py --help` 列了全部参数；窗口把常用的那些做成勾选，每条配一句说明。界面不会做脚本做不到的事。
 
 ### 打完包之后
 
