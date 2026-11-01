@@ -720,12 +720,12 @@ jobs:
           fi
           # English first, then a separator, then Chinese -- interleaving them segment by segment makes both hard to read.
           {
-            echo '## What changed since the last release'; echo
+            echo "## What's new in this release"; echo
             echo "$CHANGES"; echo
             if [ -n "$AUTO_EN" ]; then echo "$AUTO_EN"; echo; fi
           } > en.md
           {
-            echo '## 本版变更（对比上一版）'; echo
+            echo '## 本版更新'; echo
             echo "$CHANGES_ZH"; echo
             if [ -n "$AUTO_ZH" ]; then echo "$AUTO_ZH"; echo; fi
           } > zh.md
