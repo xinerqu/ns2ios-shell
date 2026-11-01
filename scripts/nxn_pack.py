@@ -1290,7 +1290,11 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
 
     step_guest(patched, mods, A)
     for m in mods:
-        for suf in ('.fixups.tsv', '.gates.tsv', '.cuts.tsv', '.obs.tsv'):
+        # changed.tsv: the text words whose instructions no longer run as the file has them. Upstream leaves it out of the
+        # iPhone app because its cheats never wrote code; this shell gives main a writable alias, so the cheat engine has
+        # to be able to tell the rewriter's words from the game's own before it writes any (hle_cheats.c changed_load /
+        # main_write_check). Without it every code-writing cheat is refused with "no rewriter list of changed words".
+        for suf in ('.fixups.tsv', '.gates.tsv', '.cuts.tsv', '.obs.tsv', '.changed.tsv'):
             s = patched / (m + suf)
             if s.is_file(): shutil.copyfile(s, A / 'dm' / s.name)
 
