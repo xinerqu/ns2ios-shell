@@ -45,7 +45,7 @@ struct CheatsSection: View {
                     Toggle(name, isOn: Binding(get: { selected.contains(name) }, set: { setOn(name, $0) }))
                         .font(.callout)
                     if let st = lastRun[name], st.state == "dead" || st.state == "unsupported" {
-                        Text(st.state == "dead" ? "Turned off on the last run: \(st.why)" : "Not supported: \(st.why)")
+                        Text(st.state == "dead" ? "Turned off on the last run: \(Self.reason(st.why))" : "Not supported: \(Self.reason(st.why))")
                             .font(.caption2).foregroundStyle(.orange)
                     }
                 }
@@ -159,6 +159,17 @@ struct CheatsSection: View {
         }
         lastRun = states
         lastBuild = build
+        // The host turned the suspects off at its load, but its load happens at Play: this panel is what puts them back in
+        // DM_CHEATS_ON, so it has to drop them too. Without this the crash repeats every launch -- the guard never gets
+        // ahead of the toggle state the player cannot see.
+        let suspects = states.filter { $0.value.why.contains("crashed within") }.map(\.key)
+        if !suspects.isEmpty {
+            let kept = selected.subtracting(suspects)
+            if kept != selected {
+                onNames = names.filter { kept.contains($0) }.joined(separator: "\n")
+                fputs("launcher: cheats dropped \(selected.count - kept.count) suspect entries from the switches (the last run crashed with them on)\n", stderr)
+            }
+        }
     }
 
     private static var dir: URL {
@@ -171,6 +182,9 @@ struct CheatsSection: View {
     }
 
     private static func selectedSet(_ s: String) -> Set<String> { Set(s.split(separator: "\n").map(String.init)) }
+
+    /// The host stores a reason as "(off: …)" and the row already says "turned off", so the prefix it repeats goes.
+    private static func reason(_ s: String) -> String { s.hasPrefix("off: ") ? String(s.dropFirst(5)) : s }
 
     /// The BID the pasted text claims ("… TID: 0100… BID: 9F221E1AFA65BA54", usually its first line).
     private static func declaredBuild(_ text: String) -> String? {
