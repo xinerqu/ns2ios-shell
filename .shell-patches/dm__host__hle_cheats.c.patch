@@ -109,7 +109,18 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -1100,6 +1132,69 @@
+@@ -1003,6 +1035,10 @@
+     if (c->broken || c->dead || c->label) return 0;
+     if ((half == 0) != (c->master != 0)) return 0;
+     if (half == 0 && g_safe) return 0;
++    // The launcher panel owns every switch, masters included: a {Name} entry it does not name does not run. Upstream's
++    // masters are unconditional here, which on a phone -- with no menu to turn one off -- is the one thing that cannot be
++    // worked around. (The parse-time on, the statistics and DM_CHEATS_ON honour this too; this gate is what actually runs.)
++    if (half == 0 && g_panel && !c->on) return 0;
+     if (half && !c->on) return 0;
+     return 1;
+ }
+@@ -1100,6 +1136,69 @@
  }
  static void files_drain(void) { dispatch_sync(files_queue(), ^{}); }
  
@@ -179,7 +190,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  // The safe-mode flag: <dir>/.cheats-running-<title> exists while some cheat runs (a plain cheat on, or the masters while
  // not in safe mode, with the master switch on); a clean exit removes it (dm_cheats_exit), a crash leaves it for the next
  // launch. Not on iOS: an iOS app usually ends killed (swiped away, or while suspended), and the app has no cheats panel
-@@ -1114,7 +1209,7 @@
+@@ -1114,7 +1213,7 @@
      for (int i = 0; i < g_ncheat && !any; i++) {
          const cheat_t *c = &g_cheat[i];
          if (c->label || c->broken) continue;
@@ -188,7 +199,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      char p[1100]; flag_file(p, sizeof p, "running");
      int want = any && atomic_load(&g_master);
-@@ -1235,7 +1330,7 @@
+@@ -1235,7 +1334,7 @@
      }
      for (int k = 0; k < g_non; k++)
          for (int i = 0; i < g_ncheat; i++)
@@ -197,7 +208,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // ---------- typed values the panel may set ("ask") ----------
-@@ -1459,7 +1554,10 @@
+@@ -1459,7 +1558,10 @@
              if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
              snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
              cur->master = end == '}';
@@ -209,7 +220,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char sec[NAME_MAX];
              int mark = section_marker(cur->name, sec, sizeof sec);
              if (mark == 1) snprintf(section, sizeof section, "%s", sec);
-@@ -1766,9 +1864,14 @@
+@@ -1766,9 +1868,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -224,7 +235,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1888,7 @@
+@@ -1785,6 +1892,7 @@
              g_nothers++;
          }
      }
@@ -232,7 +243,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +1909,7 @@
+@@ -1805,8 +1913,7 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -242,7 +253,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,8 +1950,19 @@
+@@ -1847,8 +1954,19 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -262,7 +273,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
      if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);
-@@ -1861,10 +1975,11 @@
+@@ -1861,10 +1979,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -275,7 +286,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +1992,44 @@
+@@ -1877,8 +1996,44 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked

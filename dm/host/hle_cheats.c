@@ -1035,6 +1035,10 @@ static int pass_runs(const cheat_t *c, int half) {
     if (c->broken || c->dead || c->label) return 0;
     if ((half == 0) != (c->master != 0)) return 0;
     if (half == 0 && g_safe) return 0;
+    // The launcher panel owns every switch, masters included: a {Name} entry it does not name does not run. Upstream's
+    // masters are unconditional here, which on a phone -- with no menu to turn one off -- is the one thing that cannot be
+    // worked around. (The parse-time on, the statistics and DM_CHEATS_ON honour this too; this gate is what actually runs.)
+    if (half == 0 && g_panel && !c->on) return 0;
     if (half && !c->on) return 0;
     return 1;
 }
