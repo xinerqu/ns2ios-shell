@@ -126,6 +126,8 @@ typedef struct {
     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
     uint8_t dbg_read;          // DM_CHEATS_DEBUG: its first code write has been read back once (see cheat_write)
+    uint8_t wcode, wdata;      // what its writes have actually reached: main's text, and anything else. last-run.txt reports it
+                               // so the launcher can replace its own guess with what really happened.
     uint8_t pair_off;          // the off (restore) half of an on / off pair
     int pair;                  // the other half of an on / off pair, -1 none
     int dup;                   // how many earlier entries carry the same name (its <build>.enabled key is "Name #dup+1")
@@ -713,6 +715,10 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
         case WH_HEAP: bad = dm_guest_heap_write(addr, &val, len) != 0; break;
         case WH_MODULE: dm_guest_write_prepare((void *)(uintptr_t)addr, (size_t)len); memcpy((void *)(uintptr_t)addr, &val, len); break;
         default: bad = guest_page_write(addr, &val, len) != 0; break;
+    }
+    if (!bad) {   // what it reached, for the launcher's code/data badge: main's text, or anything else
+        if (w.kind == WH_MAIN && (addr - (uint64_t)(uintptr_t)g_main_mod->base) < main_rx_end()) c->wcode = 1;
+        else c->wdata = 1;
     }
     // Once per cheat, the first code write is read back through the game's own mapping. A second mapping of main is only
     // worth anything if the write lands in the same physical pages; a copy-on-write view would have every code cheat report
@@ -2046,7 +2052,9 @@ static void save_last_run(void) {
         while (*why == ' ') why++;
         if (*why == '(') why++;
         size_t L = strlen(why);
-        fprintf(f, "%s\t%s\t%.*s\n", st, c->name, (int)(L && why[L - 1] == ')' ? L - 1 : L), why);
+        // 4th column: what this entry actually wrote (wcode / wdata, set by cheat_write); empty = nothing yet
+        fprintf(f, "%s\t%s\t%.*s\t%s\n", st, c->name, (int)(L && why[L - 1] == ')' ? L - 1 : L), why,
+                c->wcode ? "code" : c->wdata ? "data" : "");
     }
     fclose(f);
 }

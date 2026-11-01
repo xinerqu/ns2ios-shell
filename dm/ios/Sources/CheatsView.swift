@@ -18,12 +18,16 @@ import Foundation
 struct CheatsSection: View {
     @AppStorage("cheats.text") private var text: String = ""
     @AppStorage("cheats.on") private var onNames: String = ""
+    @AppStorage("cheats.allowCode") private var allowCode = false   // off: entries that patch instructions are not switchable
     @State private var expanded = false
     @State private var lastRun: [String: RunState] = [:]
     @State private var lastBuild: String = ""
     @State private var crashed: [String] = []   // the entries the previous run died with (its armed file), off this launch
+    @State private var guessedCode: Set<String> = []   // entries whose fixed-address writes land in main's text
 
-    struct RunState { let state: String; let why: String }
+    struct RunState { let state: String; let why: String; let measured: String }   // measured: "code" / "data" / ""
+
+    static let nl = String(UnicodeScalar(10))
 
     // [Name] and {Name} are both switches here: the panel is the only menu a phone has, and DM_CHEATS_PANEL makes the
     // host treat a {Name} master as an ordinary entry instead of always running it.
@@ -33,6 +37,14 @@ struct CheatsSection: View {
     private var declared: String? { Self.declaredBuild(text) }  // the BID the pasted file says it was written for
     private var offLastRun: [String] {
         names.filter { lastRun[$0].map { $0.state == "dead" || $0.state == "unsupported" } ?? false }
+    }
+
+    /// Entries that patch instructions: measured when the host has run them (last-run.txt's 4th column), guessed from the
+    /// file otherwise. The guess only covers writes to a fixed main offset; anything that follows a pointer is data.
+    private var codeEntries: Set<String> { guessedCode }
+    private func isCode(_ name: String) -> Bool {
+        if let m = lastRun[name]?.measured, !m.isEmpty { return m == "code" }
+        return guessedCode.contains(name)
     }
 
     var body: some View {
@@ -49,11 +61,22 @@ struct CheatsSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle(name, isOn: Binding(get: { selected.contains(name) }, set: { setOn(name, $0) }))
                         .font(.callout)
+                        .disabled(isCode(name) && !allowCode)
+                    if isCode(name) {
+                        Text("Patches instructions — the iPhone crashes on these, so they start off. Turn on \"Allow code patches\" to try one.")
+                            .font(.caption2).foregroundStyle(.orange)
+                    } else if lastRun[name]?.measured == "data" {
+                        Text("Changes values — safe").font(.caption2).foregroundStyle(.secondary)
+                    }
                     if let st = lastRun[name], st.state == "dead" || st.state == "unsupported" {
                         Text(st.state == "dead" ? "Turned off on the last run: \(Self.reason(st.why))" : "Not supported: \(Self.reason(st.why))")
                             .font(.caption2).foregroundStyle(.orange)
                     }
                 }
+            }
+            if !names.isEmpty {
+                Toggle("Allow code patches (they crash the game on the iPhone)", isOn: $allowCode)
+                    .font(.callout)
             }
             DisclosureGroup(isExpanded: $expanded) {
                 TextEditor(text: Binding(get: { text }, set: setText))
@@ -85,6 +108,9 @@ struct CheatsSection: View {
             loadLastRun()          // what the host made of the last run, for the notes under the switches
             Self.applySaved()      // puts the saved text and switches in place, for a launch that goes straight to Play
         }
+        .onChange(of: allowCode) { _, on in
+            if !on { pruneCode() }   // the switch that allowed them is gone: so are they
+        }
     }
 
     // MARK: - state changes
@@ -112,7 +138,8 @@ struct CheatsSection: View {
     static func applySaved() {
         let d = UserDefaults.standard
         let text = d.string(forKey: "cheats.text") ?? ""
-        let want = selectedSet(d.string(forKey: "cheats.on") ?? "")
+        var want = selectedSet(d.string(forKey: "cheats.on") ?? "")
+        if !d.bool(forKey: "cheats.allowCode") { want.subtract(codeSet(text)) }   // instruction patches stay out
         apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false)
     }
 
@@ -186,12 +213,14 @@ struct CheatsSection: View {
                 if parts.count >= 3, parts[1] == "build" { build = parts[2].uppercased() }
                 continue
             }
-            let f3 = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
-            guard f3.count >= 2 else { continue }
-            states[f3[1]] = RunState(state: f3[0], why: f3.count > 2 ? f3[2] : "")
+            let f4 = line.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard f4.count >= 2 else { continue }
+            states[f4[1]] = RunState(state: f4[0], why: f4.count > 2 ? f4[2] : "", measured: f4.count > 3 ? f4[3] : "")
         }
         lastRun = states
         lastBuild = build
+        guessedCode = Self.codeSet(text)
+        pruneCode()
         // The host turned the suspects off at its load, but its load happens at Play: this panel is what puts them back in
         // DM_CHEATS_ON, so it has to drop them too. Without this the crash repeats every launch -- the guard never gets
         // ahead of the toggle state the player cannot see.
@@ -218,6 +247,59 @@ struct CheatsSection: View {
 
     /// The host stores a reason as "(off: …)" and the row already says "turned off", so the prefix it repeats goes.
     private static func reason(_ s: String) -> String { s.hasPrefix("off: ") ? String(s.dropFirst(5)) : s }
+
+    /// Keeps instruction patches out of DM_CHEATS_ON while they are not allowed: the host would take them, and the game
+    /// dies on the first one it executes.
+    private func pruneCode() {
+        guard !allowCode else { return }
+        let code = Set(names.filter { isCode($0) })
+        guard !code.isEmpty else { return }
+        let kept = selected.subtracting(code)
+        if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: Self.nl) }
+    }
+
+    /// The estimate: an entry whose fixed-address stores point into main's text (below TEXT_END) patches instructions.
+    /// An entry that follows a pointer at all (58xxxxxx) writes data and is never marked. TEXT_END comes from the app's own
+    /// dm/main.fixups.tsv, so this stays in step with the build; without that file nothing is marked.
+    static func codeSet(_ text: String) -> Set<String> {
+        guard let end = textEnd else { return [] }
+        var out: Set<String> = []
+        var cur: String?
+        var pointer = false
+        func settle() { if let c = cur, pointer { out.remove(c) } }
+        for raw in text.split(whereSeparator: { $0.isNewline }) {
+            let line = String(raw).trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { continue }
+            if (line.hasPrefix("[") && line.hasSuffix("]")) || (line.hasPrefix("{") && line.hasSuffix("}")) {
+                settle()
+                cur = String(line.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+                pointer = false
+                continue
+            }
+            guard let c = cur else { continue }
+            let f = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard f.count >= 2, f[0].count == 8, let op = UInt32(f[0], radix: 16) else { continue }
+            let kind = op >> 28
+            if kind == 5 { pointer = true; continue }                       // 58xxxxxx: loads a pointer, writes go to the object
+            guard kind == 0 || kind == 4 || kind == 8 else { continue }      // fixed-address stores
+            if let addr = UInt64(f[1], radix: 16), addr < end { out.insert(c) }
+        }
+        settle()
+        return out
+    }
+
+    /// TEXT_END from the app's own table; nil when this build has none, and then no entry is marked.
+    static var textEnd: UInt64? {
+        let url = Bundle.main.bundleURL.appendingPathComponent("dm/main.fixups.tsv")
+        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        for line in s.split(whereSeparator: { $0.isNewline }) where line.hasPrefix("#") {
+            let p = line.split(separator: "\t")
+            if p.count >= 2, p[0].contains("TEXT_END") {
+                return UInt64(p[1].trimmingCharacters(in: .whitespaces), radix: 16)
+            }
+        }
+        return nil
+    }
 
     /// The BID the pasted text claims ("… TID: 0100… BID: 9F221E1AFA65BA54", usually its first line).
     private static func declaredBuild(_ text: String) -> String? {
