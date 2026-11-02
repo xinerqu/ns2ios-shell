@@ -1,15 +1,13 @@
 diff --git a/dm/tools/nx_extract/Program.cs b/dm/tools/nx_extract/Program.cs
 --- a/dm/tools/nx_extract/Program.cs
 +++ b/dm/tools/nx_extract/Program.cs
-@@ -85,9 +85,9 @@
+@@ -84,7 +84,8 @@
              Console.WriteLine("program has no data section: empty RomFS");
              return Damaged();
          }
--        IStorage romfs = updProg != null ? baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid) : baseProg.OpenStorage(NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid);
-+        IStorage romfs = updProg != null ? new AlignedReadStorage(baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid)) : baseProg.OpenStorage(NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid);
+-        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, level) : baseProg.OpenStorage(NcaSectionType.Data, level));
++        // the update file's storage is stacked, so every read has to go through AlignedReadStorage
++        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? (IStorage)new AlignedReadStorage(baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, level)) : baseProg.OpenStorage(NcaSectionType.Data, level));
+         Func<IFileSystem> romfs = () => Romfs(IntegrityCheckLevel.ErrorOnInvalid);
          // the same RomFS without hash checks, for reading damaged files as they are (--allow-damaged)
--        g_lenient = () => new RomFsFileSystem(updProg != null ? baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, IntegrityCheckLevel.IgnoreOnInvalid) : baseProg.OpenStorage(NcaSectionType.Data, IntegrityCheckLevel.IgnoreOnInvalid));
-+        g_lenient = () => new RomFsFileSystem(updProg != null ? new AlignedReadStorage(baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, IntegrityCheckLevel.IgnoreOnInvalid)) : baseProg.OpenStorage(NcaSectionType.Data, IntegrityCheckLevel.IgnoreOnInvalid));
-         if (manifest) Manifest(new RomFsFileSystem(romfs), Path.Combine(outDir, "romfs_manifest.tsv"));
-         else if (image) WriteImage(new RomFsFileSystem(romfs), Path.Combine(outDir, "RomFS.img"));
-         else Copy(new RomFsFileSystem(romfs), Path.Combine(outDir, "RomFS"), cmpDir);
+         g_lenient = () => Romfs(IntegrityCheckLevel.IgnoreOnInvalid);

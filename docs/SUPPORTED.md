@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**123 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**129 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -39,6 +39,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
 | Brain Memory Training Academy | `0100F5D01DA3A000` | 1.0.0 |  |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 | handheld |
+| Castlevania: Belmont's Curse | `0100BA4026E94000` | 1.1.0 |  |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a |  |
 | Celeste | `01002B30028F6000` | 1.4.1.1 |  |
 | Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
@@ -64,6 +65,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Ghost Trick: Phantom Detective | `010029B018432000` | 1.0.0 |  |
 | Hades | `0100535012974000` | 1.0.38233 |  |
 | Hades II | `0100A00019DE0000` | 0.0.126424 |  |
+| Hollow Knight | `0100633007D48000` | 1.5.12620 |  |
 | Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 |  |
 | Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 | 60 fps |
 | Hyrule Warriors: Definitive Edition | `0100AE00096EA000` | 1.0.1 |  |
@@ -106,6 +108,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
+| Splatoon Raiders | `0400380020056000` | v65536 |  |
 | Stardew Valley | `0100E65002BB8000` | 1.6.15.13 |  |
 | SteamWorld Dig | `01009320084A4000` | 1.12.0 |  |
 | SteamWorld Dig 2 | `0100CA9002322000` | 4.1.1 |  |
@@ -121,7 +124,9 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Super Mario Galaxy 2 | `0100FD8022DAA000` | 1.4.0 | handheld · 需抓一次 |
 | Super Mario Odyssey | `0100000000010000` | 1.4.1 |  |
 | Super Mario Party Jamboree | `0100965017338000` | 2.3.0 |  |
+| Super Mario RPG | `0100BC0018138000` | 1.0.1 |  |
 | Super Monkey Ball Banana Rumble | `010031F019294000` | 2.20 |  |
+| SUPER ROBOT WARS Y | `010063301BD50000` | 1.4.1 |  |
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 |  |
 | Taiko Risshiden V DX | `0100346017304000` | 1.1.1 | handheld |
 | Team Sonic Racing | `010092B0091D0000` | 1.0.3 |  |
@@ -130,6 +135,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 |  |
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
+| TRIANGLE STRATEGY | `0100CC80140F8000` | 1.1.1 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
 | Well Dweller | `0100217023F6C000` | 1.0.0 |  |
