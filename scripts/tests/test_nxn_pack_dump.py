@@ -1,5 +1,8 @@
 """A Switch 2 dump is read the way upstream's pack_dump.py reads one, and no key is involved.
 
+Lives under scripts/ and not dm/tools: the five folders packer_sync owns must stay upstream's, and a test of
+ours beside theirs reads as a file that went missing upstream.
+
 Why: the dump route is the only way a Switch 2 title packs at all, and its identification is the part that fails quietly --
 a wrongly read program ID picks another game's profile, and the pack then fails minutes later in the shader step. This
 builds the layout from bytes, so what it checks is the parsing and not a game.
@@ -10,7 +13,7 @@ import struct
 import tempfile
 import unittest
 
-REPO = pathlib.Path(__file__).resolve().parents[3]
+REPO = pathlib.Path(__file__).resolve().parents[2]      # scripts/tests/ -> the repository root
 _spec = importlib.util.spec_from_file_location('nxn_pack', REPO / 'scripts' / 'nxn_pack.py')
 nxn = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(nxn)

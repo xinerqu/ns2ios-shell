@@ -1,7 +1,7 @@
 diff --git a/dm/tools/patch_nso.py b/dm/tools/patch_nso.py
 --- a/dm/tools/patch_nso.py
 +++ b/dm/tools/patch_nso.py
-@@ -587,12 +587,18 @@
+@@ -595,12 +595,18 @@
      in a destructor."""
      if WORKERS < 2 or len(jobs) < 2:
          return [fn(*job) for job in jobs]
