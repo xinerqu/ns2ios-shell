@@ -112,3 +112,4 @@ The packer exe: the source comes from the release's own asset, and a broken down
 Revert the chain header and its lock: a local test run rewrote them	把本地测试跑改写的两个生成文件恢复回去（翻译链版本头与工具锁）：它们只应在真正改了翻译工具时提交。
 The packer's source stays the tag archive: the broken download was the network	源码仍取自 release 的 tag 快照，不额外发资产；那次中断是网络断流，不是这条路径的问题。
 The packer exe: a download that breaks is tried again, and nothing looks for a source asset	下载中途断开会自动重试，最多三轮；不再有任何「从 release 资产取源码」的代码，源码照旧取自 tag 快照。
+Base to 0a759de7: Fire Emblem Fortune's Weave joins, and the rewriter reads register writes by kind	跟上上游 3 条：改写器改成按寄存器的实际含义读写入（#952）、跳表扫描能看见被覆盖的下标和每次表基址写入，另外《火焰纹章 Fortune's Weave》作为 Switch 2 作品进表。@NL@支持列表 129 → 130 款。@NL@我们打补丁的 4 个文件（hle_nvn.c、nvn_mtl.m、dmsh_build.py、patch_nso.py）全部零冲突合并，所有补丁都打得上新基座。@NL@新增代码里没有直读 DM_GAME_* 编译期常量，也没有 Mac 专用调用。@NL@dump 的测试搬到 scripts/tests/：dm/tools 是上游的地盘，我们把测试放在他们旁边会被判成「上游删了这个文件」。
