@@ -110,3 +110,4 @@ A Switch 2 game packs from its folder of files, with no prod.keys	Switch 2 的�
 The packer exe: a Switch 2 dump folder needs no prod.keys	打包器窗口认得 dump 目录了：游戏文件夹里有 base\exefs\main.npdm 时不再要求填 prod.keys，也不再传 -k。Switch 2 的游戏文件本来就没加密。
 The packer exe: the source comes from the release's own asset, and a broken download is retried	打包器的源码仍取自 release 的 tag 快照：那次「下载中断（0x00002F78）」查下来是网络断流——同一个地址在另一台机器上一次下完 80.9 MB，他那台重试一次也过了。@NL@留下的是重试：下载中途断了会自己再来，最多三轮，报错里写明试了几轮；这是长传输走代理时的常见故障。@NL@不发源码资产（试过，没必要）。exe 里那条「有资产就用资产」的分支保留着，release 里没有这个资产时它什么都不做，照旧走 tag 快照。
 Revert the chain header and its lock: a local test run rewrote them	把本地测试跑改写的两个生成文件恢复回去（翻译链版本头与工具锁）：它们只应在真正改了翻译工具时提交。
+The packer's source stays the tag archive: the broken download was the network	源码仍取自 release 的 tag 快照，不额外发资产；那次中断是网络断流，不是这条路径的问题。
