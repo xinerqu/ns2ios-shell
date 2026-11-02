@@ -838,6 +838,11 @@ jobs:
             echo "::error::packer/ns2ios-packer.exe is missing: run toolsrc/nxn-packer/publish-exe.cmd and commit it"
             exit 1
           }
+          # The packer downloads its own source from this release. GitHub's tag archive answers with a chunked transfer
+          # and no Content-Length, and a proxy that mishandles that broke the download for real users ("the transfer
+          # broke off (0x00002F78)") while the release assets beside it came through. This asset is the same tree, so
+          # codeload leaves the path; the exe still falls back to the archive for releases published before it existed.
+          git archive --format=zip -o dist/ns2ios-packer-src.zip "${{ needs.shell.outputs.sha }}"
           # Say on the page whether this shell was actually packed with a real game before it went out. The smoke job sets
           # verified=1 only when it managed to pack and inspect one; when the test data is unreachable the build is still
           # published, but nobody should have to guess whether it was tested.
