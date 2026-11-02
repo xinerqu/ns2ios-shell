@@ -162,6 +162,33 @@ After the rewrite, the packer checks that every kind it actually emitted is in `
 shell too old to carry these keys only gets a warning: a missing key means "cannot be verified", not "broken", and the first
 shells published here are in that state.
 
+## A Switch 2 game is a dump, not an NSP
+
+Switch 2 titles circulate as a tree of files rather than as a package, and those files are not encrypted — so this route
+reads no key at all, and `-k` is not needed for it. `nxn_pack.py` takes the tree when the folder holds `base/exefs` and
+`base/romfs`:
+
+```
+<game>/
+  base/exefs/             main, main.npdm, sdk, rtld
+  base/romfs/
+  updates/458752/exefs/   the update's version, as a decimal number
+  updates/458752/romfs/   the patched RomFS, not a patch
+  dlc/<title ID>/0/romfs/
+```
+
+The title ID is the program ID in `main.npdm` (a dump has no ticket to read), the version is the update folder's name, and
+an update's RomFS is packed on its own rather than laid over the base — it already holds the base plus its patch, and the
+two trees differ (Donkey Kong Bananza's update drops 42 base files). Everything after identification is the usual chain:
+rewrite, shader split, translation, assemble.
+
+Nothing is copied or linked to get there: the dump's own folders are what the steps read (`ExeFS/` and `RomFS/` are
+answered with `exefs/` and `romfs/`), and only the RomFS copy assemble makes lands in the package. A DLC is copied into
+the work folder, because assemble copies that whole tree into the app.
+
+Upstream packs these for the Mac and has not booted one on an iPhone. The chain is the same one that builds an IPA here,
+which is why this fork packs them at all — the phone is where they get tested.
+
 ## The working folder, and cleaning it up
 
 The packer creates `<title ID>_pack` next to the game's files and keeps every intermediate product in it:

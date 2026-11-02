@@ -7,10 +7,16 @@ and `xcodebuild` -- are the ones the shell split removed.
 
 Usage:
   python scripts/nxn_pack.py <shell.zip> <NSP folder> -k <prod.keys> [-o out.ipa] [-p vN] [--stop-after STEP]
+  python scripts/nxn_pack.py <shell.zip> <dump folder> [-o out.ipa] [-p vN]    # a Switch 2 dump: no prod.keys
   python scripts/nxn_pack.py --clean <NSP folder>          # remove what an earlier run left behind, and exit
 
   <NSP folder>   one game's files: the base game (.nsp, or a cartridge dump .xci) plus every update the game profile's
                  shader_versions lists (see dm/games/<title ID>/game.tsv). DLC NSPs are packed too when present.
+  <dump folder>  a Switch 2 game's files already extracted, which needs no keys and is how those games circulate:
+                 base/exefs/ (main, main.npdm, sdk, rtld), base/romfs/, updates/<version>/..., dlc/<title ID>/0/romfs/
+                 -- the version is the update folder's name as a decimal number (458752), the title ID comes from
+                 main.npdm, and an update's RomFS is the patched tree, not a patch. Upstream packs these for the Mac;
+                 on the iPhone they are untested, which is what makes them worth packing here.
   -k            prod.keys (also read from the KEYS environment variable)
   -p            the version to pack (default: the newest one in the folder)
   --stop-after  stop after a step, to bring the chain up one piece at a time. Steps:
@@ -220,9 +226,12 @@ def which(*names):
 
 # ---------------------------------------------------------------- environment
 
-def check_env(keys_path, prebuilt=None):
+def check_env(keys_path, prebuilt=None, dump=False):
     """Only what every step needs. Tools for a single step are checked when that step is reached, so the chain can be
-    brought up piece by piece with --stop-after without installing everything first."""
+    brought up piece by piece with --stop-after without installing everything first.
+
+    A Switch 2 dump needs neither prod.keys nor the .NET SDK: its files are already extracted, so nothing on this chain
+    reads a key or builds nx_extract (`dump=True`)."""
     bad = []
     for m, pkg in (('lz4.block', 'lz4'), ('capstone', 'capstone'), ('fontTools', 'fonttools'), ('PIL', 'pillow')):
         try: __import__(m)
@@ -238,7 +247,9 @@ def check_env(keys_path, prebuilt=None):
                 bad.append('a zstd decoder: the release\'s nxnative-windows-tools.zip has zstd.exe (pass it with --tools), '
                            'or put zstd on PATH, or %s -m pip install backports.zstd' % PY)
     dotnet = which('dotnet') or (str(Path.home() / '.dotnet' / 'dotnet') if (Path.home() / '.dotnet' / 'dotnet').is_file() else None)
-    if prebuilt:
+    if dump:
+        pass                                   # the files are extracted already: no nx_extract to build, no key to read
+    elif prebuilt:
         # nx_extract and the shader translator come prebuilt, so no .NET SDK is needed on this machine
         pass
     elif not dotnet:
@@ -248,7 +259,7 @@ def check_env(keys_path, prebuilt=None):
         r = subprocess.run([dotnet, '--list-sdks'], capture_output=True, text=True)
         if not re.search(r'^10\.', (r.stdout or ''), re.M):
             bad.append('.NET 10 SDK (this dotnet has no 10.x SDK; found: %s)' % ((r.stdout or '').strip() or 'none'))
-    if not Path(keys_path).is_file(): bad.append('prod.keys not found: %s' % keys_path)
+    if not dump and not Path(keys_path).is_file(): bad.append('prod.keys not found: %s' % keys_path)
     if bad: die('missing %d item(s):\n  - %s' % (len(bad), '\n  - '.join(bad)))
     return dotnet
 
@@ -498,6 +509,125 @@ def scan_nsps(folder):
         elif kind == 'update': a['updates'][ver or UNKNOWN_VER] = p
         else: a['dlc'].append((tid, ver, p))
     return apps
+
+
+# ---------------------------------------------------------------- Switch 2 dumps
+
+def npdm_program_id(npdm):
+    """The ACI0 program ID of main.npdm: a dump's title ID, and the only identifier its files carry."""
+    d = Path(npdm).read_bytes()
+    if d[:4] != b'META': raise ValueError('%s: not an NPDM' % npdm)
+    if len(d) < 0x74: raise ValueError('%s: too short to be an NPDM' % npdm)
+    off, size = struct.unpack_from('<II', d, 0x70)
+    if d[off:off + 4] != b'ACI0' or size < 0x18: raise ValueError('%s: no ACI0 section' % npdm)
+    return '%016x' % struct.unpack_from('<Q', d, off + 0x10)[0]
+
+
+def dump_version_name(name):
+    """`updates/458752` holds the title version as a decimal number; the profile calls the same version v458752."""
+    n = name.strip().lstrip('vV')
+    return 'v' + n if n.isdigit() else None
+
+
+def scan_dump(folder):
+    """A Switch 2 game's files, already extracted: the layout upstream's dump route takes, and it needs no prod.keys.
+
+    ```
+      base/exefs/   main, main.npdm, sdk, rtld
+      base/romfs/
+      updates/458752/...   optional: the update's version, as a decimal number, and its patched RomFS
+      dlc/<title ID>/0/romfs/   optional
+    ```
+
+    Returns None when the folder is not one, so the NSP route keeps its own messages. Nothing here reads a key: a dump's
+    files are not encrypted, which is why this route exists for Switch 2 titles -- their dumps are the form they circulate in.
+    """
+    base = folder / 'base'
+    if not (base / 'exefs').is_dir() or not (base / 'romfs').is_dir(): return None
+    npdm = base / 'exefs' / 'main.npdm'
+    if not npdm.is_file(): return None
+    try:
+        tid = npdm_program_id(npdm)
+    except Exception as e:
+        die('%s looks like a dump (base/exefs, base/romfs) but its title ID cannot be read: %s' % (folder, e))
+    updates = {}
+    if (folder / 'updates').is_dir():
+        for d in sorted((folder / 'updates').iterdir()):
+            if not d.is_dir() or d.name.startswith('.'): continue
+            ver = dump_version_name(d.name)
+            if not ver:
+                warn('updates/%s is not a version number (a decimal one, like 458752): skipping it' % d.name); continue
+            if not (d / 'exefs').is_dir() or not (d / 'romfs').is_dir():
+                die('updates/%s holds no exefs/ and romfs/: an update in a dump is the patched tree, not a patch'
+                    % d.name)
+            updates[ver] = d
+    dlc = {}
+    if (folder / 'dlc').is_dir():
+        for t in sorted((folder / 'dlc').iterdir()):
+            if not t.is_dir() or t.name.startswith('.'): continue
+            for n in sorted(t.iterdir()):
+                romfs = n / 'romfs'
+                if not romfs.is_dir(): continue
+                if not n.name.isdigit():
+                    warn('dlc/%s/%s: the folder holding a DLC\'s romfs must be its add-on index (0, 1, ...): skipping it'
+                         % (t.name, n.name)); continue
+                idx = int(n.name)
+                want = int(t.name, 16) - int(tid, 16) - 0x1000
+                if want != idx:
+                    warn('dlc/%s/%s: its title ID makes it add-on index %d, and the folder says %d: using %d'
+                         % (t.name, n.name, want, idx, idx))
+                dlc[idx] = romfs
+    return {'tid': tid, 'base': base, 'updates': updates, 'dlc': dlc}
+
+
+class DumpVersion:
+    """One version of a dump, seen the way every later step sees an extraction: `ExeFS/` and `RomFS/`.
+
+    The dump already has both folders, under the names a console dump uses (`exefs`, `romfs`), so nothing is copied or
+    linked: this answers the two names the chain asks for and leaves everything else to the dump folder itself.
+    """
+    def __init__(self, root): self.root = root
+    def __truediv__(self, name):
+        low = name.lower()
+        if low == 'exefs': return self.root / 'exefs'
+        if low == 'romfs': return self.root / 'romfs'
+        return self.root / name
+    def __fspath__(self): return str(self.root)
+    def __str__(self): return str(self.root)
+    def __repr__(self): return 'DumpVersion(%s)' % self.root
+    @property
+    def name(self): return self.root.name
+
+
+def dump_dirs(dump, versions):
+    dirs = {}
+    for v in versions:
+        if v == 'v0': dirs[v] = DumpVersion(dump['base'])
+        else: dirs[v] = DumpVersion(dump['updates'][v])
+    return dirs
+
+
+def dump_aoc(dump, work, tid, force=False):
+    """The dump's add-on content at work/aoc/<index>/, the layout step_aoc writes: each folder is that DLC's RomFS root.
+
+    The folders are copied rather than pointed at, because assemble copies this whole tree into the app and a link there
+    would end up in the package. A dump's DLC is usually a few hundred MB, against several GB for the base game.
+    """
+    if not dump['dlc']: return None
+    out = work / 'aoc'
+    out.mkdir(parents=True, exist_ok=True)
+    for idx, romfs in sorted(dump['dlc'].items()):
+        dst = out / str(idx)
+        if dst.is_dir() and not force:
+            say('reusing the DLC %d (%s)' % (idx, romfs.parent.parent.name)); continue
+        tmp = out / ('%d.partial' % idx)
+        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.copytree(romfs, tmp, symlinks=True)
+        if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
+        tmp.replace(dst)
+        n = sum(1 for f in dst.rglob('*') if f.is_file())
+        say('DLC %d: %d files -> aoc/%d' % (idx, n, idx))
+    return out
 
 
 # ---------------------------------------------------------------- steps
@@ -1440,7 +1570,7 @@ def step_pack(A, out_ipa, rows, work):
 def main():
     ap = argparse.ArgumentParser(description='Pack the shell and your own game files into an IPA, without a Mac.')
     ap.add_argument('shell', nargs='?', default='', help='the shell zip (nxnative-shell-build-input.zip)')
-    ap.add_argument('nsp_dir', nargs='?', default='', help="a folder with the game's NSP/XCI files")
+    ap.add_argument('nsp_dir', nargs='?', default='', help="a folder with the game's NSP/XCI files, or a Switch 2 game's dump (base/exefs, base/romfs): a dump needs no keys")
     ap.add_argument('-k', '--keys', default=os.environ.get('KEYS', ''), help='prod.keys')
     ap.add_argument('-o', '--out', default='', help='output IPA (default: next to the NSPs)')
     ap.add_argument('-p', '--package', default='', help='version to pack (default: the newest one in the folder)')
@@ -1508,8 +1638,12 @@ def main():
         if src and free < src:
             die('not enough space on the disk that would hold the IPA (%s): %.1f GiB free, and the package alone is about '
                 '%.1f GiB.\n    Give another -o, or free some space there.' % (parent, free / 2**30, src / 2**30))
-    if not a.keys: die('give prod.keys with -k')
-    keys = Path(a.keys).resolve()
+    # A Switch 2 game is packed from a folder of its files, which are not encrypted (upstream: "A Switch 2 game is built
+    # from a folder of its files, not from NSPs, and needs no prod.keys"). That form is decided by the folder, not a flag:
+    # a folder with base/exefs and base/romfs is a dump, anything else goes through the NSP/XCI route as before.
+    dump = scan_dump(folder)
+    if not a.keys and not dump: die('give prod.keys with -k')
+    keys = Path(a.keys).resolve() if a.keys else None
     stamp = shell_stamp(shell)
     check_shell(stamp)
 
@@ -1519,9 +1653,13 @@ def main():
         if not tools_dir.is_dir(): die('--tools %s is not a folder' % tools_dir)
         os.environ['PATH'] = str(tools_dir) + os.pathsep + os.environ.get('PATH', '')
         say('tools: %s' % tools_dir)
-    dotnet = check_env(keys, tools_dir)
-    apps = scan_nsps(folder)
+    dotnet = check_env(keys, tools_dir, dump=bool(dump))
+    apps = {} if dump else scan_nsps(folder)
     probed = nx = None
+    if dump:
+        # The game is identified by its own main.npdm, so nothing is scanned and nothing is probed.
+        apps = {dump['tid']: {'base': dump['base'], 'updates': dump['updates'], 'dump': True, 'all': [],
+                              'dlc': [(str(i), '', p) for i, p in dump['dlc'].items()]}}
     if not apps:
         xcis = sorted(folder.glob('*.xci'))
         if len(xcis) == 1:
@@ -1569,12 +1707,19 @@ def main():
     #
     # A cartridge dump is the exception: it carries no version at all, so "the newest in the folder" means nothing there and
     # the profile decides. That holds whether it was identified just now or by a title ID an earlier run recorded.
-    is_dump = fam['base'].suffix.lower() == '.xci'
+    is_dump = fam.get('dump', False) or fam['base'].suffix.lower() == '.xci'
     upds = sorted(fam['updates'], key=lambda s: int(s[1:]) if s[1:].isdigit() else -1)
-    pkg = a.package or (upds[-1] if upds else (one(rows, 'package', 'v0') if is_dump else 'v0'))
-    if not is_dump and pkg != 'v0' and pkg not in fam['updates']:
-        die('no update for %s in %s (the folder has: %s)'
-            % (pkg, folder, ', '.join(upds) if upds else 'only the base game'))
+    if fam.get('dump'):
+        # A dump names its versions outright (updates/<decimal>), so nothing is guessed and the profile's own `package`
+        # row is not consulted: the base folder is v0, and -p picks one of the update folders.
+        pkg = (dump_version_name(a.package) or 'v0') if a.package else (upds[-1] if upds else 'v0')
+        if pkg != 'v0' and pkg not in fam['updates']:
+            die('no update %s in %s (the dump has: %s)' % (pkg, folder, ', '.join(upds) if upds else 'only base/'))
+    else:
+        pkg = a.package or (upds[-1] if upds else (one(rows, 'package', 'v0') if is_dump else 'v0'))
+        if not is_dump and pkg != 'v0' and pkg not in fam['updates']:
+            die('no update for %s in %s (the folder has: %s)'
+                % (pkg, folder, ', '.join(upds) if upds else 'only the base game'))
     if pkg == UNKNOWN_VER:
         # Not a warning: this is settled further down, from the unpacked files (identify_version), never from the name.
         say('this update has no [v<N>] tag in its name and keeps its CNMT encrypted (cnmt.nca): the version is read from '
@@ -1613,9 +1758,14 @@ def main():
     # update packed the cartridge's v0 files under the update's version number, and the module build IDs then matched
     # nothing in the profile.
     picks = {v: (fam['base'], fam['updates'].get(v) if v != 'v0' else None) for v in versions}
-    say('files: base %s%s' % (fam['base'].name,
-        (', update %s' % fam['updates'][pkg].name) if pkg != 'v0' and pkg in fam['updates'] else ', no update')
-        + (('; %d DLC' % len(fam['dlc'])) if fam['dlc'] else ''))
+    if fam.get('dump'):
+        say('files: dump %s, %s%s' % (folder.name,
+            ('base + ' + fam['updates'][pkg].name) if pkg != 'v0' and pkg in fam['updates'] else 'base only',
+            ('; %d DLC' % len(fam['dlc'])) if fam['dlc'] else ''))
+    else:
+        say('files: base %s%s%s' % (fam['base'].name,
+            (', update %s' % fam['updates'][pkg].name) if pkg != 'v0' and pkg in fam['updates'] else ', no update',
+            ('; %d DLC' % len(fam['dlc'])) if fam['dlc'] else ''))
 
     work = folder / (tid + '_pack')
     work.mkdir(parents=True, exist_ok=True)
@@ -1639,9 +1789,16 @@ def main():
     say('versions to pack: %s (packing %s)' % (', '.join(versions), pkg))
     say('work folder: %s' % work)
 
-    nx = nx or build_nx_extract(dotnet, work, tools_dir)
-    dirs = step_extract(nx, keys, folder, picks, work, versions, a.allow_damaged)
-    aoc_dir = step_aoc(nx, keys, fam['dlc'], work, tid, a.force, a.allow_damaged)
+    nx = None if fam.get('dump') else (nx or build_nx_extract(dotnet, work, tools_dir))
+    if fam.get('dump'):
+        # Already extracted: the steps that follow ask a version for ExeFS/ and RomFS/ and get the dump's own folders,
+        # and assemble copies that RomFS into the app. So there is nothing to unpack here, and no key is read.
+        dirs = dump_dirs(dump, versions)
+        aoc_dir = dump_aoc(dump, work, tid, a.force)
+        say('dump: %s (%s)' % (folder, ', '.join(sorted(dump['updates'])) or 'base only'))
+    else:
+        dirs = step_extract(nx, keys, folder, picks, work, versions, a.allow_damaged)
+        aoc_dir = step_aoc(nx, keys, fam['dlc'], work, tid, a.force, a.allow_damaged)
     if a.stop_after == 'extract': return say('stopped after extract')
     game = dirs[pkg]
     if pkg == UNKNOWN_VER:

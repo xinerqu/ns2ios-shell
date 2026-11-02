@@ -146,6 +146,29 @@ ENV=1
 打包器在改写之后核对本次真正用到的类型是否都在 `GATES` 里，不在就直接停，并说明该去下最新的壳。旧壳（没有这些字段）
 只警告——缺字段代表「不可验证」，不代表「坏的」，而现在发布的第一批壳就属于这一类。
 
+## Switch 2 的游戏是一个 dump 目录，不是 NSP
+
+Switch 2 的游戏以「一堆文件」的形式流通，而不是打包成一个 NSP，而且这些文件本身没有加密——所以这条路**一个密钥都不读**，
+也不需要 `-k`。文件夹里有 `base/exefs` 和 `base/romfs` 时，`nxn_pack.py` 就按 dump 走：
+
+```
+<游戏>/
+  base/exefs/             main、main.npdm、sdk、rtld
+  base/romfs/
+  updates/458752/exefs/   更新的版本号，十进制
+  updates/458752/romfs/   打好补丁的 RomFS，不是补丁
+  dlc/<title ID>/0/romfs/
+```
+
+title ID 取自 `main.npdm` 里的 program ID（dump 没有 ticket 可读），版本号取自 update 文件夹的名字；update 的 RomFS
+是**单独打包**的，不叠在 base 上——它本身已经含 base 加补丁，两棵树并不等价（大金刚 Bananza 的更新会丢掉 base 的 42 个文件）。
+认出身份之后，后面就是同一条链：改写、拆着色器、翻译、装配。
+
+全程不复制、也不建链接：后面各步直接读 dump 自己的目录（`ExeFS/` 与 `RomFS/` 分别对到 `exefs/`、`romfs/`），
+只有装配时那份 RomFS 拷贝会进包。DLC 会复制进工作目录，因为装配是整棵拷进 App 的。
+
+上游只把这些打进 Mac App，没在 iPhone 上跑过。这里打的是同一个链的 IPA——这个仓库愿意打它们，正是因为手机才是要验的地方。
+
 ## 工作目录与清理
 
 打包器在游戏文件夹旁边建一个 `<title ID>_pack`，一切中间产物都在里面：
