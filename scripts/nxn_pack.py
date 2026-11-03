@@ -1305,10 +1305,25 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     source and the phone compiles them once on first launch. dmsh_build.py creates <iosout>/b-<chain version> itself."""
     # Completeness is decided by the per-shader results dmsh_build.py writes, not by "some file is there": a run that was
     # interrupted leaves libraries behind, and trusting them would ship a package that only fails on the phone.
+    #
+    # Which directory counts matters as much as completeness. The chain version moves whenever one of the files the
+    # translation hashes changes, and a base move changes several, so a work folder that survived earlier runs holds a
+    # complete library of the OLD chain. Taking "the last b-*/_b_build.json" then reuses it and the package ships shaders
+    # translated by the old toolchain -- and nothing on the phone says so, because the shell accepts whatever one chain
+    # directory the package carries. 2026-11-03: a package built after the base move kept the previous day's shaders, so
+    # the LDSM fix (an 8x8 lattice of garbage in Bananza's upscaler) was still in it. Ask the toolchain for its version.
     cache = work / 'shader' / 'cache'
+    nometal = GFX / 'nometal_run.py'
+    cur = None
+    if nometal.is_file():
+        r = subprocess.run([PY, str(nometal), str(GFX / 'dmsh_chain.py')], capture_output=True, text=True,
+                           env=dict(os.environ, PYTHONUTF8='1', XLATE=str(xlate), DM_GAME=tid))
+        cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else None
+        if not cur: warn('could not read the translation chain version; a library of another version may be reused')
     def done():
-        marks = sorted(cache.glob('b-*/_b_build.json'))
-        if not marks: return False
+        if cur: marks = [cache / ('b-' + cur) / '_b_build.json']
+        else: marks = sorted(cache.glob('b-*/_b_build.json'))
+        if not marks or not marks[-1].is_file(): return False
         try: res = json.load(open(marks[-1], encoding='utf-8'))
         except Exception: return False
         if not res or any(r.get('st') != 'ok' for r in res): return False
@@ -1316,10 +1331,10 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         have = {x.name for x in d.glob('*_b.metallib')} if d.is_dir() else set()
         return all(r['key'] + '_b.metallib' in have for r in res)
     if not force and done():
-        say('shader libraries already there'); return
+        say('shader libraries already there (chain %s)' % cur); return
+    if cur: say('translation chain %s: translating the shaders' % cur)
     need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
               'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
-    nometal = GFX / 'nometal_run.py'
     if not nometal.is_file():
         die('dm/gfx/tools/nometal_run.py is missing (it is what makes this work without Apple\'s compiler)')
     # dmsh_build.py refuses to start when the toolchain does not match dmsh_chain.lock, which on a machine using the
