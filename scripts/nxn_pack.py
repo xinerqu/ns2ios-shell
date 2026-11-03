@@ -651,6 +651,44 @@ def build_nx_extract(dotnet, work, tools_dir=None):
     return exe
 
 
+def check_keys(nx, keys, fam, picks, versions, work, tid):
+    """Stop when prod.keys cannot open the game's packages, before anything is unpacked.
+
+    nx_extract <keys> --keys <pkg>... reads each NCA's header (a compressed NSZ's too) and tests it with LibHac's own
+    CanOpenSection, exiting 6 with the newest key that is missing and the firmware it came with. Keys older than the game
+    lack that master key, and the extraction stops minutes later instead -- or, for an NSZ, after `nsz -D` wrote a corrupt
+    extraction and exited 0, which is how this used to look: a package that unpacked and then made no sense.
+
+    A tools folder from before this mode answers with its usage line and exit 2 instead: that is not an error here, and
+    any other failure is left to the extraction, which reports it itself, as it always did. Only exit 6 -- the check's own
+    verdict -- stops the pack.
+    """
+    if not nx or not keys: return
+    ex = work / 'extract'
+    pkgs = []
+    for ver in versions:
+        if (ex / ver / 'ExeFS').is_dir(): continue        # already unpacked: its keys opened it once
+        for p in picks.get(ver, (None, None)):
+            if p and p not in pkgs: pkgs.append(p)
+    for t, _, p in (fam.get('dlc') or []):
+        try: idx = int(t, 16) - int(tid, 16) - 0x1000
+        except ValueError: idx = -1
+        if idx >= 0 and not (work / 'aoc' / str(idx)).is_dir() and p not in pkgs: pkgs.append(p)
+    if not pkgs: return
+    log = work / 'logs' / 'keys.log'
+    say('checking that the keys open %d package(s)' % len(pkgs))
+    t0 = time.time()
+    e = dict(os.environ, PYTHONUTF8='1')
+    if os.environ.get('NXN_VERBOSE'): print('    $ ' + ' '.join([str(nx), str(keys), '--keys'] + [str(p) for p in pkgs]), flush=True)
+    with open(log, 'w', encoding='utf-8', errors='replace') as f:
+        r = subprocess.run([str(nx), str(keys), '--keys'] + [str(p) for p in pkgs], env=e, stdout=f, stderr=subprocess.STDOUT)
+    if r.returncode != 6: return
+    text = log.read_text(errors='replace') if log.is_file() else ''
+    red = [l[6:].strip() for l in text.splitlines() if l.startswith('[RED] ')]
+    say('    the keys do not open this game (%.1fs)' % (time.time() - t0))
+    die(red[0] if red else 'prod.keys cannot open %s: dump prod.keys again from a newer console' % ', '.join(p.name for p in pkgs))
+
+
 def step_extract(nx, keys, folder, picks, work, versions, allow_damaged=False):
     ex = work / 'extract'
     ex.mkdir(parents=True, exist_ok=True)
@@ -1169,6 +1207,37 @@ def oodle_archives(game, mods):
         warn('could not scan the RomFS for Oodle-compressed shader archives (%s): packing on as before' % e)
         return {}
     return {k: src[k][1] for k in ('oodle_packs', 'ue_legacy') if src.get(k) and src[k][0]}
+
+
+def prune_shader_cache(work):
+    """Remove the per-shader cache entries this run's chain did not use (upstream's prune_shader_cache, in this folder).
+
+    A shader entry's digest covers the translation chain, so a new chain translates every shader again into a new
+    cas/shader/<digest> and leaves the old one behind. That is invisible in a default run (the work folder goes), and it
+    is what --keep-work keeps and reuses: Tears of the Kingdom's cache held 906,286 entries nothing read, 70.2 GB.
+    dmsh_build.py's full build lists the digests it used in b-<chain>/_b_cas.txt; entries that are not named there and
+    are older than that list go. No list (a library from before the list), a failed build or a folder without the cache:
+    nothing goes. cas/metallib and cas/variant are keyed by the MSL, not the chain, and stay.
+    """
+    cache = work / 'shader' / 'cache'
+    lists = [p for p in list(cache.glob('b-*/_b_cas.txt')) + list(work.glob('build/ios/**/b-*/_b_cas.txt')) if p.is_file()]
+    if not lists: return 0
+    used = max(lists, key=lambda p: p.stat().st_mtime)
+    try: keep, since = set(used.read_text().split()), used.stat().st_mtime
+    except OSError: return 0
+    root = cache / 'cas' / 'shader'
+    if not root.is_dir(): return 0
+    n = size = 0
+    for e in root.iterdir():
+        try:
+            if len(e.name) != 64 or any(c not in '0123456789abcdef' for c in e.name): continue
+            if e.name in keep or not e.is_dir() or e.stat().st_mtime >= since: continue
+            b = sum(f.stat().st_size for f in e.rglob('*') if f.is_file())
+            shutil.rmtree(e)
+        except OSError: continue
+        n += 1; size += b
+    if n: say('  removed %d shader cache entr%s of other chain versions (%.1f MB)' % (n, 'y' if n == 1 else 'ies', size / 1048576))
+    return n
 
 
 def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
@@ -1797,6 +1866,7 @@ def main():
         aoc_dir = dump_aoc(dump, work, tid, a.force)
         say('dump: %s (%s)' % (folder, ', '.join(sorted(dump['updates'])) or 'base only'))
     else:
+        check_keys(nx, keys, fam, picks, versions, work, tid)
         dirs = step_extract(nx, keys, folder, picks, work, versions, a.allow_damaged)
         aoc_dir = step_aoc(nx, keys, fam['dlc'], work, tid, a.force, a.allow_damaged)
     if a.stop_after == 'extract': return say('stopped after extract')
@@ -1938,6 +2008,7 @@ def main():
     tables = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
     if route == 'nvn':
         pkg_dir, tb, diff = step_shaders(dirs, versions, gdir, tables, work, tid, a.force)
+        prune_shader_cache(work)
         # shader_facts.tsv is the exception: the split merges the profile's shader_facts_manual.tsv into it, and the
         # translator reads the profile's table, so a difference there is written back below (upstream writes it back too
         # when the profile is provisional). The other tables are the ones dmsh_build.py indexes its package with, so a
