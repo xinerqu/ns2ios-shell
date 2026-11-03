@@ -1,10 +1,11 @@
 diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
 --- a/dm/ios/Sources/DmGamepad.m
 +++ b/dm/ios/Sources/DmGamepad.m
-@@ -184,8 +184,14 @@
-             if (names[b]) _label[b] = label(_key[b], names[b]);   // the D-pad arms carry no label
-         }
-         _swap = shape(_controls); _swapLabel = label(_swap, @"");
+@@ -216,8 +216,15 @@
+         __weak DmGamepad *weakSelf = self;
+         [_menu addAction:[UIAction actionWithHandler:^(UIAction *a) { (void)a; [weakSelf reset]; }] forControlEvents:UIControlEventMenuActionTriggered];   // the menu opens: release every key and touch first
+         [self addSubview:_menu];
++        _swap = shape(_controls); _swapLabel = label(_swap, @"");
 +        // First-launch layout from the game profile (DM_PAD_LAYOUT, atoi; the profile writes simple / full / touch and the packer turns it
 +        // into 0 / 1 / 2, the order game.py uses). The game-free shell is compiled against the placeholder profile, which asks for full:
 +        // that is the shell's own default, and a profile that sets no key keeps it (upstream's Mac host would compile game.py's default,

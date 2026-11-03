@@ -810,6 +810,21 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Check:** `test_dmsh_geometry.py` checks the sizes (388 bytes takes 16 triangles, the test shader 32, arrays and half types, an unknown member type and a vertex too large for one triangle refused) and composes and compiles a 16-triangle mesh shader. On Donkey Kong Bananza's scripted route, its one geometry pair as mesh draws against the compute path (`DM_NVN_GEO_MESH=0`), each run alone: translation 7.20 against 9.94 ms a frame, GPU p50 9.0 against 11.8 ms, no red lines. Frames through gameplay show the terrain, rocks, vines and props.
 - **Found on:** [Donkey Kong Bananza](../../dm/games/040074A01BF12000/README.md#found-on-this-game): its `geo_mesh.tsv` pair, about 600 geometry draws a frame.
 
+### Mesh geometry draws gathered into one dispatch
+
+- **Symptom:** a depth prepass of many small geometry-shader draws, drawn as mesh draws, leaves the GPU nearly idle: the per-pass profile (`DM_NVN_GPUPROF`) shows an idle gap before the pass that grows with its draw count (about 2.3 µs a draw), and the GPU counters show vertex-only time at about 4 % occupancy.
+- **Cause:** a Metal mesh draw has a fixed cost on the GPU, whatever it draws. On an M1, 480 one-triangle mesh draws of Donkey Kong Bananza's pair took 1.24–1.32 ms (about 2.7 µs each), and 480 draws of the prepass's sizes (15–350 triangles) 1.5–1.7 ms, where one draw of the same 67,000 triangles took 0.5–0.6 ms.
+- **Fix:**
+  - `dmsh_mesh.compose` gives each mesh entry a run twin (`dm_mesh_run`, `dm_mesh_run_z`, `..._p16`). It takes a table at the draw slot (buffer 12) of `dm_mesh_rec`: each draw's arguments, the running total of its threadgroups and the addresses bound at the vertex table's slots for it. A threadgroup finds its draw by halving, takes the vertex set, the pulling layout and the kernel's arguments through those addresses, and runs the same body with the draw's own threadgroup and primitive numbers. A pair whose vertex resources are not all constant references gets no twin.
+  - The host (`nvn_geometry.inc`, `geo_mesh_take`) lets a mesh draw that fits wait instead of dispatching: its record copies `g_vt_addr`, the shadow of the vertex table the mesh stage shares, after its arguments are bound. The run is one dispatch of the twin, drawn before any operation other than bindings, a program bind and draws (`geo_mesh_keeps`, from `mtl_exec`), before a draw of another pair, pass or kind (`geo_mesh_draw`, `draw_`), and before its pass ends (`rp_end`, `defer_fallback`). Bindings only change the replay state and dirty flags, so nothing else reaches the encoder between the draws of a run.
+  - The GPU may rasterize the threadgroups of one dispatch in any order, so a run takes only draws whose result does not depend on their order: no colour writes to an attached target, no stencil writes, depth written only with a test that keeps the nearest or the farthest (NEVER, LESS, LEQUAL, GREATER, GEQUAL), no occlusion query counting, and a fragment shader with no resources, since the fragment table is not in the record. The kernel's storage writes are unordered between separate mesh draws of a pass already (NVN orders them only with a barrier, which ends the run).
+  - The twin's pipeline is built in the background like the pair's own; until it is ready, and when it fails, the draws are single. `DM_NVN_GEO_MESH_RUN=0` turns runs off. The `geometry mesh draws` line of the log counts the draws drawn in runs, the runs, and what ended them.
+- **Check:**
+  - `test_dmsh_geometry.py` checks the twins' text (the table, the halving, the resources from the record, the same body in all four entries) and that a non-constant vertex resource leaves the twin out. With `DMSH_TEST_XLATE` and `DMSH_TEST_GPU=1`, `mesh_primitive_id.m` also draws 97 translated triangles as four draws (31, 1, 33, 32) in one run dispatch for both depth modes and all three index types, each draw numbering its own primitives.
+  - `make check_t_geometry_mesh` replays six geometry draws through `mtl_exec`, each with its own uniform (its depth) and its own storage counter, a scissor change between the fourth and the fifth, in runs, with `DM_NVN_GEO_MESH_RUN=0`, and in runs on the encoding thread: the same depth in every pixel column, every counter equal to its draw's triangles, two runs, under Metal validation.
+  - A benchmark on an M1 with Donkey Kong Bananza's pair (`f9c807930abd1234` / `5d537f7630ec3671`): 480 draws of the prepass's sizes 1.50 → 0.67–0.72 ms, 480 one-triangle draws 1.24–1.32 → 0.28 ms, 2,100 draws of 32 triangles 4.37 → 0.66 ms.
+- **Found on:** [Donkey Kong Bananza](../../dm/games/040074A01BF12000/README.md#found-on-this-game): the 960x540 depth prepass of its heavy areas in handheld mode, 420–550 geometry draws a frame, 1.0–2.0 ms of idle GPU before the pass.
+
 ### Tessellation stages are not drawn
 
 - **Symptom:** `primitive type 14 not implemented`; patch draws skipped.
@@ -910,6 +925,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
   - UP2UR (0x883): `URd = UP0 ? 1 : 0`. The game's one encoding (URZ, mask 1) is accepted; any other stops the shader.
 - **Found on:** [Pokémon Pokopia](../../dm/games/0400A3A01EE4C000/README.md).
 - **Check:** `DMSH_TEST_XLATE=<translator> python3 dm/gfx/tests/test_dmsh_ampere_mem.py`.
+
+### Barrier moves around warp shuffles
+
+- **Symptom:** `Ampere instruction f55 at 0x… (000fe20000000000000000001a0f7f55) is not implemented` in the shader build; those shaders are left out.
+- **Cause:** `0xf55` and `0xf56` (BMOV) save convergence barrier B15 into R26 before a block of warp shuffles (SHFL) and restore it after. The translator had no entry for either.
+- **Fix:** both are no-ops, as the barriers they save are (BSSY, BSYNC, BREAK, WARPSYNC): per thread they do nothing. In the shaders found, no other instruction reads R26 after them, and the register beside the barrier field (R15) is read live by an FMUL, so neither writes a general register (`InstEmitAmpere.cs`).
+- **Found on:** [Hyrule Warriors: Age of Imprisonment](../../dm/games/04003F40232DE000/README.md#shaders): pixel shaders `02e49c189b769074` and `49241cf469c76830`, 16 pairs each (chain 95ba69b5403e).
+- **Check:** `DMSH_TEST_XLATE=<translator> python3 dm/gfx/tests/test_dmsh_ampere_mem.py` (`BarrierMoves`: the game's encodings leave the translated shader unchanged; it fails on the translator before).
 
 ### IMAD.HI adds a register pair, and IMAD.X its carry
 
@@ -1289,6 +1312,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Fix:** for macOS, `pso_offline.py`'s default `--os-min` is this Mac's major version (`sw_vers`); iOS keeps the SDK's. The Mac host's minimum is `MACOS_MIN` in `dm/mac/min_os.mk` (26.6, as the README asks), on the host's compile lines (`-mmacosx-version-min`, libvpx's too), which the NSP script and `pack_app.py` follow. The host builds with the same warnings at 26.6 as at 27.0 (no unguarded newer API). An archive is still for one major version: an iPhone on iOS 26 cannot open the IPA's 27.0 archive and builds its bases itself (open: one archive per major version would serve both).
 - **Found on:** no game: [GitHub issue #673](https://github.com/seedds/nxnative/issues/673), `t_pso_bundle` on an M4 Pro with macOS 26.6.2 and Xcode 27.1.
 - **Check:** `dm/tools/tests/test_pso_offline.py` (`test_macos_takes_this_macs_major_version`). `t_pso_bundle` builds its archive with the default and opens it on macOS 27.2: 52 checks pass with its libraries built for 27.0 and for 26.6 (`MACOSX_DEPLOYMENT_TARGET=26.6`), the mirror of the reporter's Mac; the same libraries in an archive made for 26.6 failed the 10 checks. Open: no run on macOS 26.x here.
+
+### Python memory during offline pipeline archive preparation
+
+- **Symptom:** `pso_offline.py` holds about 1.8 GB while `metal-tt` builds an archive of 140,036 bases, and the system's memory view shows the build far larger than that (180.5 GB) before `metal-tt` fails or is stopped.
+- **Cause:** the builder made the pipeline script (503 MB at 140,036 bases) as one JSON string and as bytes, read the previous script whole to compare them, and serialized the whole key input once more; the descriptors stayed referenced while `metal-tt` ran. That is at most about 1.8 GB: the 180.5 GB were `metal-tt` and its compiler processes, not Python.
+- **Fix:** `write_script` streams the script to `bases.mtl4-json.partial` and replaces the previous script only when the two differ; `archive_key` hashes the same JSON as it is encoded (the keys of earlier builds still match); the descriptors are released before `metal-tt` starts. Measured with 140,036 synthetic bases: peak 1.83 → 0.45 GB, 1.81 → 0.06 GB held while `metal-tt` runs, about 11 s more encoding (Python 3.15), byte-identical script and key.
+- **Found on:** [Mario Party Superstars](../../dm/games/01006FE013472000/README.md) ([GitHub issue #1022](https://github.com/seedds/nxnative/issues/1022), [PR #1024](https://github.com/seedds/nxnative/pull/1024)). Open: why `metal-tt` failed after 76 minutes there, and how its memory grows with the number of bases.
+- **Check:** `dm/tools/tests/test_pso_offline.py` (`test_large_script_memory_and_compatible_archive_key`).
 
 ### Offline pipeline archive on a full disk
 
