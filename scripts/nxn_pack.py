@@ -1314,12 +1314,25 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     # the LDSM fix (an 8x8 lattice of garbage in Bananza's upscaler) was still in it. Ask the toolchain for its version.
     cache = work / 'shader' / 'cache'
     nometal = GFX / 'nometal_run.py'
-    cur = None
-    if nometal.is_file():
-        r = subprocess.run([PY, str(nometal), str(GFX / 'dmsh_chain.py')], capture_output=True, text=True,
-                           env=dict(os.environ, PYTHONUTF8='1', XLATE=str(xlate), DM_GAME=tid))
-        cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else None
-        if not cur: warn('could not read the translation chain version; a library of another version may be reused')
+    if not nometal.is_file():
+        die('dm/gfx/tools/nometal_run.py is missing (it is what makes this work without Apple\'s compiler)')
+    # dmsh_build.py refuses to start when the toolchain does not match dmsh_chain.lock, which on a machine using the
+    # prebuilt executables it never will: register this machine first. That rewrites dmsh_chain.lock and the profile's
+    # dmsh_chain.h. It has to happen BEFORE the chain version is read, because the version hashes that lock: asking first
+    # names a version this run will not use (2026-11-03: it printed f4e3ba9fef0f, the registration moved the version, and
+    # the package carried f552588aa0f7 -- the log line that was meant to prove the run was current proved nothing).
+    genv = {'XLATE': str(xlate), 'DM_GAME': tid}
+    chk = subprocess.run([PY, nometal, GFX / 'tool_lock.py', '--check-tools'], capture_output=True, text=True,
+                         env=dict(os.environ, PYTHONUTF8='1', **genv))
+    if chk.returncode:
+        say('the toolchain differs from dmsh_chain.lock: registering this machine')
+        run([PY, nometal, GFX / 'tool_lock.py', '--update-lock'], env=genv,
+            log=work / 'logs' / 'chain_lock.log', what='tool_lock --update-lock')
+        warn('dmsh_chain.lock now describes this machine (do not commit it)')
+    r = subprocess.run([PY, nometal, GFX / 'dmsh_chain.py'], capture_output=True, text=True,
+                       env=dict(os.environ, PYTHONUTF8='1', **genv))
+    cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else None
+    if not cur: warn('could not read the translation chain version; a library of another version may be reused')
     def done():
         if cur: marks = [cache / ('b-' + cur) / '_b_build.json']
         else: marks = sorted(cache.glob('b-*/_b_build.json'))
@@ -1335,20 +1348,6 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     if cur: say('translation chain %s: translating the shaders' % cur)
     need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
               'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
-    if not nometal.is_file():
-        die('dm/gfx/tools/nometal_run.py is missing (it is what makes this work without Apple\'s compiler)')
-    # dmsh_build.py refuses to start when the toolchain does not match dmsh_chain.lock, which on a machine using the
-    # prebuilt executables it never will: register this machine first. That rewrites dmsh_chain.lock and the profile's
-    # dmsh_chain.h -- the header is the compile-time constant only the Xcode route needs, and the shell reads the version
-    # from the directory name, so neither value is used any further here.
-    genv = {'XLATE': str(xlate), 'DM_GAME': tid}
-    chk = subprocess.run([PY, nometal, GFX / 'tool_lock.py', '--check-tools'], capture_output=True, text=True,
-                         env=dict(os.environ, PYTHONUTF8='1', **genv))
-    if chk.returncode:
-        say('the toolchain differs from dmsh_chain.lock: registering this machine')
-        run([PY, nometal, GFX / 'tool_lock.py', '--update-lock'], env=genv,
-            log=work / 'logs' / 'chain_lock.log', what='tool_lock --update-lock')
-        warn('dmsh_chain.lock now describes this machine (do not commit it)')
     # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
     # header is per game: packing a second game on the same machine fails with "run --header first" if this only happens
     # when the toolchain lock changes. It reads the tables, so it costs nothing to do every time.
@@ -1357,6 +1356,12 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     run([PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
         env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': os.environ.get('J', '8'), 'DM_GAME': tid},
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
+    # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
+    # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
+    made = [p.name for p in iosout.glob('b-*') if p.is_dir()] if iosout.is_dir() else []
+    if cur and ('b-' + cur) not in made:
+        warn('the shader build made %s, but this run read chain %s: the package may carry another version\'s shaders'
+             % (', '.join(made) or 'nothing', cur))
     # Report per directory: a work folder that survived an interrupted run holds one b-<V> per chain version, and the
     # sum of them reads as a healthy build while the directory that gets shipped holds a handful.
     libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) if iosout.is_dir() else []
