@@ -1517,8 +1517,31 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         say('add-on content in place: index %s' % ', '.join(sorted((d.name for d in dst.iterdir() if d.is_dir()), key=int)))
 
     # tables the game profile carries (shader map, c1 list, warm-up list, uniform extents)
+    #
+    # The last two name the translation chain and the profile inputs they were made from in their first line, and the host
+    # takes them only beside a library built from the same inputs (nvn_mtl.m). One from another chain is refused at run
+    # time with a [RED] line and every c1 then gets its own 64 KiB instead of the extent its shader reads, which is the kind
+    # of thing a package never shows: it boots, it plays, and only the memory is wrong. So a stale or missing pair is said
+    # here, where the reason is still visible (a reused shader build is the usual one).
+    chain = None
+    hdr = DM / 'gfx' / 'nvn' / 'dmsh_chain.h'
+    if hdr.is_file():
+        m = re.search(r'#define\s+DMSH_CHAIN\s+"([0-9a-f]+)"', hdr.read_text(encoding='utf-8'))
+        chain = m.group(1) if m else None
+    nvn = (gdir / 'shader_map.tsv').is_file()
     for n in ('shader_map.tsv', 'pso_manifest.tsv', 'c1_full.tsv', 'cb_extent.tsv'):
-        if (gdir / n).is_file(): shutil.copyfile(gdir / n, A / 'dm' / n)
+        src = gdir / n
+        if not src.is_file():
+            if nvn and n.startswith(('c1_full', 'cb_extent')):
+                warn('%s is not in %s: the phone then gives every c1 its own 64 KiB (a full shader build writes it)'
+                     % (n, gdir))
+            continue
+        if nvn and n.startswith(('c1_full', 'cb_extent')) and chain:
+            head = src.open(encoding='utf-8', errors='replace').readline().strip()
+            if chain not in head:
+                warn('%s in %s was made for another translation chain (%s), so the phone will refuse it and give every c1 '
+                     'its own 64 KiB; a full shader build rewrites it, and this run reused one' % (n, gdir, head or 'no header line'))
+        shutil.copyfile(src, A / 'dm' / n)
     # The shader pairs the pipeline prebuild and the hybrid pipelines read (nvn_mtl.m pso_prebuild, from the folder
     # DM_NVN_SHMAP names). Upstream's build_ipa.sh copies the profile's two; the split's copy stands in for pso_pairs.tsv
     # when the profile has none, which is the substitution the Mac route makes with --pso-pairs. Without them a profile
@@ -1551,7 +1574,9 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         with open(ip, 'rb') as f: pl = plistlib.load(f)
         pl['CFBundleIdentifier'] = 'org.nxnative.%016x' % int(tid, 16)
         pl['CFBundleDisplayName'] = name
-        pl['CFBundleShortVersionString'] = version
+        # A dump's version is the profile's "v458752" (updates/458752); CFBundleShortVersionString is read as numbers, so
+        # it goes in without the v. An NSP's is already "1.1.0".
+        pl['CFBundleShortVersionString'] = version.lstrip('vV')
         pl['CFBundleVersion'] = version
         pl['DMShowFPS'] = 'NO'
         pl['DMLanguage'] = os.environ.get('NXN_LANG', 'en-US')
@@ -1582,7 +1607,11 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         with open(ip, 'wb') as f: plistlib.dump(pl, f)
         say('Info.plist: %s %s' % (name, version))
     except Exception as e:
-        warn('could not edit Info.plist (%s); the app keeps the shell identity' % e)
+        # Not a warning: the bundle ID is what keeps two games apart on the phone (iOS identifies an app by it), so a
+        # package that keeps the shell's own ID installs over the player's other game and looks like the shell. Nothing
+        # here is optional.
+        die('could not edit the app\'s Info.plist (%s): the package would carry the shell\'s own identity, and installing it '
+            'would replace the other game that uses it' % e)
     return A
 
 
@@ -1590,15 +1619,17 @@ def step_launcher(tid, patched, game, A, work):
     """The settings screen that upstream put in front of the game (Launcher.swift) is drawn from dm/launcher.json, which
     dm/games/settings.py writes: the rows of dm/games/settings.tsv whose condition holds for this game, with its defaults.
 
-    Upstream's build_ipa.sh does this step; a packer that does not leaves the screen empty, and Launcher.swift then starts the
-    game at once -- so this warns instead of failing, unlike the steps whose output the game itself needs.
+    Upstream's build_ipa.sh does this step with the control.nacp it may not have -- a Switch 2 dump carries no control
+    data, and settings.py only asks it for the game's languages (nacp.languages() answers an empty list for a missing
+    file, which hides the language row and nothing else). So the path is passed as it is: skipping the step when the file
+    is absent left the whole screen out, and the screen is also where the cheats panel lives.
+
+    A packer that does not do this step leaves the screen empty, and Launcher.swift then starts the game at once -- so this
+    warns instead of failing, unlike the steps whose output the game itself needs.
     """
     s = DM / 'games' / 'settings.py'
     if not s.is_file(): return                     # upstream before the launcher existed
-    nacp = game / 'control.nacp'
-    if not nacp.is_file():
-        warn('no control.nacp beside the RomFS: no dm/launcher.json, so the game starts without the settings screen')
-        return
+    nacp = game / 'control.nacp'                   # may be absent: a dump has no control data
     out = A / 'dm' / 'launcher.json'
     r = subprocess.run([str(PY), str(s), tid, str(patched), str(nacp), str(out)],
                        capture_output=True, text=True, env=dict(os.environ, PYTHONUTF8='1'))
@@ -1609,7 +1640,7 @@ def step_launcher(tid, patched, game, A, work):
         msg = ((r.stderr or r.stdout or '').strip().splitlines() or ['no output'])[-1]
         warn('dm/launcher.json could not be written (%s: see %s), so the game starts without the settings screen' % (msg, log))
         return
-    say('launcher settings: %s' % (r.stdout or '').strip())
+    say('launcher settings: %s%s' % (r.stdout or '', '' if nacp.is_file() else ' (no control.nacp: no language row)'))
 
 
 def step_pack(A, out_ipa, rows, work):
