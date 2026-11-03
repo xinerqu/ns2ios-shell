@@ -1,16 +1,20 @@
 diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 --- a/dm/gfx/tools/dmsh_build.py
 +++ b/dm/gfx/tools/dmsh_build.py
-@@ -192,6 +192,9 @@
+@@ -188,9 +188,12 @@
+ def record_index(path):   # → (an open descriptor, the offsets of the package's records and its end): record k is bytes offsets[k]..offsets[k + 1]
+     # Scanned through a read-only mapping that is closed again, so no package stays in this process. Pokopia's ps_rdb.bin (4.25 GB) read and cut into its 105,118
+     # records left the process at 8.7 GB, and each fork (every spirv-cross and Metal compile) then took 75 ms instead of 3 with the GIL held: one shader worker at a time (GitHub issue #1036)
+-    fd = os.open(path, os.O_RDONLY); n = os.fstat(fd).st_size
++    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_BINARY', 0)); n = os.fstat(fd).st_size   # O_BINARY: without it a Windows descriptor translates CRLF, so the records read back short
      if not n: return fd, [0]
      with mmap.mmap(fd, n, access=mmap.ACCESS_READ) as m: return fd, [x.start() for x in re.finditer(b'BTCDBTCD', m)] + [n]
- 
++
 +def pread(fd, n, off):   # Windows has no os.pread, and the packer runs this build there (scripts/nxn_pack.py): a seek and a read return the same bytes, and nothing else moves this descriptor
 +    os.lseek(fd, off, os.SEEK_SET); return os.read(fd, n)
-+
+ 
  def clone(src, dst):   # APFS copy-on-write, else a plain copy; the clonefile call, not a cp: a fork of this large process costs about 6 ms
      os.makedirs(os.path.dirname(dst), exist_ok=True)
-     dmsh_mtlcache.clone(src, dst)
 @@ -200,7 +203,10 @@
      os.makedirs(os.path.dirname(path), exist_ok=True)
      tmp = path + '.tmp-' + str(os.getpid()) + '-' + str(threading.get_ident())
