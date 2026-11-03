@@ -216,7 +216,6 @@ static BOOL fullOnly(int b) { return b == B_LS || b == B_RS || b >= B_LEFT; }   
         __weak DmGamepad *weakSelf = self;
         [_menu addAction:[UIAction actionWithHandler:^(UIAction *a) { (void)a; [weakSelf reset]; }] forControlEvents:UIControlEventMenuActionTriggered];   // the menu opens: release every key and touch first
         [self addSubview:_menu];
-        _swap = shape(_controls); _swapLabel = label(_swap, @"");
         // First-launch layout from the game profile (DM_PAD_LAYOUT, atoi; the profile writes simple / full / touch and the packer turns it
         // into 0 / 1 / 2, the order game.py uses). The game-free shell is compiled against the placeholder profile, which asks for full:
         // that is the shell's own default, and a profile that sets no key keeps it (upstream's Mac host would compile game.py's default,
