@@ -1,7 +1,17 @@
 diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 --- a/dm/gfx/tools/dmsh_build.py
 +++ b/dm/gfx/tools/dmsh_build.py
-@@ -197,7 +197,10 @@
+@@ -192,6 +192,9 @@
+     if not n: return fd, [0]
+     with mmap.mmap(fd, n, access=mmap.ACCESS_READ) as m: return fd, [x.start() for x in re.finditer(b'BTCDBTCD', m)] + [n]
+ 
++def pread(fd, n, off):   # Windows has no os.pread, and the packer runs this build there (scripts/nxn_pack.py): a seek and a read return the same bytes, and nothing else moves this descriptor
++    os.lseek(fd, off, os.SEEK_SET); return os.read(fd, n)
++
+ def clone(src, dst):   # APFS copy-on-write, else a plain copy; the clonefile call, not a cp: a fork of this large process costs about 6 ms
+     os.makedirs(os.path.dirname(dst), exist_ok=True)
+     dmsh_mtlcache.clone(src, dst)
+@@ -200,7 +203,10 @@
      os.makedirs(os.path.dirname(path), exist_ok=True)
      tmp = path + '.tmp-' + str(os.getpid()) + '-' + str(threading.get_ident())
      with open(tmp, 'w') as f: json.dump(value, f, ensure_ascii=False, indent=1)
@@ -13,7 +23,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  
  def source_without_rule_bodies():   # this file's code form (dmsh_chain.code_form): no comments, docstrings or formatting, and the rule functions' bodies blanked
      return dmsh_chain.code_form(open(__file__, 'r').read(), {f.__name__ for f, _ in RULES})
-@@ -1202,7 +1205,7 @@
+@@ -1208,7 +1214,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
@@ -22,3 +32,12 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              spv_single_lane(os.path.join(w, key + '.spv'))
              r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
+@@ -1305,7 +1311,7 @@
+     name, k = loc[key]
+     if name not in packs: packs[name] = record_index(os.path.join(dm_dir, name))
+     fd, offs = packs[name]
+-    return name, os.pread(fd, offs[k + 1] - offs[k], offs[k])
++    return name, pread(fd, offs[k + 1] - offs[k], offs[k])
+ for key in keys: digests[key] = shader_key(key, *rec_of(key))
+ def plain_digest(k):   # a paired pixel shader's key, also when it is not built this time
+     if k in digests: return digests[k]
