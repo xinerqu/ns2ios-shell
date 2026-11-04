@@ -324,6 +324,15 @@ def load_profile(tid):
         if not line.strip() or line.lstrip().startswith('#'): continue
         k, _, v = line.partition('\t')
         rows.setdefault(k.strip(), []).append(v)
+    # A game of several programs (Super Mario 3D All-Stars: its launcher, Super Mario 64, Super Mario Sunshine): upstream packs
+    # them as one app by building the host over a table of every program's profile, and this shell runs one program per app --
+    # its DM_GAME_* are the placeholder's. Stop here rather than after the extraction and the rewrite, with an app that starts
+    # the launcher and then fails when the launcher starts a program that is not in it.
+    if rows.get('programs'):
+        die('%s is one app of several programs (%s; its profile lists them under "programs")\n'
+            '    The shell runs one program per app: it cannot hold the launcher and the games it starts. Not packed.\n'
+            '    Upstream builds this one for the Mac only; docs/SUPPORTED.md lists it as not supported.'
+            % (tid, ', '.join(rows['programs'][0].split())))
     return d, rows
 
 

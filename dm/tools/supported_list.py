@@ -50,6 +50,9 @@ def read_games(games_dir):
         f = d / 'game.tsv'
         if not f.is_file() or d.name == PLACEHOLDER: continue
         rows = rows_of(f)
+        # A program of another game's application (Super Mario 3D All-Stars' Super Mario 64 and Sunshine): not a game of its own,
+        # nothing can be packed from it alone, and upstream keeps it out of the games table too.
+        if one(rows, 'program_of'): continue
         versions = builds(rows)
         package = one(rows, 'package')
         verified = dict(versions).get(package, '') or (versions[-1][1] if versions else '')
@@ -65,6 +68,10 @@ def read_games(games_dir):
         # host runs natively. Said here rather than inferred from the profile's prose, because a game can mention Oodle for other
         # assets and still pack fine (Shin Megami Tensei V keeps its shader records inline in Oodle-compressed pak blocks).
         if one(rows, 'needs_mac_shaders'): features.append('暂不支持')
+        # One app of several programs (Super Mario 3D All-Stars): upstream builds the host over a table of every program's
+        # profile; this shell runs one program per app, so the launcher would start games that are not in the package. The
+        # packer stops on the profile's "programs" key before it extracts anything.
+        if one(rows, 'programs'): features.append('暂不支持（多程序合集）')
         # A Vulkan profile that carries vk_capture.tsv is one whose shaders exist only while the game runs, so the packer
         # needs one capture from the phone before it can build a playable package -- still supported, and no Mac is
         # involved. gl_capture.tsv is not a signal: Balatro carries one as the yardstick for the LÖVE prebuilt route,
@@ -96,6 +103,11 @@ def render_md(games):
          '**当前版本的打包器没有这条通路**，所以这几款在 Windows、Linux、macOS 上都会失败——它会在拆着色器那步停下并说明，'
          '不会产出装上去却画不出东西的半成品。详见 README 的「现在打不了的游戏」。'
          + ('' if any('暂不支持' in g['features'] for g in games) else '（当前没有。）'),
+         '- **标着「暂不支持（多程序合集）」的游戏**：一个应用里装了多个程序（《超级马力欧 3D 收藏集》= 启动器 + 马力欧 64 +'
+         ' 阳光；银河那一版是 32 位 ARM，Mac 上也跑不了）。上游的做法是把每个程序的参数编成一张表，启动器用'
+         ' `oe::ExecuteProgram` 换程序；**本项目的壳一个应用只跑一个程序**，打进去启动器能起，点进去就停了。'
+         '**打包器读到这种 profile 会直接停下并说明**，不会产出半成品。'
+         + ('' if any('多程序合集' in g['features'] for g in games) else '（当前没有。）'),
          '- **标着「需抓一次」的游戏**：着色器只在游戏跑起来时才生成，没有文件可拆。先用手机装一个不带画面的包抓一次，'
          '再打第二遍——**不需要 Mac**，Windows + 手机就够。步骤见 `docs/CAPTURE.zh-CN.md`。'
          + ('' if any('需抓一次' in g['features'] for g in games) else '（当前没有。）'), '',
