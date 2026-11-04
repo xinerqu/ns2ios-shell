@@ -12,6 +12,14 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Check:** `dm/gfx/tests/test_cra.py`. All 8,671 files of 1.1.1 pass the game's checksums.
 - **Found on:** [Mario Tennis Fever](../../dm/games/0400D4201C6EA000/README.md): 35,045 shaders.
 
+### Packed shader banks in loose NARC files
+
+- **Symptom:** the split finds only a small part of a game's shaders, with no `[RED]` line, and its RomFS holds files that start `NARC` (`.narc`, `.nptl`, `.ntex` on Mario Tennis Aces).
+- **Cause:** the split reads a whole file only when it sees a shader magic in the file's bytes. A NARC's members are packed by their first byte (`cra.undo`), which hides those magics, so the file was left out before the reader ever saw it. Mario Tennis Fever did not show this: its files come through `cra_jobs`, past that check.
+- **Fix:** `scan_file_in` passes every file with the `NARC` magic to `scan_blob`, whatever its name. The members go through the same `cra.narc_members` and `cra.undo` as Fever's.
+- **Check:** `dm/tools/tests/test_split_narc.py`: synthetic files with every packing and BNSH hidden in the file's bytes give the same keys and pairs as plain ones.
+- **Found on:** Mario Tennis Aces, no profile yet ([issue #1131](https://github.com/seedds/nxnative/issues/1131), diagnosed by PikaMan80, who counted 1,388 shaders from the loose `.nsb` files and 21,703 with the archives read). Not run on the game's files here. Open: that report says kind `0x50` wraps a zlib stream, and `cra.undo` does not unwrap one, so such members would give no shaders and no red line.
+
 ### Sumo Ninty_NX shaders and MuxFDMR streams
 
 - **Symptom:** the split finds no shaders in `main` or RomFS, while reporting control sections in `main` with no code area. The game has `.sp4` resources and loose `.nvnbin` files rather than BNSH archives or whole GLSLC outputs.
@@ -439,6 +447,13 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **How it is stored:** a version 11 pak (Zlib blocks, index not encrypted) with no `.ushaderbytecode`: the project turned `bShareMaterialShaderCode` off, so each material keeps its shaders in its own `.uexp` and the engine's global shaders are in `Engine/GlobalShaderCache-SF_GLSL_SWITCH.bin`, as in [Unreal Engine 4.18](#unreal-engine-418-shaders-inline-in-cooked-packages). Unreal 4.27 serializes each one as an entry of `FShaderMapResourceCode`: the code (`i32` length, then an LZ4 block, the engine's shader compression since 4.26), the raw size (`i32`) and the frequency (`u8`).
 - **Reader:** `uepak.py` `inline_shaders` tells such a pak from one with archives by its directory index (cooked packages and no `.ushaderbytecode`; an encrypted index is taken for one with archives), and `shader_split.py` `ue_legacy_jobs` reads it file by file, Zlib and LZ4 blocks decoded in Python (`Pak.read`), so no host runs. `ue_inline_shaders` finds each LZ4 block by its first literals, the record's `LSLG`, with the token and literal length bytes in front of it, and takes it when it decodes to exactly the raw size after the block.
 - **Found on:** [OCTOPATH TRAVELER II](../../dm/games/0100A3501946E000/README.md): 13,980 unique shaders (1,910 vertex, 11,346 pixel, 694 compute, 30 geometry) from the 3.3 GB pak in 13 s.
+
+### Unreal Engine 4.27 shaders inline in IoStore export bundles
+
+- **Symptom:** `the RomFS has Unreal paks, but none … holds a shader code archive` from the NSP script, on a game with a `.pak` beside a `.utoc` and `.ucas`.
+- **How it is stored:** the same inline records as [the paks' `.uexp` files](#unreal-engine-427-shaders-inline-in-cooked-packages-lz4), `bShareMaterialShaderCode` being off, with IoStore on as well: the cooked packages are the container's export bundles (chunk type 2 in Unreal 4.27's numbering, TOC version 3), Oodle-compressed block by block, and the pak beside it keeps everything else, the global shader cache (`Engine/GlobalShaderCache-SF_GLSL_SWITCH.bin`) too. The pak's directory has neither `.ushaderbytecode` nor `.uexp`, so it was taken for one with archives.
+- **Reader:** `uepak.py` `inline_shaders` also takes the global shader cache with no `.ushaderbytecode` as inline, and `shader_split.py` `ue_legacy_jobs` then also reads the export bundles of the containers beside such a pak, the newest copy of each chunk ID (`mount_order`), through the game's own Oodle in the host's tool mode. Bulk data chunks are skipped. `Toc.names` reads the container's directory index, so a shader's label names its package, as for a pak, and `shader_groups` works the same way.
+- **Found on:** [Mario & Luigi: Brothership](../../dm/games/01006D0017F7A000/README.md): 45,824 unique shaders from 8.8 GB of export bundles in 39 s.
 
 ### Unreal Engine 4.22 to 4.25 paks (version 8)
 
@@ -1414,13 +1429,21 @@ Finding, keying and translating shaders (`dm/gfx/tools/shader_split.py`, `dmsh_b
 - **Found on:** [Mario Party Superstars](../../dm/games/01006FE013472000/README.md) ([GitHub issue #1022](https://github.com/seedds/nxnative/issues/1022), [PR #1024](https://github.com/seedds/nxnative/pull/1024)). Open: why `metal-tt` failed after 76 minutes there, and how its memory grows with the number of bases.
 - **Check:** `dm/tools/tests/test_pso_offline.py` (`test_large_script_memory_and_compatible_archive_key`).
 
-### Bounded groups for the offline pipeline compiler (experimental)
+### Bounded groups for the offline pipeline compiler
 
-- **Symptom:** the offline archive stops with only `applegpu-nt command failed`; the macOS kernel log reports `no paging space action` and kills `air-nt` as the largest compressed process.
+- **Symptom:** the offline archive stops with only `applegpu-nt command failed`, sometimes after `Max Unstruct ID` lines ([a note, not the failure](#front-end-at--o1-apples-control-flow-lowering)); the macOS kernel log reports `no paging space action` and kills `air-nt` as the largest compressed process.
 - **Cause:** Apple's GPU compiler can exhaust memory while compiling the complete pipeline list. Lowering the Python builder's memory does not bound the compiler's. RSS excludes compressed and swapped allocations: use kernel resource-kill diagnostics and physical-footprint measurements to distinguish this failure from a compiler rejection or a full disk.
-- **Fix (experimental):** `pso_offline.py --batch-size N` compiles sequential groups of at most N bases, each script referencing only its libraries, then merges all results with `metal-pack -nthreads 1`. The normal single-file output, full-input archive key and runtime stamp stay compatible. Successful groups are cached by their own descriptors, library bytes, GPU, OS and compiler. A failed group or merge publishes neither a new complete archive key nor coverage stamp. The default remains one compiler invocation. This bounds input count, not compiler memory; an individual pipeline or the final merge may still exhaust resources.
+- **Fix:** with more bases than `--batch-size` (default 1,000; 0: one compiler invocation), `pso_offline.py` compiles sequential groups of at most that many, each script referencing only its libraries, then merges all results with `metal-pack -nthreads 1`. The normal single-file output, full-input archive key and runtime stamp stay compatible. Successful groups are cached by their own descriptors, library bytes, GPU, OS and compiler. A failed group or merge publishes neither a new complete archive key nor coverage stamp, and keeps the groups already done. The groups stay in the work folder (`batches.<arch>/`, 1.2 GB for Odyssey), so a run after a failure or after a change to some libraries compiles only what changed. This bounds input count, not compiler memory; an individual pipeline or the final merge may still exhaust resources.
 - **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md#files-and-shaders), which records the resource-kill evidence, before/after measurements and complete archive validation. [Issue #1022](https://github.com/seedds/nxnative/issues/1022) requests archive partitioning for another game's resource-heavy build; that workload remains unverified.
-- **Check:** `dm/tools/tests/test_pso_offline.py` covers pilot reuse, compatible full-archive reuse, partial final batches, changed-group invalidation, compile failure and merge failure. `t_pso_bundle` compiles one base per group, opens the merged result, retrieves a base from each group, rejects an absent depth entry and compares the complete coverage stamp with the ordinary build.
+- **Check:** `dm/tools/tests/test_pso_offline.py` covers the default, pilot reuse, compatible full-archive reuse, partial final batches, changed-group invalidation, compile failure and merge failure. `t_pso_bundle` compiles one base per group, opens the merged result, retrieves a base from each group, rejects an absent depth entry and compares the complete coverage stamp with the ordinary build.
+
+### A failed pipeline archive stops the whole build
+
+- **Symptom:** `--platform mac-app` or the iPhone build stops at its pipeline archive stage, after every earlier stage has finished: `[RED] pso_offline: metal-tt failed for applegpu_<gpu> (exit 1)`, then `pso_offline.py exit code 1`.
+- **Cause:** the archive is an optimization (without one the device builds the bases on its first start, as with `--gpu none`), but the NSP script and `build_ipa.sh` treated its failure as fatal. Whatever made it fail, such as [memory](#bounded-groups-for-the-offline-pipeline-compiler) or a [full disk](#offline-pipeline-archive-on-a-full-disk), lost the whole build.
+- **Fix:** both remove the unfinished archive folder, print a `[RED] pipeline archive: pso_offline.py failed` line and pack the app without one. The NSP script ends the stage with a warning (`⚠` in the console, `warn: true` in its JSON event). `pso_offline.py` run by itself still exits non-zero.
+- **Found on:** [Super Mario Odyssey](../../dm/games/0100000000010000/README.md#found-on-this-game) 1.4.1 on an M1 (`applegpu_g13g`), [LNPANDY/NX2Apple#98](https://github.com/LNPANDY/NX2Apple/issues/98), through [PR #494](https://github.com/seedds/nxnative/pull/494).
+- **Check:** `dm/tools/tests/test_nsp_mac_app.py` (`test_pso_archive_failure_is_a_warning`, `test_ipa_build_says_its_archive_failed`), `dm/tools/tests/test_pso_offline.py` (`IpaFallback`), `dm/tools/tests/test_nsp_progress.py` (`test_warned_stage_end`).
 
 ### Offline pipeline archive on a full disk
 
