@@ -19,7 +19,7 @@ nxn = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(nxn)
 
 BASE_TID = 0x0400380020056000          # Splatoon Raiders, a Switch 2 title the profiles know
-DLC_TID = BASE_TID + 0x1000            # add-on content sits at base + 0x1000 + index
+DLC_TID = BASE_TID + 0x1000 + 1        # add-on content sits at base + 0x1000 + index, and the index starts at 1
 
 
 def npdm_bytes(tid):
@@ -53,7 +53,9 @@ class Switch2Dump(unittest.TestCase):
         d = nxn.scan_dump(self.root)
         self.assertEqual('%016x' % BASE_TID, d['tid'])
         self.assertEqual(['v458752'], list(d['updates']))
-        self.assertEqual([0], list(d['dlc']))
+        # The folder says 0 and the title ID says 1: the title ID wins, because the host reports add-on content 1 and up
+        # (hle_misc.c). Packed as aoc/0 the DLC was invisible to the game (Donkey Kong Bananza, 2026-11-04).
+        self.assertEqual([1], list(d['dlc']))
 
     def test_a_folder_without_the_layout_is_left_to_the_nsp_route(self):
         self.assertIsNone(nxn.scan_dump(self.root / 'base'))

@@ -581,11 +581,21 @@ def scan_dump(folder):
                     warn('dlc/%s/%s: the folder holding a DLC\'s romfs must be its add-on index (0, 1, ...): skipping it'
                          % (t.name, n.name)); continue
                 idx = int(n.name)
+                # The title ID is the index, not the folder: an add-on's index is tid - base - 0x1000, and the host reports the
+                # ones 1 and up (hle_misc.c counts a name starting with 1-9). A dump's folder name is whatever tool made it, and
+                # a DLC landing in "0" is add-on 1 -- packed as aoc/0 it was never reported, and the game saw no add-on content
+                # at all (Donkey Kong Bananza, 2026-11-04). The NSP route already went by the title ID; this one did not.
                 want = int(t.name, 16) - int(tid, 16) - 0x1000
+                if not 1 <= want <= 2000:
+                    warn('dlc/%s: its title ID makes it add-on index %d, and add-on content starts at 1 (the host reports the '
+                         'ones 1 and up, hle_misc.c): skipping it, and the game will see no add-on content'
+                         % (t.name, want)); continue
                 if want != idx:
                     warn('dlc/%s/%s: its title ID makes it add-on index %d, and the folder says %d: using %d'
-                         % (t.name, n.name, want, idx, idx))
-                dlc[idx] = romfs
+                         % (t.name, n.name, want, idx, want))
+                if want in dlc:
+                    die('dlc/%s and another folder both claim add-on index %d: one DLC file per index' % (t.name, want))
+                dlc[want] = romfs
     return {'tid': tid, 'base': base, 'updates': updates, 'dlc': dlc}
 
 
