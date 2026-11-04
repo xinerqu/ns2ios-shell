@@ -635,6 +635,14 @@ def dump_aoc(dump, work, tid, force=False):
     if not dump['dlc']: return None
     out = work / 'aoc'
     out.mkdir(parents=True, exist_ok=True)
+    # A DLC whose index moved (the folder said 0, its title ID makes it 1: see scan_dump) must not leave the old folder behind:
+    # this folder outlives a run with --keep-work, and assemble copies the whole of it into the package, so a stale aoc/0 would
+    # ship a second copy of the same DLC that the host never reports (hle_misc.c counts 1 and up). Same rule as step_aoc's.
+    want = {str(i) for i in dump['dlc']}
+    for d in sorted(out.iterdir()):
+        if d.is_dir() and d.name not in want and (d.name.isdigit() or d.name.endswith('.partial')):
+            warn('DLC index %s is no longer in the folder: dropping it from the package' % d.name)
+            shutil.rmtree(d, ignore_errors=True)
     for idx, romfs in sorted(dump['dlc'].items()):
         dst = out / str(idx)
         if dst.is_dir() and not force:

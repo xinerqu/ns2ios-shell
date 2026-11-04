@@ -74,6 +74,20 @@ class Switch2Dump(unittest.TestCase):
         # a dump carries no control data, so the steps that want it have to cope with its absence
         self.assertFalse((dirs['v0'] / 'control.nacp').is_file())
 
+    def test_a_reused_work_dir_drops_the_dlc_of_an_old_index(self):
+        # --keep-work keeps work/aoc, and assemble copies the whole of it into the package: a DLC whose index moved from the
+        # folder's 0 to the title ID's 1 must not leave the old folder to ship a second copy nothing reports.
+        with tempfile.TemporaryDirectory() as t:
+            work = pathlib.Path(t) / 'work'
+            (work / 'aoc' / '0').mkdir(parents=True)
+            (work / 'aoc' / '0' / 'old.bin').write_text('a copy the host never reports')
+            romfs = pathlib.Path(t) / 'dlc' / '040074a01bf13001' / '0' / 'romfs'
+            romfs.mkdir(parents=True)
+            (romfs / 'a.bin').write_text('the DLC')
+            nxn.dump_aoc({'dlc': {1: romfs}}, work, '040074a01bf12000')
+            self.assertEqual(['1'], sorted(d.name for d in (work / 'aoc').iterdir()))
+            self.assertTrue((work / 'aoc' / '1' / 'a.bin').is_file())
+
 
 if __name__ == '__main__':
     unittest.main()
