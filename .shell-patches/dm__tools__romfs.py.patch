@@ -13,3 +13,38 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
      parts = p.split('/')
      for i, part in enumerate(parts):
          if not part.endswith('.img'): continue
+@@ -113,9 +116,24 @@
+ _fd_ranges = {}
+ 
+ 
++def _pread(fd, size, offset):
++    """os.pread, which Windows does not have: seek then read on that file's own descriptor.
++
++    Each _File opens its own descriptor and reads sequentially, so the seek is not shared with another reader. Without this a
++    RomFS image opened fine and every read of a file inside it raised AttributeError (Windows, 2026-11-05); the Mac has pread."""
++    try:
++        return _os.pread(fd, size, offset)
++    except AttributeError:
++        _os.lseek(fd, offset, _os.SEEK_SET)
++        return _os.read(fd, size)
++
++
+ class _File(io.RawIOBase):
+     def __init__(self, image, k):
+-        self.fd = _os.open(image.path, _os.O_RDONLY)
++        # O_BINARY: Windows opens a descriptor in text mode without it, and then a byte 0x1A (^Z) inside game data ends the
++        # read -- a 208 MB file came back as 592 bytes and the whole RomFS summed to 253 KB, silently (2026-11-05). POSIX has
++        # no such flag, so this is a no-op on a Mac.
++        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
+         self.start, self.length = image.entry(k)[:2]
+         self.pos = 0
+         _fd_ranges[self.fd] = (self.start, self.length)
+@@ -129,7 +147,7 @@
+         self.pos = pos; return pos
+     def readinto(self, buffer):
+         size = min(len(buffer), max(0, self.length - self.pos))
+-        data = _os.pread(self.fd, size, self.start + self.pos)
++        data = _pread(self.fd, size, self.start + self.pos)
+         buffer[:len(data)] = data; self.pos += len(data)
+         return len(data)
+     def close(self):

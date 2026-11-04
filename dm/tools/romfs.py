@@ -130,7 +130,10 @@ def _pread(fd, size, offset):
 
 class _File(io.RawIOBase):
     def __init__(self, image, k):
-        self.fd = _os.open(image.path, _os.O_RDONLY)
+        # O_BINARY: Windows opens a descriptor in text mode without it, and then a byte 0x1A (^Z) inside game data ends the
+        # read -- a 208 MB file came back as 592 bytes and the whole RomFS summed to 253 KB, silently (2026-11-05). POSIX has
+        # no such flag, so this is a no-op on a Mac.
+        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
         self.start, self.length = image.entry(k)[:2]
         self.pos = 0
         _fd_ranges[self.fd] = (self.start, self.length)
