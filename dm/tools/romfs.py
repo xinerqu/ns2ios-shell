@@ -92,7 +92,10 @@ def is_image(path):
 
 
 def _resolve(path):
-    p = _os.path.abspath(_os.fsdecode(path))
+    # One separator before splitting: on Windows abspath() returns backslashes, split('/') then yields a single part, no part
+    # ends in .img, and every read of a RomFS image falls back to the file system and fails (E:\...\RomFS.img\AS, shader_split's
+    # cra_jobs, 2026-11-05). The Mac never sees it. The rest of this module joins with '/', so this is the only place.
+    p = _os.path.abspath(_os.fsdecode(path)).replace('\\', '/')
     parts = p.split('/')
     for i, part in enumerate(parts):
         if not part.endswith('.img'): continue
@@ -113,6 +116,18 @@ def source(extraction):
 _fd_ranges = {}
 
 
+def _pread(fd, size, offset):
+    """os.pread, which Windows does not have: seek then read on that file's own descriptor.
+
+    Each _File opens its own descriptor and reads sequentially, so the seek is not shared with another reader. Without this a
+    RomFS image opened fine and every read of a file inside it raised AttributeError (Windows, 2026-11-05); the Mac has pread."""
+    try:
+        return _os.pread(fd, size, offset)
+    except AttributeError:
+        _os.lseek(fd, offset, _os.SEEK_SET)
+        return _os.read(fd, size)
+
+
 class _File(io.RawIOBase):
     def __init__(self, image, k):
         self.fd = _os.open(image.path, _os.O_RDONLY)
@@ -129,7 +144,7 @@ class _File(io.RawIOBase):
         self.pos = pos; return pos
     def readinto(self, buffer):
         size = min(len(buffer), max(0, self.length - self.pos))
-        data = _os.pread(self.fd, size, self.start + self.pos)
+        data = _pread(self.fd, size, self.start + self.pos)
         buffer[:len(data)] = data; self.pos += len(data)
         return len(data)
     def close(self):

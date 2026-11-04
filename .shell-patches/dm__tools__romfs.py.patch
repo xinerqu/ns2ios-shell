@@ -1,0 +1,15 @@
+diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
+--- a/dm/tools/romfs.py
++++ b/dm/tools/romfs.py
+@@ -92,7 +92,10 @@
+ 
+ 
+ def _resolve(path):
+-    p = _os.path.abspath(_os.fsdecode(path))
++    # One separator before splitting: on Windows abspath() returns backslashes, split('/') then yields a single part, no part
++    # ends in .img, and every read of a RomFS image falls back to the file system and fails (E:\...\RomFS.img\AS, shader_split's
++    # cra_jobs, 2026-11-05). The Mac never sees it. The rest of this module joins with '/', so this is the only place.
++    p = _os.path.abspath(_os.fsdecode(path)).replace('\\', '/')
+     parts = p.split('/')
+     for i, part in enumerate(parts):
+         if not part.endswith('.img'): continue

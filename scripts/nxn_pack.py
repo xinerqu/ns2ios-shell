@@ -553,7 +553,8 @@ def scan_dump(folder):
     files are not encrypted, which is why this route exists for Switch 2 titles -- their dumps are the form they circulate in.
     """
     base = folder / 'base'
-    if not (base / 'exefs').is_dir() or not (base / 'romfs').is_dir(): return None
+    # romfs/ or RomFS.img: a .nup unpacked by pack_nup.py holds the image, which dm/tools/romfs.py serves as a folder
+    if not (base / 'exefs').is_dir() or not ((base / 'romfs').is_dir() or (base / 'RomFS.img').is_file()): return None
     npdm = base / 'exefs' / 'main.npdm'
     if not npdm.is_file(): return None
     try:
@@ -567,8 +568,8 @@ def scan_dump(folder):
             ver = dump_version_name(d.name)
             if not ver:
                 warn('updates/%s is not a version number (a decimal one, like 458752): skipping it' % d.name); continue
-            if not (d / 'exefs').is_dir() or not (d / 'romfs').is_dir():
-                die('updates/%s holds no exefs/ and romfs/: an update in a dump is the patched tree, not a patch'
+            if not (d / 'exefs').is_dir() or not ((d / 'romfs').is_dir() or (d / 'RomFS.img').is_file()):
+                die('updates/%s holds no exefs/ and romfs/ (or RomFS.img): an update in a dump is the patched tree, not a patch'
                     % d.name)
             updates[ver] = d
     dlc = {}
@@ -610,7 +611,11 @@ class DumpVersion:
     def __truediv__(self, name):
         low = name.lower()
         if low == 'exefs': return self.root / 'exefs'
-        if low == 'romfs': return self.root / 'romfs'
+        if low == 'romfs':
+            # An extraction that holds the image (a .nup unpacked by pack_nup.py) answers with it: dm/tools/romfs.py gives
+            # every reader an os/open that serves an image as a folder, so the shader split and the profile scan take either.
+            img = self.root / 'RomFS.img'
+            return img if img.is_file() else self.root / 'romfs'
         return self.root / name
     def __fspath__(self): return str(self.root)
     def __str__(self): return str(self.root)
@@ -672,77 +677,69 @@ def find_nup(folder, given=None):
 
 
 def nup_dump(nup_path, folder):
-    """A .nup written out as the dump layout every later step here reads, and that layout's scan.
+    """A .nup unpacked by upstream's own pack_nup.py, then labelled the way this packer reads a dump.
 
-    Upstream's pack_nup.py (copied into scripts/, unedited) writes extract/v<N>/{ExeFS,RomFS.img} and aoc/<index>.img: this
-    packer asks every later step for a RomFS *folder* -- the profile scan, the shader split, the copy into the app -- so the
-    container is walked here into <folder>/_nup/{base|updates/<version>}/ and _nup/dlc/<title ID>/<index>/romfs/, which is
-    exactly the layout scan_dump reads. Nothing downstream changes, and the Windows route stays what it is.
+    Upstream writes extract/v<N>/{ExeFS,RomFS.img,control.nacp,icon.jpg} and aoc/<index>.img, and that is what is kept: no
+    file is converted. The RomFS stays an image and every reader here takes it as one -- shader_split.py imports os/open
+    from dm/tools/romfs.py, which serve an image as a folder, and the app reads <App>/romfs.img as readily as <App>/romfs
+    (main.m romfs_locate). Only the labels change, because the version choice below goes by the folder name: pack_nup.py
+    names a base package's folder v0, while the profile registers builds like v458752, so the folder takes the version the
+    container itself states, and ExeFS becomes the exefs a dump folder uses.
 
-    Every file is checked against its size and SHA-256 as it is written (Nup.copy), so a damaged container stops here instead
-    of producing a package that fails on the phone. `codec` 0 (raw) and 1 (one zstd frame) are the two the reader knows.
-
-    A container with no base game (updates marked standalone_update) is taken as the game itself, as upstream's pack_nup.py
-    does, and the newest update becomes the version that is packed.
+    A container with no base game (updates marked standalone_update) is taken as the game itself, as upstream does, and the
+    newest update becomes the version that is packed.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import pack_nup                                    # scripts/pack_nup.py: upstream's SPEC v1 reader, copied unedited
     try:
-        n = pack_nup.Nup(nup_path)
+        with pack_nup.Nup(nup_path) as n:
+            app, base, vers, dlc = pack_nup.scan(n)
+            k = base if base is not None else (vers[max(vers)] if vers else None)
+            if k is None: die('%s holds no game files' % nup_path.name)
+            ver = int(getattr(k, 'version', 0) or 0)
+            nver = (str(ver) if ver else '0')
     except pack_nup.Error as e:
         die('%s cannot be read as a NUP: %s' % (nup_path.name, e))
-    try:
-        app, base, vers, dlc = pack_nup.scan(n)
-        k = base if base is not None else (vers[max(vers)] if vers else None)
-        if k is None: die('%s holds no game files' % nup_path.name)
-        out = folder / ('_nup_%016x' % app)
-        # A second run over the same container reuses what the first wrote: unpacking 9 GB of a big game costs a minute and
-        # a half, and the pack after it usually only changed a setting. Size and mtime together, as the other steps use.
-        stamp = out / '.source'
-        want = '%s\t%d\t%d' % (nup_path.name, nup_path.stat().st_size, nup_path.stat().st_mtime_ns)
-        if stamp.is_file() and stamp.read_text(encoding='utf-8').strip() == want and (out / 'base' / 'exefs' / 'main.npdm').is_file():
-            say('NUP %s: reusing the dump written from it (%s)' % (nup_path.name, out.name))
-            return scan_dump(out)
-        # Where the tree goes: a base package that names a version is that version (a NUP packed from a dump carries the
-        # update as the base, version 458752 for Donkey Kong Bananza), and the folder has to be named the way a dump names
-        # it -- updates/<decimal> -- so the profile's `build` rows and `build IDs match the profile` still line up.
-        ver = int(getattr(k, 'version', 0) or 0)
-        root = (out / 'updates' / str(ver)) if ver else (out / 'base')
-        root.mkdir(parents=True, exist_ok=True)
-        say('NUP %s: %s, version %d, %d DLC; unpacking into %s' % (nup_path.name, '%016X' % app, ver, len(dlc), out.name))
-
-        def walk(d, dst):
-            dst.mkdir(parents=True, exist_ok=True)
-            for name, isdir, idx in n.children(d):
-                p = dst / name.decode('utf-8', 'replace')
-                if isdir: walk(idx, p)
-                else:
-                    with open(p, 'wb') as f: n.copy(idx, f)
-
-        meta = k.meta()
-        walk(k.exefs, root / 'ExeFS')
-        if k.romfs != pack_nup.NO_DIR: walk(k.romfs, root / 'RomFS')
-        else: (root / 'RomFS').mkdir(parents=True, exist_ok=True)
-        # Control data travels in the container's meta block when its packer kept it: the NACP gives the settings screen the
-        # game's languages and the icon gives it the game's picture, and both are things a plain dump cannot have.
-        for t, fname in ((pack_nup.T_NACP, 'control.nacp'), (pack_nup.T_ICON, 'icon.jpg')):
-            if t in meta: (root / fname).write_bytes(meta[t])
-        if ver:
-            # scan_dump identifies the game from base/exefs/main.npdm and checks that base/romfs is a folder: a stub of both
-            # is all it needs, and the real tree is under updates/<version>/ exactly as a dump keeps it.
-            (out / 'base' / 'exefs').mkdir(parents=True, exist_ok=True)
-            (out / 'base' / 'romfs').mkdir(parents=True, exist_ok=True)
-            (out / 'base' / 'exefs' / 'main.npdm').write_bytes(n.read(n.child(k.exefs, b'main.npdm')))
-        for t, pk in sorted(dlc.items()):
-            idx = t - app - 0x1000
-            walk(pk.romfs, out / 'dlc' / ('%016x' % t) / str(idx) / 'romfs')
-        say('NUP: add-on content at index %s' % (', '.join(str(t - app - 0x1000) for t in sorted(dlc)) or 'none'))
-        stamp.write_text(want, encoding='utf-8')
-    except pack_nup.Error as e:
-        die('%s: %s' % (nup_path.name, e))
-    finally:
-        n.close()
-    return scan_dump(out)
+    out = folder / ('_nup_%016x' % app)
+    # A second run over the same container reuses what the first wrote: unpacking 9 GB costs a minute and a half to seven,
+    # and the pack after it usually only changed a setting. Size and mtime together, as the other steps use.
+    stamp, want = out / '.source', '%s	%d	%d' % (nup_path.name, nup_path.stat().st_size, nup_path.stat().st_mtime_ns)
+    if stamp.is_file() and stamp.read_text(encoding='utf-8').strip() == want and (out / 'done').is_file():
+        say('NUP %s: reusing what was unpacked from it (%s)' % (nup_path.name, out.name))
+        return scan_dump(out)
+    tmp = out / 'unpack'
+    shutil.rmtree(tmp, ignore_errors=True)
+    say('NUP %s: %s, version %s, %d DLC; unpacking with pack_nup.py' % (nup_path.name, '%016X' % app, nver, len(dlc)))
+    run([str(PY), str(Path(__file__).resolve().parent / 'pack_nup.py'), str(nup_path), '--work-dir', str(tmp)],
+        log=(out / 'logs' / 'nup.log'), what='unpacking %s' % nup_path.name)
+    root = (out / 'updates' / nver) if ver else (out / 'base')
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    ex = tmp / 'extract'
+    srcs = sorted(p for p in ex.iterdir() if p.is_dir()) if ex.is_dir() else []
+    if not srcs: die('pack_nup.py wrote no extract/ under %s: see %s' % (out, out / 'logs' / 'nup.log'))
+    src = next((p for p in srcs if p.name == 'v%s' % nver), srcs[-1])
+    for item in src.iterdir():
+        name = 'exefs' if item.name == 'ExeFS' else item.name
+        item.replace(root / name)
+    if ver:
+        # scan_dump identifies the game from base/exefs/main.npdm and wants base/romfs to be a folder: a stub of both is all
+        # it needs, and the real tree is under updates/<version>/ exactly as a dump keeps it.
+        (out / 'base' / 'exefs').mkdir(parents=True, exist_ok=True)
+        (out / 'base' / 'romfs').mkdir(parents=True, exist_ok=True)
+        (out / 'base' / 'exefs' / 'main.npdm').write_bytes((root / 'exefs' / 'main.npdm').read_bytes())
+    # The add-on content stays the container's images, at the indices pack_nup.py gave them (its own rule: DLC title ID - the
+    # base's - 0x1000). assemble copies this folder into <App>/aoc, which is the shape the host mounts.
+    aoc = tmp / 'aoc'
+    dst_aoc = out / 'aoc'
+    shutil.rmtree(dst_aoc, ignore_errors=True)
+    if aoc.is_dir(): aoc.replace(dst_aoc)
+    shutil.rmtree(tmp, ignore_errors=True)
+    (out / 'done').write_text('ok', encoding='utf-8')
+    stamp.write_text(want, encoding='utf-8')
+    dump = scan_dump(out)
+    dump['aoc_dir'] = dst_aoc if dst_aoc.is_dir() else None
+    return dump
 
 
 # ---------------------------------------------------------------- steps
@@ -1688,8 +1685,15 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         n = len(list(dst.glob('*_b.metallib')))
         if n: say('shader source for %d shaders -> msl/%s' % (n, msl_dir.name))   # empty for a GL package, whose shaders go to msl/gl instead
 
-    shutil.copytree(game / 'RomFS', A / 'romfs', symlinks=True)
-    say('RomFS in place')
+    romfs = game / 'RomFS'
+    if romfs.is_file():
+        # <App>/romfs.img, the shape upstream's build_ipa.sh gives a package whose extraction holds an image, and the one
+        # main.m looks for first (romfs_locate). One file instead of a hundred thousand, and the app stops paying to copy them.
+        shutil.copyfile(romfs, A / 'romfs.img')
+        say('RomFS in place: romfs.img (%.1f GB)' % (romfs.stat().st_size / 2**30))
+    else:
+        shutil.copytree(romfs, A / 'romfs', symlinks=True)
+        say('RomFS in place')
 
     # Add-on content: <App>/aoc/<index>/, which main.m hands to the host as DM_AOC_DIR and hle_fs.c mounts for the game.
     # Absent when the folder holds no DLC, and then the host reports no add-on content at all -- the same as a console
@@ -2093,7 +2097,7 @@ def main():
         # Already extracted: the steps that follow ask a version for ExeFS/ and RomFS/ and get the dump's own folders,
         # and assemble copies that RomFS into the app. So there is nothing to unpack here, and no key is read.
         dirs = dump_dirs(dump, versions)
-        aoc_dir = dump_aoc(dump, work, tid, a.force)
+        aoc_dir = dump.get('aoc_dir') or dump_aoc(dump, work, tid, a.force)
         say('dump: %s (%s)' % (folder, ', '.join(sorted(dump['updates'])) or 'base only'))
     else:
         check_keys(nx, keys, fam, picks, versions, work, tid)
