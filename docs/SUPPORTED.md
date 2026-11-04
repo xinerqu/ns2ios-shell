@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**134 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**141 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -45,6 +45,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
 | Cuphead | `0100A5C00D162000` | 1.3.7 |  |
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
+| DAVE THE DIVER | `010097F018538000` | v1.0.6.1267 |  |
 | Dead Cells | `0100646009FBE000` | 1.25.0 |  |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
@@ -72,11 +73,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Hyrule Warriors: Age of Imprisonment | `04003F40232DE000` | v196608 |  |
 | Hyrule Warriors: Definitive Edition | `0100AE00096EA000` | 1.0.1 |  |
 | Kirby and the Forgotten Land | `01004D300C5AE000` | 1.1.0 |  |
+| Kirby Star Allies | `01007E3006DDA000` | 4.0.0a |  |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 | 60 fps |
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
 | Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 |  |
 | Mario Kart 8 Deluxe | `0100152000022000` | 4.0.1（也可 4.0.0） |  |
+| Mario Kart World | `0400C3F00006E000` | v0 |  |
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
+| Mario Tennis Fever | `0400D4201C6EA000` | v327680 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
@@ -122,6 +126,9 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Streets of Rage 4 | `0100EC9010258000` | 1.0.9 |  |
 | Subnautica | `0100429011144000` | 1.23.83358 |  |
 | Subnautica: Below Zero | `010014C011146000` | 1.23.55063 |  |
+| Super Mario 3D All-Stars | `010049900F546000` | 1.1.4 |  |
+| Super Mario 3D All-Stars: Super Mario 64 | `010049900F546001` | 1.1.4 |  |
+| Super Mario 3D All-Stars: Super Mario Sunshine | `010049900F546002` | 1.1.4 | handheld · 需抓一次 |
 | Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 1.2.2 |  |
 | Super Mario Bros. Wonder | `010015100B514000` | 1.2.1（也可 1.0.0 / 1.0.1） |  |
 | Super Mario Galaxy | `010099C022B96000` | 1.3.1 | handheld · 需抓一次 |

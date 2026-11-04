@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 --- a/dm/gfx/tools/dmsh_mtlcache.py
 +++ b/dm/gfx/tools/dmsh_mtlcache.py
-@@ -7,17 +7,34 @@
+@@ -8,17 +8,34 @@
  # Filling from earlier builds: every imported library must record the current compiler identity and flags in its reflection. Legacy libraries without that identity are not imported.
  # A fresh compile of two shaders per stage also checks their bytes. Each folder is read once per compiler identity (filled.json remembers its number of libraries).
  # Not part of the chain version (dmsh_chain.py): the cache never changes an output, it only skips recompiling one. Change FORMAT when what it stores changes.
@@ -39,7 +39,7 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
  
  
  def compiler_id(sdk):
-@@ -56,7 +73,7 @@ class Cache:
+@@ -57,7 +74,7 @@
              clone(p, lib); self.count((target, 'reused')); return
          tmp = f'{lib}.tmp-{os.getpid()}-{threading.get_ident()}'
          self._compile(target, msl, tmp)
@@ -47,4 +47,4 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 +        _replace(tmp, lib)
          os.makedirs(os.path.dirname(p), exist_ok=True); clone(lib, p); self.count((target, 'compiled'))
  
-     def _check(self, target, d, stems, mac_dir):
+     def compile_split(self, target, msl, a, b, split):

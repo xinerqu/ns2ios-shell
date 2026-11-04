@@ -25,9 +25,9 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  
  // Documents/romfs.img, one RomFS image file (dm/tools/romfs_image.py, scripts/push_romfs.sh): only a complete one counts. Its index is written last and ends the file, so a copy cut off partway is skipped
  static int romfs_image_complete(NSString *path) {
-@@ -73,8 +78,15 @@
+@@ -78,8 +83,15 @@
      NSString *documentFolder = [doc stringByAppendingPathComponent:@"romfs"];
-     if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return documentFolder;
+     if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) return documentFolder;
      if (romfs_image_complete(bundledImage)) return bundledImage;
 -    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]])
 +    for (NSString *d in @[[doc stringByAppendingPathComponent:@"romfs"], [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"romfs"]]) {
@@ -36,13 +36,13 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        // The packer writes the game's own tree there; if it is the wrong game, the host reports it when reading the files.
 +        if ([fm fileExistsAtPath:d] && ([fm contentsOfDirectoryAtPath:d error:nil] ?: @[]).count) return d;
 +#else
-         if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@DM_GAME_ROMFS_MARKER]]) return d;   // only a directory containing the game profile's romfs_marker path counts (Mario: System/Resource, the resource size table)
+         if ([fm fileExistsAtPath:[d stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) return d;   // only a directory containing the game profile's romfs_marker path counts (Mario: System/Resource, the resource size table)
 +#endif
 +    }
      return nil;
  }
  
-@@ -123,7 +135,7 @@
+@@ -129,7 +141,7 @@
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
@@ -51,7 +51,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
      for (NSString *d in [@[@"romfs", @"aoc", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
-@@ -168,12 +180,29 @@
+@@ -174,16 +186,39 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -62,10 +62,8 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
 +              av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
 +                                : "entitlement in effect"); }
-     NSString *romfs = romfs_locate();
-     if (!romfs) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
-     fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
-     setenv("DM_ROMFS", romfs.fileSystemRepresentation, 0);
+     NSString *dm = program_env();
+     if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
      setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
      setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
 +    // Atmosphère cheat files the player drops in from the Files app: Documents/cheats/<build ID>.txt, named by the main
@@ -78,10 +76,9 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    // The panel is the only switch there is on a phone, so it owns every entry -- including a "{Name}" master, which
 +    // Atmosphère always runs: with no menu to turn one off, a file whose master breaks the game would be unusable.
 +    setenv("DM_CHEATS_PANEL", "1", 1);
-     NSString *dm = [res stringByAppendingPathComponent:@"dm"];
-     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
-     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
-@@ -183,6 +212,12 @@
+     setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
+     aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
+     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -94,7 +91,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -195,11 +230,19 @@
+@@ -231,11 +266,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

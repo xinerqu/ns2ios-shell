@@ -1,7 +1,7 @@
 diff --git a/dm/host/main.c b/dm/host/main.c
 --- a/dm/host/main.c
 +++ b/dm/host/main.c
-@@ -92,13 +92,17 @@
+@@ -128,13 +128,17 @@
      { void dm_term_install(void); dm_term_install(); }   // SIGTERM graceful exit (hle_lifecycle.c)
      { void crash_set_dump_hook(void (*)(void)); void svc_thread_dump(void); crash_set_dump_hook(svc_thread_dump); }   // Dump guest thread state on a crash
      const char *names[argc + DM_GAME_NMOD]; int n = 0;
@@ -20,5 +20,5 @@ diff --git a/dm/host/main.c b/dm/host/main.c
 -        LOG("game arguments from the game profile: %s", DM_GAME_ARGS);
 +        LOG("game arguments from the game profile: %s", profile_args);
      }
-     if (!n) { static const char *def[] = DM_GAME_MODULES; for (int k = 0; k < DM_GAME_NMOD; k++) names[n++] = def[k]; }   // default module list from the game profile's modules (Mario: main sdk)
+     if (!n) n = profile_modules(argv[1], names);
      load_modules(argv[1], names, n);

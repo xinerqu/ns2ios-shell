@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
 --- a/dm/gfx/vk/hle_vk.m
 +++ b/dm/gfx/vk/hle_vk.m
-@@ -129,6 +129,8 @@
+@@ -137,6 +137,8 @@
  typedef struct { char key[17]; int frag, nres; shres res[24]; } shinfo;
  static shinfo *g_sh; static int g_nsh;
  static id<MTLLibrary> g_lib;
@@ -10,7 +10,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
  static int sh_cmp(const void *a, const void *b) { return memcmp(((const shinfo *)a)->key, ((const shinfo *)b)->key, 16); }
  static void sh_load(void) {
      const char *d = getenv("DM_MSL_DIR"); char p[1024];
-@@ -153,11 +155,48 @@
+@@ -161,11 +163,48 @@
      fclose(f);
      qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);   // looked up by key (Super Mario Galaxy creates over 3,000 modules at boot)
      snprintf(p, sizeof p, "%s/vk/vk_shaders.metallib", d);
@@ -62,7 +62,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
  
  static void dev_init_once(void) {
      @autoreleasepool {
-@@ -801,8 +840,12 @@
+@@ -896,8 +935,12 @@
      for (int i = 0; i < 8; i++) snprintf(m->key + 2 * i, 3, "%02x", h[i]);
      sh_capture(m->key, ci->pCode, ci->codeSize);
      m->si = sh_find(m->key);
@@ -77,7 +77,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
      else OLOG("CreateShaderModule %s", m->key);
      *out = m; return VK_SUCCESS;
  }
-@@ -854,7 +897,7 @@
+@@ -967,7 +1010,7 @@
              else if (st->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
                  if (dual && m->fn) {   // pipelines may be built on several threads
                      static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER; pthread_mutex_lock(&mu);
@@ -85,4 +85,4 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
 +                    if (!m->tried_d) { m->tried_d = 1; m->fn_d = g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s_d", m->key]] : sh_src_fn(m->key, 1); }
                      pthread_mutex_unlock(&mu);
                  }
-                 pd.fragmentFunction = dual && m->fn_d ? m->fn_d : m->fn; p->fs = m->si;
+                 pd.fragmentFunction = spec_fn(dual && m->fn_d ? m->fn_d : m->fn, m->key, dual && m->fn_d, st->pSpecializationInfo); p->fs = m->si;
