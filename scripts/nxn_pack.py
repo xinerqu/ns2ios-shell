@@ -1378,7 +1378,27 @@ def step_guest(patched, mods, stage):
     say('Frameworks/Guest.framework: %d bytes' % n)
 
 
-def env_for(rows):
+def upscaler_keys(gdir):
+    """The game's own upscaler shaders, by the rule dm/games/game.py upscaler_keys() uses (a compute shader of the shader map
+    whose source is agl's NDSR pack), read from the profile directory this run packs instead of DM_GAMES_DIR: a derived
+    profile is not registered there.
+
+    The shell compiles the placeholder profile, so its DM_GAME_UPSCALER_KEYS is the empty string and the launcher's
+    "Game's upscaler: MetalFX" row would change nothing; nvn_mtl.m reads DM_NVN_UPSCALER_KEYS first.
+    """
+    p = gdir / 'shader_map.tsv'
+    if not p.is_file(): return []
+    sys.path.insert(0, str(DM / 'games'))
+    import game                                   # only for UPSCALER_SOURCE, so the two rules cannot drift apart
+    keys = set()
+    for line in p.read_text(encoding='utf-8', errors='replace').splitlines():
+        c = line.split('\t')
+        if len(c) >= 5 and c[2] == 'compute' and game.UPSCALER_SOURCE.search(c[4]) and re.fullmatch(r'[0-9a-f]{16}', c[3]):
+            keys.add(c[3])
+    return sorted(keys)
+
+
+def env_for(rows, gdir=None):
     """The profile keys the shell cannot carry in its compiled-in header, as dm/env.txt lines.
 
     main.m exports these before the host starts; hle_svc.c reads the memory layout from them, hle_os.c the game's own getenv.
@@ -1474,6 +1494,11 @@ def env_for(rows):
     pl = one(rows, 'pad_layout')
     if pl and pl.strip() in ('simple', 'full', 'touch'):
         lines.append('DM_PAD_LAYOUT=%d' % ('simple', 'full', 'touch').index(pl.strip()))
+    # The game's own upscaler shaders (the entry beside game.py's DM_GAME_UPSCALER_KEYS, which the shell compiles empty):
+    # written as the profile's comma-separated 16-digit keys, the form nvn_mtl.m's up_keys() walks. Left out when the game
+    # has none, so the row never appears and nothing changes.
+    ups = upscaler_keys(gdir) if gdir else []
+    if ups: lines.append('DM_NVN_UPSCALER_KEYS=' + ','.join(ups))
     return lines
 
 
@@ -1578,7 +1603,7 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     # starts, and the host reads them (env_for lists them and the form each one takes). Getting the memory layout wrong
     # does not crash at once -- the game asks for the wrong heap and aborts in SetHeapSize (Hades II asked for pool - 64 MB
     # instead of pool - 108 MB and overflowed the pool by 44 MB).
-    env_lines = env_for(rows)
+    env_lines = env_for(rows, gdir)
     if env_lines:
         (A / 'dm' / 'env.txt').write_text('\n'.join(env_lines) + '\n', encoding='utf-8')
         say('dm/env.txt: ' + ', '.join(env_lines))
