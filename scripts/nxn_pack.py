@@ -1521,6 +1521,30 @@ def env_for(rows, gdir=None):
     return lines
 
 
+def text_tables_to_lf(root):
+    """CRLF → LF for the text tables the host compares as text, and the count rewritten.
+
+    This packer runs on Windows, where the chain's own writers (dm/gfx/tools/dmsh_chain.py's inputs.tsv, c1_guard.py's
+    c1_full.tsv, and this script's env.txt) open in text mode and get \\r\\n, while the host splits on "\\n" and compares the
+    fields: the library's stamp then arrives as "5dd843bed8d1\\r", the "# chain b-<V> inputs <stamp> " header of c1_full.tsv no
+    longer matches it, and both tables are refused -- every c1 getting its own 64 KiB and uniform blocks copied whole
+    (nvn_mtl.m shmap_read). Upstream builds on a Mac, where the same files are LF, so this only ever shows on this route
+    (Donkey Kong Bananza, 2026-11-04). The shaders themselves (*_b.metallib) are left alone: they hold Metal source, which the
+    device compiles, and no line of it is compared as a field.
+    """
+    n = 0
+    paths = []
+    if (root / 'dm').is_dir():
+        paths += list((root / 'dm').glob('*.tsv')) + list((root / 'dm').glob('*.txt'))
+    if (root / 'msl').is_dir():
+        for d in (root / 'msl').iterdir():
+            if d.is_dir(): paths += list(d.glob('*.tsv'))
+    for p in paths:
+        b = p.read_bytes()
+        if b'\r\n' in b: p.write_bytes(b.replace(b'\r\n', b'\n')); n += 1
+    return n
+
+
 def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, tid, msl_dir, work, aoc_dir=None):
     """Unpack the shell and put the game into it: guest library, MSL source, RomFS, tables, icon, identity."""
     # Move a previous stage aside instead of deleting it: this environment counts file deletions and refuses to go past a
@@ -1676,6 +1700,10 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
         # here is optional.
         die('could not edit the app\'s Info.plist (%s): the package would carry the shell\'s own identity, and installing it '
             'would replace the other game that uses it' % e)
+    # Last thing before the package is built: the text tables the host compares as text must not carry CRLF (text_tables_to_lf
+    # says why, and what the host does with them when they do).
+    n = text_tables_to_lf(A)
+    if n: say('line endings: %d text table(s) rewritten with LF (the host compares them as text, and this packer runs on Windows)' % n)
     return A
 
 
