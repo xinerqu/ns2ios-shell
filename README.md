@@ -120,8 +120,9 @@ neither a ticket nor a readable header (an NCA header is encrypted with a key fr
 the packer unpacks the dump and takes the title ID from the result, recording it in `<file>.xci.tid`; later packs read that
 instead of unpacking again.
 
-Formats: **NSP** (base game, updates, DLC) and **XCI** (base game only). **NSZ is not supported** — unpack it first with
-`nsz -D "file.nsz"`.
+Formats: **NSP** (base game, updates, DLC), **XCI** (base game only) and **NUP** (one `.nup` holding the game, its
+updates and its DLC — no keys needed; the packer unpacks it into `_nup_<title ID>` beside it, and `--clean` removes that
+again). **NSZ is not supported** — unpack it first with `nsz -D "file.nsz"`.
 
 ## Which games work, and which version
 

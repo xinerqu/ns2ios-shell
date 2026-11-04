@@ -103,8 +103,9 @@ def tidy(work, keep_logs=True):
 def clean_folders(folder):
     """--clean: everything a previous run left in this folder, logs included."""
     if not folder.is_dir(): die('no such folder: %s' % folder)
-    works = sorted(p for p in folder.iterdir() if p.is_dir() and p.name.endswith('_pack'))
-    if not works: say('nothing to clean: %s holds no <title ID>_pack folder' % folder); return
+    works = sorted(p for p in folder.iterdir()
+                   if p.is_dir() and (p.name.endswith('_pack') or p.name.startswith('_nup_')))
+    if not works: say('nothing to clean: %s holds no <title ID>_pack folder, and no _nup_<title ID> from a .nup' % folder); return
     freed = 0
     for w in works:
         say('cleaning %s' % w.name)
@@ -655,6 +656,93 @@ def dump_aoc(dump, work, tid, force=False):
         n = sum(1 for f in dst.rglob('*') if f.is_file())
         say('DLC %d: %d files -> aoc/%d' % (idx, n, idx))
     return out
+
+
+def find_nup(folder, given=None):
+    """The .nup to pack: the one --nup names, or the only one at the top of the folder (None when there is none)."""
+    if given:
+        p = Path(given).resolve()
+        if not p.is_file(): die('--nup %s is not a file' % given)
+        return p
+    ns = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == '.nup')
+    if len(ns) > 1:
+        die('this folder holds %d .nup files (%s): name the one to pack with --nup'
+            % (len(ns), ', '.join(p.name for p in ns)))
+    return ns[0] if ns else None
+
+
+def nup_dump(nup_path, folder):
+    """A .nup written out as the dump layout every later step here reads, and that layout's scan.
+
+    Upstream's pack_nup.py (copied into scripts/, unedited) writes extract/v<N>/{ExeFS,RomFS.img} and aoc/<index>.img: this
+    packer asks every later step for a RomFS *folder* -- the profile scan, the shader split, the copy into the app -- so the
+    container is walked here into <folder>/_nup/{base|updates/<version>}/ and _nup/dlc/<title ID>/<index>/romfs/, which is
+    exactly the layout scan_dump reads. Nothing downstream changes, and the Windows route stays what it is.
+
+    Every file is checked against its size and SHA-256 as it is written (Nup.copy), so a damaged container stops here instead
+    of producing a package that fails on the phone. `codec` 0 (raw) and 1 (one zstd frame) are the two the reader knows.
+
+    A container with no base game (updates marked standalone_update) is taken as the game itself, as upstream's pack_nup.py
+    does, and the newest update becomes the version that is packed.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import pack_nup                                    # scripts/pack_nup.py: upstream's SPEC v1 reader, copied unedited
+    try:
+        n = pack_nup.Nup(nup_path)
+    except pack_nup.Error as e:
+        die('%s cannot be read as a NUP: %s' % (nup_path.name, e))
+    try:
+        app, base, vers, dlc = pack_nup.scan(n)
+        k = base if base is not None else (vers[max(vers)] if vers else None)
+        if k is None: die('%s holds no game files' % nup_path.name)
+        out = folder / ('_nup_%016x' % app)
+        # A second run over the same container reuses what the first wrote: unpacking 9 GB of a big game costs a minute and
+        # a half, and the pack after it usually only changed a setting. Size and mtime together, as the other steps use.
+        stamp = out / '.source'
+        want = '%s\t%d\t%d' % (nup_path.name, nup_path.stat().st_size, nup_path.stat().st_mtime_ns)
+        if stamp.is_file() and stamp.read_text(encoding='utf-8').strip() == want and (out / 'base' / 'exefs' / 'main.npdm').is_file():
+            say('NUP %s: reusing the dump written from it (%s)' % (nup_path.name, out.name))
+            return scan_dump(out)
+        # Where the tree goes: a base package that names a version is that version (a NUP packed from a dump carries the
+        # update as the base, version 458752 for Donkey Kong Bananza), and the folder has to be named the way a dump names
+        # it -- updates/<decimal> -- so the profile's `build` rows and `build IDs match the profile` still line up.
+        ver = int(getattr(k, 'version', 0) or 0)
+        root = (out / 'updates' / str(ver)) if ver else (out / 'base')
+        root.mkdir(parents=True, exist_ok=True)
+        say('NUP %s: %s, version %d, %d DLC; unpacking into %s' % (nup_path.name, '%016X' % app, ver, len(dlc), out.name))
+
+        def walk(d, dst):
+            dst.mkdir(parents=True, exist_ok=True)
+            for name, isdir, idx in n.children(d):
+                p = dst / name.decode('utf-8', 'replace')
+                if isdir: walk(idx, p)
+                else:
+                    with open(p, 'wb') as f: n.copy(idx, f)
+
+        meta = k.meta()
+        walk(k.exefs, root / 'ExeFS')
+        if k.romfs != pack_nup.NO_DIR: walk(k.romfs, root / 'RomFS')
+        else: (root / 'RomFS').mkdir(parents=True, exist_ok=True)
+        # Control data travels in the container's meta block when its packer kept it: the NACP gives the settings screen the
+        # game's languages and the icon gives it the game's picture, and both are things a plain dump cannot have.
+        for t, fname in ((pack_nup.T_NACP, 'control.nacp'), (pack_nup.T_ICON, 'icon.jpg')):
+            if t in meta: (root / fname).write_bytes(meta[t])
+        if ver:
+            # scan_dump identifies the game from base/exefs/main.npdm and checks that base/romfs is a folder: a stub of both
+            # is all it needs, and the real tree is under updates/<version>/ exactly as a dump keeps it.
+            (out / 'base' / 'exefs').mkdir(parents=True, exist_ok=True)
+            (out / 'base' / 'romfs').mkdir(parents=True, exist_ok=True)
+            (out / 'base' / 'exefs' / 'main.npdm').write_bytes(n.read(n.child(k.exefs, b'main.npdm')))
+        for t, pk in sorted(dlc.items()):
+            idx = t - app - 0x1000
+            walk(pk.romfs, out / 'dlc' / ('%016x' % t) / str(idx) / 'romfs')
+        say('NUP: add-on content at index %s' % (', '.join(str(t - app - 0x1000) for t in sorted(dlc)) or 'none'))
+        stamp.write_text(want, encoding='utf-8')
+    except pack_nup.Error as e:
+        die('%s: %s' % (nup_path.name, e))
+    finally:
+        n.close()
+    return scan_dump(out)
 
 
 # ---------------------------------------------------------------- steps
@@ -1740,7 +1828,10 @@ def step_launcher(tid, patched, game, A, work):
         msg = ((r.stderr or r.stdout or '').strip().splitlines() or ['no output'])[-1]
         warn('dm/launcher.json could not be written (%s: see %s), so the game starts without the settings screen' % (msg, log))
         return
-    say('launcher settings: %s%s' % (r.stdout or '', '' if nacp.is_file() else ' (no control.nacp: no language row)'))
+    # No suffix about a missing control.nacp: upstream's settings.py falls back to every language when the build carries
+    # none (a dump or a NUP), so the language row is there either way, and the old "(no language row)" note was wrong twice
+    # over -- it appeared in packages whose launcher.json had the row (2026-11-05).
+    say('launcher settings: %s' % (r.stdout or ''))
 
 
 def step_pack(A, out_ipa, rows, work):
@@ -1780,6 +1871,8 @@ def main():
     ap.add_argument('--force', action='store_true', help='redo steps whose output already exists')
     ap.add_argument('--no-shaders', action='store_true', help='a GL/Vulkan game: build it without a shader library, so it boots and captures its own shaders (no picture until they are packed in)')
     ap.add_argument('--allow-damaged', action='store_true', help='read files that fail their hash check as they are: a dump with a few bad files (a couple of music tracks) still packs')
+    ap.add_argument('--nup', default='',
+                    help='the .nup to pack when the folder holds more than one (a .nup needs no prod.keys)')
     ap.add_argument('--skip-oodle-check', action='store_true',
                     help='do not stop early for a game whose shaders sit in Oodle- or LZ5-compressed archives (it then stops '
                          'at the shader step instead). Only useful when the scan is wrong about your files')
@@ -1842,6 +1935,12 @@ def main():
     # from a folder of its files, not from NSPs, and needs no prod.keys"). That form is decided by the folder, not a flag:
     # a folder with base/exefs and base/romfs is a dump, anything else goes through the NSP/XCI route as before.
     dump = scan_dump(folder)
+    if not dump:
+        # A .nup is one file holding the base game, its updates and its DLC (SPEC v1). It is unpacked into the dump layout
+        # first, so everything below -- the version choice, the add-on indices, the messages -- is the dump route, and no
+        # key is read either way.
+        nup = find_nup(folder, a.nup)
+        if nup: dump = nup_dump(nup, folder)
     if not a.keys and not dump: die('give prod.keys with -k')
     keys = Path(a.keys).resolve() if a.keys else None
     stamp = shell_stamp(shell)

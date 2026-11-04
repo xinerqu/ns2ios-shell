@@ -28,6 +28,7 @@
 + dm/games/0000000000000000/game.tsv      # neutral placeholder profile the shell is compiled against
 + dm/games/0000000000000000/dmsh_chain.h
 + scripts/nxn_pack.py                     # packs the shell and the user's game files into an IPA, on any OS
++ scripts/pack_nup.py                     # upstream's NUP reader (copied, unedited): nxn_pack.py writes a .nup out as a dump folder with it
 + README.md                                # this fork's route; upstream's own README is linked, not copied
 + README.zh-CN.md
 + docs/SHELL.md
