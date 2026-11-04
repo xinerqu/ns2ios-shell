@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**139 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**140 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -76,6 +76,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Kirby and the Forgotten Land | `01004D300C5AE000` | 1.1.0 |  |
 | Kirby Star Allies | `01007E3006DDA000` | 4.0.0a |  |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 | 60 fps |
+| Mario & Luigi: Brothership | `01006D0017F7A000` | 1.0.0 | 60 fps |
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
 | Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 |  |
 | Mario Kart 8 Deluxe | `0100152000022000` | 4.0.1（也可 4.0.0） |  |
