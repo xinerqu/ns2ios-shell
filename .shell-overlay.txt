@@ -83,6 +83,7 @@
 # the shell is built in, so the overlay has no business copying them.
 ! scripts/annotate_build_errors.py
 ! scripts/check_release_notes.py
+! scripts/check_reference_calls.py
 ! scripts/check_workflow_shell.py
 ! scripts/check_tree.py
 ! scripts/restore_mac_shader_marks.py
