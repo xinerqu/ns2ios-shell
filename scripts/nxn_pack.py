@@ -661,20 +661,21 @@ def dump_aoc(dump, work, tid, force=False):
     # ship a second copy of the same DLC that the host never reports (hle_misc.c counts 1 and up). Same rule as step_aoc's.
     want = {str(i) for i in dump['dlc']}
     for d in sorted(out.iterdir()):
-        if d.is_dir() and d.name not in want and (d.name.isdigit() or d.name.endswith('.partial')):
+        stem = d.name[:-4] if d.name.endswith('.img') else d.name
+        if (d.is_dir() or d.name.endswith('.img')) and stem not in want and (stem.isdigit() or d.name.endswith('.partial')):
             warn('DLC index %s is no longer in the folder: dropping it from the package' % d.name)
-            shutil.rmtree(d, ignore_errors=True)
+            shutil.rmtree(d, ignore_errors=True) if d.is_dir() else d.unlink()
     for idx, romfs in sorted(dump['dlc'].items()):
         dst = out / str(idx)
-        if dst.is_dir() and not force:
+        if (dst.is_dir() or (out / ('%d.img' % idx)).is_file()) and not force:
+            aoc_image(out, idx)
             say('reusing the DLC %d (%s)' % (idx, romfs.parent.parent.name)); continue
         tmp = out / ('%d.partial' % idx)
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.copytree(romfs, tmp, symlinks=True)
         if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
         tmp.replace(dst)
-        n = sum(1 for f in dst.rglob('*') if f.is_file())
-        say('DLC %d: %d files -> aoc/%d' % (idx, n, idx))
+        aoc_image(out, idx)
     return out
 
 
@@ -850,6 +851,38 @@ def romfs_source(d):
     return Path(romfs.source(str(d)))
 
 
+def _romfs_image():
+    sys.path.insert(0, str(TOOLS))
+    import romfs_image
+    return romfs_image
+
+
+def aoc_image(out, idx):
+    """One DLC's RomFS as `<out>/<index>.img`, its folder removed: what upstream's extract_aoc writes.
+
+    Same reason as the game's own RomFS: a DLC is a whole RomFS tree (Monster Hunter Rise ships 250 DLC), and the app
+    copies those files one by one at install while one image is copied once and mapped page by page by the host. The
+    shell reads either form -- hle_misc.c takes `<index>` and `<index>.img`, and reports a legacy folder and its image
+    as the same DLC once -- so nothing depends on which one the package carries.
+
+    Called after the folder is complete (nx_extract writes `<index>.partial` and it is renamed into place), so an image
+    is never made from a half-extracted DLC. The folder goes only after the image's entry count matches what was packed.
+    """
+    romfs_image = _romfs_image()
+    d, img = out / str(idx), out / ('%d.img' % idx)
+    if not d.is_dir(): return False
+    t0 = time.time()
+    n = romfs_image.pack(d, img)
+    with open(img, 'rb') as f:
+        magic, _, _, packed = romfs_image.HEAD.unpack(f.read(romfs_image.HEAD.size))
+    if magic != romfs_image.MAGIC or packed != n:
+        die('%s: the image header says %d entries, packing the folder returned %d' % (img, packed, n))
+    shutil.rmtree(d)
+    say('DLC %d: %d entries -> aoc/%s (%.2f MB, %.1f s)'
+        % (idx, n, img.name, img.stat().st_size / 2**20, time.time() - t0))
+    return True
+
+
 def romfs_images(dirs, work, force=False):
     """Each extracted version's loose RomFS packed into `<ver>/RomFS.img`, and the loose tree dropped.
 
@@ -864,8 +897,7 @@ def romfs_images(dirs, work, force=False):
     The loose tree is removed only after the image is published and its entry count matches the tree's: keeping both
     would cost the game's size twice, and a run that stopped halfway must not leave the folder gone and no image.
     """
-    sys.path.insert(0, str(TOOLS))
-    import romfs_image
+    romfs_image = _romfs_image()
     for ver in sorted(dirs):
         d = dirs[ver]
         if not isinstance(d, Path): continue                 # a dump folder: nothing is written there
@@ -939,9 +971,10 @@ def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
     # A DLC removed from the folder must not stay in the package: this folder outlives a run with --keep-work.
     want = {str(i) for i, _, _ in jobs}
     for d in sorted(out.iterdir()):
-        if d.is_dir() and d.name not in want and (d.name.isdigit() or d.name.endswith('.partial')):
+        stem = d.name[:-4] if d.name.endswith('.img') else d.name
+        if (d.is_dir() or d.name.endswith('.img')) and stem not in want and (stem.isdigit() or d.name.endswith('.partial')):
             warn('DLC index %s is no longer in the folder: dropping it from the package' % d.name)
-            shutil.rmtree(d, ignore_errors=True)
+            shutil.rmtree(d, ignore_errors=True) if d.is_dir() else d.unlink()
     # What each index was extracted from. A DLC file swapped for another one of the same index must not be reused: this
     # folder outlives a run with --keep-work, and a stale extraction looks exactly like a fresh one otherwise (the same
     # failure as the shader directory that was picked by name instead of by what this run filled).
@@ -954,7 +987,8 @@ def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
     for idx, t, p in jobs:
         dst = out / str(idx)
         src = [t, p.name, str(p.stat().st_size), str(p.stat().st_mtime_ns)]
-        if dst.is_dir() and not force and done.get(str(idx)) == src:
+        if (dst.is_dir() or (out / ('%d.img' % idx)).is_file()) and not force and done.get(str(idx)) == src:
+            aoc_image(out, idx)          # a folder from a run before this one becomes the image here
             say('reusing the extracted DLC %d (title ID %s)' % (idx, t)); continue
         tmp = out / ('%d.partial' % idx)
         shutil.rmtree(tmp, ignore_errors=True)
@@ -964,8 +998,7 @@ def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
         if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
         tmp.replace(dst)
         done[str(idx)] = src
-        n = sum(1 for f in dst.rglob('*') if f.is_file())
-        say('DLC %d: %d files -> aoc/%d' % (idx, n, idx))
+        aoc_image(out, idx)
     stamp.write_text(''.join('%s\t%s\n' % (i, '\t'.join(done[i])) for i in sorted(want, key=int) if i in done),
                      encoding='utf-8')
     return out
@@ -1795,8 +1828,12 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     if aoc_dir is not None and aoc_dir.is_dir():
         dst = A / 'aoc'
         if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
-        shutil.copytree(aoc_dir, dst, symlinks=True)
-        say('add-on content in place: index %s' % ', '.join(sorted((d.name for d in dst.iterdir() if d.is_dir()), key=int)))
+        # <index>.img.inputs.json is romfs_image's reuse stamp, beside the image in the work folder: the app has no use
+        # for it, and the host's scan would skip it anyway (hle_misc.c takes <index> or <index>.img only).
+        shutil.copytree(aoc_dir, dst, symlinks=True, ignore=shutil.ignore_patterns('*.inputs.json'))
+        idx = sorted(int(d.name[:-4] if d.name.endswith('.img') else d.name)
+                     for d in dst.iterdir() if d.is_dir() or d.name.endswith('.img'))
+        say('add-on content in place: index %s' % ', '.join(str(i) for i in idx))
 
     # tables the game profile carries (shader map, c1 list, warm-up list, uniform extents)
     #

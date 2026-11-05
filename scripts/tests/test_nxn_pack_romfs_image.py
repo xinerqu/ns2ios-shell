@@ -79,5 +79,45 @@ class RomfsImage(unittest.TestCase):
         self.assertFalse((src.parent / 'RomFS.img').is_file(), 'an image was written into the dump')
 
 
+class AocImage(unittest.TestCase):
+    """A DLC's RomFS becomes one <index>.img, the shape upstream's extract_aoc writes.
+
+    The host reads either form (hle_misc.c takes <index> and <index>.img, and reports a legacy folder and its image as
+    the same DLC once), so a package never has to carry both -- and a game whose own files are one romfs.img should not
+    carry its add-on content as folders.
+    """
+
+    def dlc(self, idx, files):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        out = pathlib.Path(tmp.name) / 'aoc'
+        src = out / str(idx)
+        for name, data in files.items():
+            (src / name).parent.mkdir(parents=True, exist_ok=True)
+            (src / name).write_bytes(data)
+        return out, src
+
+    def test_the_folder_becomes_one_file(self):
+        out, src = self.dlc(1, FILES)
+        self.assertTrue(nxn.aoc_image(out, 1))
+        self.assertTrue((out / '1.img').is_file())
+        self.assertFalse(src.exists(), 'the loose DLC folder stayed next to the image')
+
+    def test_reading_it_back_gives_the_same_files(self):
+        import sys
+        out, _ = self.dlc(2, FILES)
+        sys.path.insert(0, str(nxn.TOOLS))
+        import romfs
+        nxn.aoc_image(out, 2)
+        img = str(out / '2.img')
+        for name, data in FILES.items():
+            self.assertEqual(romfs.open(img + '/' + name, 'rb').read(), data, name)
+
+    def test_a_missing_folder_is_not_an_error(self):
+        out, _ = self.dlc(1, FILES)
+        (out / '1').rename(out / 'elsewhere')
+        self.assertFalse(nxn.aoc_image(out, 1))
+
+
 if __name__ == '__main__':
     unittest.main()

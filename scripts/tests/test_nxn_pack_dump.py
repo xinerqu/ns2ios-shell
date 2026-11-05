@@ -85,8 +85,12 @@ class Switch2Dump(unittest.TestCase):
             romfs.mkdir(parents=True)
             (romfs / 'a.bin').write_text('the DLC')
             nxn.dump_aoc({'dlc': {1: romfs}}, work, '040074a01bf12000')
-            self.assertEqual(['1'], sorted(d.name for d in (work / 'aoc').iterdir()))
-            self.assertTrue((work / 'aoc' / '1' / 'a.bin').is_file())
+            # One file per DLC (romfs_image.pack), and the reuse stamp beside it; the old index 0 folder is gone.
+            self.assertEqual(['1.img', '1.img.inputs.json'], sorted(d.name for d in (work / 'aoc').iterdir()))
+            import sys
+            sys.path.insert(0, str(nxn.TOOLS))
+            import romfs
+            self.assertEqual(romfs.open(str(work / 'aoc' / '1.img') + '/a.bin', 'rb').read(), b'the DLC')
 
 
 if __name__ == '__main__':
