@@ -95,9 +95,6 @@
 ! docs/image-atomic-binding-contract.md
 ! .gitignore
 
-# Upstream's Mac front end and app packing: this fork builds the iPhone shell only, and nothing here reaches it.
-! dm/mac
-
 # Upstream's own CI, issue templates and requirements: theirs to run, not ours. This fork's two workflows are "+" above.
 ! .github
 
