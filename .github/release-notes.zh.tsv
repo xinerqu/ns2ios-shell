@@ -137,3 +137,11 @@ Base to cb34473f: a shader library may be one file read in place, sparse 3D tile
 Base to 7249ee9f: the compile cache is one file, and the Windows-tolerant rename moves into it	打包缓存改成单个文件，Windows 上的改名冲突也一起处理了。@NL@- 着色器编译缓存从「每个着色器几个文件」变成一个文件（《密特罗德 生存恐惧》那种 8 万多个文件的目录不再出现），两次打包之间不再解包，硬盘上少一堆小文件。@NL@- 修一个 Windows 上会整包失败的问题：缓存往目标位置写文件时，如果那个文件正被别的东西（杀毒扫描）打开，Windows 会拒绝改名并让打包中断。现在会重试。@NL@- 支持列表仍 143 款。
 Fix the base move: every merged file had to be written back, not only the two that conflicted	补上上一条移基座漏合并的文件（打包时的着色器步骤会因此报错）。@NL@- 这是我们的流程失误，与上游无关；补完 27 个补丁全部能打、逐字节复现。
 The app carries its shader library as one file, and every difference from upstream has to be declared	包里的着色器库现在是一个文件，安装和拷贝都更快了。@NL@- 以前一款游戏要在 App 里塞上千个着色器小文件，现在是一个 `msl/b-<chain>.img`，打开时按需读、不整份载入。上游实测（御天之剑 HD）：10,017 个文件变 1 个，拷贝 3.72 秒变 0.18 秒，占用 150 MB 变 131 MB。@NL@- Windows 上打的包没有苹果的 Metal 编译器，着色器是以源码形式放着的，这次让壳能直接从镜像里读源码并编译——不然装上去是黑的。@NL@- 装配时写完镜像会重新打开逐个核对，少一个文件就当场停下，不会打出「能装但某几个着色器不出画面」的包。@NL@- 内部：新增一道检查，凡是我们改了却没登记进打包清单的文件，CI 直接红——以前这种情况是「构建绿、功能没了」。@NL@- 支持列表 143 款不变。
+Base to 865cc35f: guest memory in files when the pool does not fit, and one value that had to go through our switch	跟上上游：内存池放不进 iPhone 内存上限时，把游戏内存放到文件里，绕开系统按匿名页统计的那条线。@NL@- 对内存吃紧的大作有用：以前会被系统直接结束，现在页面可以写回文件、不死。
+Base to dd6ce5ba: UE dynamic buffer rings, and one game profile's patches	跟上上游：虚幻引擎的动态缓冲环多留一份，减少某帧还在读、下一帧已经覆盖的偶发花屏（issue #1040）。
+A pack says what each phase cost, and CI asserts the package's shape	打包日志现在每个阶段报耗时（解包 / 造镜像 / 拆着色器 / 翻译 / 装配 / 出包），慢在哪一步一眼能看到。
+A game's RomFS becomes one file before anything reads it	游戏文件现在打成一个镜像文件进包，不再摊成几十万个小文件。@NL@- 装机和拷贝都快很多；大游戏以前光拷贝这些文件就要很久。
+dm/mac follows upstream again: four files, 61 KB, and four upstream tests import it	内部：Mac 前端那几个文件恢复正常跟随上游（不影响打包）。
+docs/SHELL.md: the four kinds of overlay line, and the guard that judges them	内部：文档补上打包清单的四种登记方式和对应的检查（不影响打包）。
+Say so the first time a shader library is read as source inside the image	日志里多一行：第一次从镜像里按源码编译着色器时会说明，方便确认走的是新路。
+Smoke pack counts the shader libraries inside the image	内部：自动打包自检改成进镜像里数着色器，镜像坏了会当场报错（不影响使用）。
