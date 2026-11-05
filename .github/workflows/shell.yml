@@ -585,6 +585,10 @@ jobs:
               z.extract(images[0], tmp)
               with romfs.scandir(os.path.join(tmp, images[0])) as it:
                   libs = [e.name for e in it if e.name.endswith('_b.metallib')]
+          # The shape, not only the presence: a package that carries the game files and the shader library as one file
+          # each is what this route is for (upstream's iOS build does the same), and going back to loose files would be
+          # silent -- the app installs and plays, only slower. Tears of the Kingdom's RomFS alone is about 800,000 files.
+          loose_libs = [n for n in names if '/msl/b-' in n and not n.endswith('.img')]
           # The shell's own stamp is what lets the packer refuse a shell that cannot dispatch something it wrote. If the
           # build stops writing it, that protection is gone without anything else failing -- so check the stamp itself.
           info = z.read('Payload/DmIOS.app/dm/shell_info.txt').decode('utf-8', 'replace') if 'Payload/DmIOS.app/dm/shell_info.txt' in names else ''
@@ -592,7 +596,11 @@ jobs:
               'main binary executable': mode('Payload/DmIOS.app/DmIOS') == (stat.S_IFREG | 0o755),
               'guest binary executable': mode('Payload/DmIOS.app/Frameworks/Guest.framework/Guest') == (stat.S_IFREG | 0o755),
               'shader libraries present': len(libs) > 0,
-              'romfs present': any('/romfs/' in n for n in names),
+              'shader library is one file': bool(images) and not loose_libs,
+              'romfs is one file': 'Payload/DmIOS.app/romfs.img' in names and not any('/romfs/' in n for n in names),
+              # A ceiling rather than a count: the app holds a few dozen entries (the binary, fonts, tables, two images),
+              # and the moment one of them turns back into a folder it is hundreds or millions. Brain Memory here: 43.
+              'the package is a few dozen files': len(names) < 120,
               'env.txt carries the memory layout': 'DM_APP_POOL=' in env,
               'shell declares its gate kinds': 'GATES=' in info,
               # iOS gives an app without this entitlement about 3,375 MB, which the bigger games fill exactly. The shell is

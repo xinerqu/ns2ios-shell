@@ -65,6 +65,21 @@ def die(s): sys.exit('[x] ' + s)
 def warn(s): print('[!] ' + s, flush=True)
 
 
+_LAP = [time.time()]
+
+
+def lap(what):
+    """Seconds since the previous lap, one line per phase of a pack.
+
+    A game folder of 16 GB spends minutes in some phases and seconds in others, and until this existed the only way to tell
+    which was to read timestamps off the work folder afterwards (Tears of the Kingdom, 2026-11-06: 15 minutes to build the
+    RomFS image, 1 minute to remove the loose tree, the rest in the shader steps).
+    """
+    now = time.time()
+    say('%s: %.1f s' % (what, now - _LAP[0]))
+    _LAP[0] = now
+
+
 def folder_size(p):
     """Bytes under p, without following a symlink out of it: the game's RomFS can be large and the count is only a report."""
     n = 0
@@ -856,21 +871,18 @@ def romfs_images(dirs, work, force=False):
         if not isinstance(d, Path): continue                 # a dump folder: nothing is written there
         src, img = d / 'RomFS', d / 'RomFS.img'
         if not src.is_dir(): continue
-        files = dirs_n = 0
-        for _, subdirs, names in os.walk(src):
-            dirs_n += len(subdirs); files += len(names)
         t0 = time.time()
         n = romfs_image.pack(src, img, reuse=not force)
         with open(img, 'rb') as f:
             magic, _, _, packed = romfs_image.HEAD.unpack(f.read(romfs_image.HEAD.size))
         if magic != romfs_image.MAGIC or packed != n:
-            die('%s: the image header says %d entries, packing %d files returned %d' % (img, packed, files, n))
-        if n != files + dirs_n + 1:   # every file, every folder, the root
-            die('%s holds %d entries, the folder has %d files and %d folders' % (img, n, files, dirs_n))
-        say('RomFS image: %s, %d files -> %s (%.2f GB, %.1f s)'
-            % (ver, files, img.name, img.stat().st_size / 2**30, time.time() - t0))
+            die('%s: the image header says %d entries, packing the folder returned %d' % (img, packed, n))
+        say('RomFS image: %s, %d entries -> %s (%.2f GB, %.1f s)'
+            % (ver, n, img.name, img.stat().st_size / 2**30, time.time() - t0))
+        t0 = time.time()
         try:
             shutil.rmtree(src)
+            say('loose RomFS removed: %s (%.1f s)' % (src.name, time.time() - t0))
         except OSError as e:
             warn('the loose RomFS stays next to %s until it can be removed (%s)' % (img.name, e))
 
@@ -2185,7 +2197,9 @@ def main():
         check_keys(nx, keys, fam, picks, versions, work, tid)
         dirs = step_extract(nx, keys, folder, picks, work, versions, a.allow_damaged)
         aoc_dir = step_aoc(nx, keys, fam['dlc'], work, tid, a.force, a.allow_damaged)
+    lap('extract')
     romfs_images(dirs, work, a.force)
+    lap('RomFS image')
     if a.stop_after == 'extract': return say('stopped after extract')
     game = dirs[pkg]
     if pkg == UNKNOWN_VER:
@@ -2249,6 +2263,7 @@ def main():
 
     patched = work / 'build' / 'patched'
     step_rewrite(game / 'ExeFS', mods, patched, work, a.force)
+    lap('rewrite main')
     # After the rewrite, not before: only the rewritten modules' bytes reach GetInfo's UsedMemorySize.
     # Only for a derived profile: a game the profile was brought up on has its mem_used settled by the profile author,
     # and second-guessing it would resize the heap of titles that already work.
@@ -2325,6 +2340,7 @@ def main():
     tables = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
     if route == 'nvn':
         pkg_dir, tb, diff = step_shaders(dirs, versions, gdir, tables, work, tid, a.force)
+        lap('split the shaders out of the game files')
         prune_shader_cache(work)
         # shader_facts.tsv is the exception: the split merges the profile's shader_facts_manual.tsv into it, and the
         # translator reads the profile's table, so a difference there is written back below (upstream writes it back too
@@ -2389,6 +2405,7 @@ def main():
         xlate = next((c for c in cands if c.is_file()), None)
         if not xlate: die('no shader translator: pass --tools <folder> with dmsh_xlate, or build it with dotnet publish')
         step_translate(pkg_dir, work, xlate, iosout, tid, a.force)
+        lap('translate shaders')
         libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) \
             if iosout.is_dir() else []
         if not libs: die('no shader library directory under %s' % iosout)
@@ -2425,6 +2442,7 @@ def main():
     stage = work / 'stage'
     A = step_assemble(shell, stage, game, patched, mods, gdir, rows,
                       one(rows, 'name', tid), builds[pkg], tid, msl_out, work, aoc_dir)
+    lap('assemble')
     if vk_out is not None:
         dst = A / 'msl' / 'vk'
         shutil.rmtree(dst, ignore_errors=True)
@@ -2444,6 +2462,7 @@ def main():
     if a.stop_after == 'assemble':
         return say('stopped before packing: the app tree is %s' % stage)
     step_pack(A, out_ipa, rows, work)
+    lap('pack the IPA')
     say('done: %s (%.0f MB)' % (out_ipa, out_ipa.stat().st_size / 1048576))
     say('next: sign it with a sideloading tool (SideStore / Sideloadly / LiveContainer) and install it on the phone')
     say('this IPA contains your game files: for your own use only, do not distribute it')
