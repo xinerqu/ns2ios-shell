@@ -1,7 +1,7 @@
 diff --git a/dm/games/game.py b/dm/games/game.py
 --- a/dm/games/game.py
 +++ b/dm/games/game.py
-@@ -47,7 +47,9 @@
+@@ -60,7 +60,9 @@
  
  
  def extra_dirs():   # profile folders outside the repository (DM_GAMES_DIR), searched after dm/games

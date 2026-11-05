@@ -9,7 +9,7 @@ diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
                      Section {
                          Button("Reset to tested defaults") { m.reset() }
                              .disabled(!m.changed)
-@@ -179,6 +180,7 @@
+@@ -181,6 +182,7 @@
          guard let h = host else { return }
          host = nil
          model.apply()

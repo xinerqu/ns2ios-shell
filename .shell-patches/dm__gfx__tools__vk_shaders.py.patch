@@ -46,7 +46,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
          if r.returncode: red(f'{m}: metal compile failed: {r.stderr.strip()[:400]}')
          return a
      with cf.ThreadPoolExecutor(os.cpu_count()) as ex: airs = list(ex.map(comp, msls))
-@@ -158,6 +161,10 @@
+@@ -160,6 +163,10 @@
  def main():
      a = sys.argv[1:]
      ios = None
@@ -57,7 +57,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if '--ios' in a: i = a.index('--ios'); ios = a[i + 1]; del a[i:i + 2]
      if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]')
      roots, out = a[:-1], a[-1]
-@@ -174,15 +181,20 @@
+@@ -176,15 +183,20 @@
          if skipped: print('[RED] skipped shader stages Metal does not have: ' + ', '.join(f'{k} {v}' for k, v in sorted(skipped.items())))
          msls = [m for v in seen.values() for m in v[2]]
          tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; resources kind:set.binding=slot (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)',

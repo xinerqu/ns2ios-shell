@@ -76,7 +76,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
  static size_t image_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (!g_mod[i].nro) n += g_mod[i].size;   // an NRO lives in memory the game allocated (its image and bss buffers)
      return (n + 0x1fffff) & ~(size_t)0x1fffff; }
  // Giant bss (modules with the patch area before the base, patch_nso.py FAR): the image bytes beyond the file part. Used memory was reported as "heap + 64 MB", where the 64 MB covers ordinary modules' code and data (Mario's two modules are about 74 MB together,
-@@ -366,6 +392,14 @@
+@@ -367,6 +393,14 @@
  // it instead (Absolum's .NET garbage collector takes 1.5 GB after it). The SDK lays the region out from that size, so it holds; the pool, not the region, bounds what the heap
  // can map. A workaround for the iPhone's address space, not the game: with room for the request (a Switch-sized DM_ALIAS_SIZE) nothing changes. Found by symbol in every sdk
  #define STDALLOC_LATER 0x10000000ull
@@ -91,7 +91,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
  // What the alias region has room for in one more region: past the end of the regions made so far, less STDALLOC_LATER for those made later, in 32 MB steps (0 = none)
  static uint64_t alias_room(void) {
      mem_init();
-@@ -378,11 +412,12 @@
+@@ -379,11 +413,12 @@
  static void stdalloc_init(uint64_t *r, int param) {
      (void)param;
      if (r[1]) return;   // a heap over memory the game passes in: no address region
@@ -106,7 +106,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
      r[2] = cap;
  }
  // ---- Unreal's engine region ----
-@@ -471,11 +506,11 @@
+@@ -472,11 +507,11 @@
              // Logged once (Mario's retries would repeat it): a game that sizes its heap as pool − used memory and does not retry stops here when its modules are larger than the used memory reported
              // (profile mem_used; the NSP script's probe boot reads this line, and sets mem_used when no SetHeapSize succeeds afterwards)
              static int once; if (!once++) LOG("[mem] SetHeapSize %#zx + modules %#zx > app pool %#llx (used memory reported %#llx + bss %#zx)", size, image_bytes() - big_bss_bytes(),
@@ -121,7 +121,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
              pthread_mutex_unlock(&g_map_lock); regs[0] = 0x10801; return 0;
          }
          int rc = 0;
-@@ -619,8 +654,8 @@
+@@ -620,8 +655,8 @@
          // and maps new ones for later allocations, until a map fails: then it unmaps the cached block and retries (measured on the Mac: the refused 4 MB map at +0x43e2c000 was followed by
          // UnmapPhysicalMemory of the 3.15 GB block and the same map again). Without the limit the mapped total went past the pool in the first minute and the freed block stayed mapped.
          // Off by default: Ace Attorney Investigations Collection maps a little more than the 1 GB pool its profile reports
@@ -132,7 +132,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
              if (need && need > room) {
                  pthread_mutex_unlock(&g_map_lock);
                  static _Atomic int nref; if (atomic_fetch_add(&nref, 1) < 8) LOG("[mem] MapPhysicalMemory +%#zx refused: %.2f GB mapped, the application pool is full (ResultLimitReached, the SDK frees cached pages and retries)",
-@@ -686,13 +721,13 @@
+@@ -687,13 +722,13 @@
          case I_StackAddr: v = (uint64_t)g_stack; break;   case I_StackSize: v = g_stack_cap; break;
          case I_TotalMem: case I_TotalNonSys: v = APP_POOL; break;
          case I_UsedMem:  case I_UsedNonSys:  pthread_mutex_lock(&g_map_lock);

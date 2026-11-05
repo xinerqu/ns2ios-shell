@@ -64,6 +64,7 @@
 ~ dm/gfx/tools/tool_lock.py     # tolerate a single-file translator build and a CRLF checkout
 ~ dm/gfx/tools/dmsh_mtlcache.py # ctypes.CDLL(None) is POSIX-only
 ~ dm/gfx/tools/dmsh_build.py    # atomic_json retries a Windows sharing violation: keys sharing a digest publish the same .json at once
+~ dm/tools/shader_cache.py      # os.replace retries a Windows sharing violation: the store writes each metallib to the cache, and a scanner holding the destination fails the rename
 ~ dm/ios/Sources/main.m         # modules from the Guest library, relaxed romfs lookup, shader preparation before the host
 ~ dm/ios/Sources/Launcher.swift # the Cheats section in the settings list (its view: dm/ios/Sources/CheatsView.swift)
 ~ dm/ios/Sources/front_ios.m     # reads the cheats switches again when Play is pressed: the host loads at launch, before the screen

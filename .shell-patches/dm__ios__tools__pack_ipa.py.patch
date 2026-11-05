@@ -1,7 +1,7 @@
 diff --git a/dm/ios/tools/pack_ipa.py b/dm/ios/tools/pack_ipa.py
 --- a/dm/ios/tools/pack_ipa.py
 +++ b/dm/ios/tools/pack_ipa.py
-@@ -24,6 +24,27 @@
+@@ -27,6 +27,27 @@
  L32, L16 = 0xFFFFFFFF, 0xFFFF
  DIR_MODE = stat.S_IFDIR | 0o755   # a parent folder no source folder stands for (Payload/, msl/); its time is 1980-01-01, so it is the same in every pack
  Entry = collections.namedtuple('Entry', 'name path st root')   # st None: a synthetic parent; root: the mapping's source folder
@@ -29,7 +29,7 @@ diff --git a/dm/ios/tools/pack_ipa.py b/dm/ios/tools/pack_ipa.py
  
  
  def entries(maps, skip, skip_suffix=()):
-@@ -116,7 +137,7 @@
+@@ -119,7 +140,7 @@
          off, nb, fl, t, d = h
          z = [v for v in (usize, csize, off) if v >= L32]   # zip64 extra: the fields that do not fit, in this order
          ext = struct.pack(f'<HH{len(z)}Q', 1, 8 * len(z), *z) if z else b''
@@ -38,7 +38,7 @@ diff --git a/dm/ios/tools/pack_ipa.py b/dm/ios/tools/pack_ipa.py
          self.cd.append(struct.pack('<IHHHHHHIIIHHHHHII', 0x02014B50, 0x031E, 45 if z else 20 if method == 8 else 10, fl, method, t, d, crc, min(csize, L32), min(usize, L32),
                                     len(nb), len(ext), 0, 0, 0, (mode << 16) | (0x10 if stat.S_ISDIR(mode) else 0), min(off, L32)) + nb + ext)
          self.stats['deflated' if method == 8 else 'stored'] += usize
-@@ -179,6 +200,9 @@
+@@ -182,6 +203,9 @@
  
  
  def load_index(out):   # (the old IPA opened, its index) when <out>.idx describes the IPA there now and this deflate level, else None
