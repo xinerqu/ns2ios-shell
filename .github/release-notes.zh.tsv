@@ -146,3 +146,4 @@ docs/SHELL.md: the four kinds of overlay line, and the guard that judges them	�
 Say so the first time a shader library is read as source inside the image	日志里多一行：第一次从镜像里按源码编译着色器时会说明，方便确认走的是新路。
 Smoke pack counts the shader libraries inside the image	内部：自动打包自检改成进镜像里数着色器，镜像坏了会当场报错（不影响使用）。
 A game's DLC ships as one file per add-on, like its own files	DLC（追加内容）也打成一个文件：一个 DLC 一个镜像，和游戏本体一样。@NL@- 以前本体是一个文件、DLC 却是一堆目录，装在手机上要逐个拷；现在统一了。
+extract: ask nx_extract for the image instead of packing one afterwards	打包快了很多：游戏文件（含每个 DLC）在解包时直接写成一个镜像，不再先解成几十万个碎文件、再读一遍打回镜像、再删掉。王国之泪这种大作一次省 15 分钟以上，装到手机上也要快得多。

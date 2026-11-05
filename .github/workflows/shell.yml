@@ -703,11 +703,12 @@ jobs:
           N=0
           if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null 2>&1; then
             # Two commits of this repository are its own bookkeeping and say nothing to a reader: the sync that moves the
-            # packer's internal copies, and the one that adds a Chinese row to this table. Both are dropped here and in
-            # scripts/check_release_notes.py (SKIP_SUBJECTS), so the page and the check never disagree about what shipped.
+            # packer's internal copies, the one that adds a Chinese row to this table, and one that keeps the overlay's
+            # local-only list in step with a new file. All are dropped here and in scripts/check_release_notes.py
+            # (SKIP_PREFIXES), so the page and the check never disagree about what shipped.
             # The list is cut at 30 rows, which used to happen silently -- a day of upstream's 51 commits read as 30.
             PAIRS=$(git log --no-merges --pretty='%h%x09%s' "$PREV"..HEAD 2>/dev/null \
-                    | awk -F'\t' '$2 !~ /^Sync the packer/ && $2 !~ /^Release notes: /' || true)
+                    | awk -F'\t' '$2 !~ /^Sync the packer/ && $2 !~ /^Release notes: / && $2 !~ /^overlay: /' || true)
             N=$(printf '%s' "$PAIRS" | grep -c . || true)
             PAIRS=$(printf '%s\n' "$PAIRS" | head -30)
             if [ "${N:-0}" -gt 30 ]; then MORE_EN="and $((N - 30)) more commit(s) -- the full list is in the commit history"; fi

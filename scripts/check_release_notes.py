@@ -25,10 +25,11 @@ import pathlib
 import subprocess
 import sys
 
-# This repository's own bookkeeping commits. They are in the range every time it syncs the packer's copies or adds a row
-# to this table, and listing them as changes to users says nothing: neither touches anything a reader of the page runs.
-# The same two prefixes are dropped by .github/workflows/shell.yml, so the page and this check agree on what shipped.
-SKIP_PREFIXES = ('Sync the packer', 'Release notes: ')
+# This repository's own bookkeeping commits. They are in the range every time it syncs the packer's copies, adds a row
+# to this table, or keeps the overlay's local-only list in step with a new file: none of them touches anything a reader of
+# the page runs. The same prefixes are dropped by .github/workflows/shell.yml, so the page and this check agree on what
+# shipped.
+SKIP_PREFIXES = ('Sync the packer', 'Release notes: ', 'overlay: ')
 
 
 def git(*args):
