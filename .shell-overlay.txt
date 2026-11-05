@@ -2,6 +2,12 @@
 #
 #   + path   a file this fork adds: copied onto the upstream tree as it is
 #   ~ path   a file this fork modifies: the matching .shell-patches/*.patch is applied to the upstream file
+#   - path   a file upstream has and this fork does not carry: CI must not copy it, and it must be gone here too
+#   ! path   outside what this fork maintains: the assembler does not use it, and a difference there is not drift
+#            (this fork's own docs and tools, upstream's Mac front end and dev scripts, the screenshots, upstream's CI)
+#
+# `scripts/check_tree.py` judges the whole tree against these lines and fails on anything undeclared: a change this fork
+# carries in a file no line names never reaches the shell, and nothing else would notice. CI runs it in Report drift.
 #
 # The patches are unified diffs against the base commit recorded in .shell-base.txt, so an upstream change elsewhere in one of
 # these files merges automatically instead of being lost by a whole-file copy. Only a change to the same lines makes `git apply`
@@ -70,3 +76,44 @@
 ~ dm/ios/Sources/front_ios.m     # reads the cheats switches again when Play is pressed: the host loads at launch, before the screen
 ~ dm/ios/Sources/DmGamepad.m    # profile pad_layout overridable at run time (DM_PAD_LAYOUT), for the first launch only
 ~ dm/ios/tools/pack_ipa.py      # keep the executable bit when packing on Windows
+
+# --- local only: not part of the assembled tree, and not drift ---
+
+# This fork's own tools and pages. They run from this checkout (the workflow calls `fork/scripts/...`), never from the tree
+# the shell is built in, so the overlay has no business copying them.
+! scripts/annotate_build_errors.py
+! scripts/check_release_notes.py
+! scripts/check_workflow_shell.py
+! scripts/check_tree.py
+! scripts/restore_mac_shader_marks.py
+! scripts/basemove
+! scripts/tests
+! packer
+! docs/CAPTURE.md
+! docs/CAPTURE.zh-CN.md
+! docs/SUPPORTED.md
+! docs/image-atomic-binding-contract.md
+! .gitignore
+
+# Upstream's Mac front end and app packing: this fork builds the iPhone shell only, and nothing here reaches it.
+! dm/mac
+
+# Upstream's own CI, issue templates and requirements: theirs to run, not ours. This fork's two workflows are "+" above.
+! .github
+
+# Upstream's iOS packaging tests. Kept for reference; this fork runs none of them, and upstream adds to them often.
+! dm/ios/tests
+
+# Screenshots the per-game READMEs embed. Not shipped, and a base move does not chase them: 68 of upstream's 140 are here.
+! docs/images
+
+# The `needs_mac_shaders` marks a base move restores (scripts/restore_mac_shader_marks.py): upstream's copy of these five
+# profiles says a Mac must translate them, ours says they are already translated for this route.
+! dm/games/01004A4010FEA000/game.tsv
+! dm/games/01005270232F2000/game.tsv
+! dm/games/0100606026F12000/game.tsv
+! dm/games/01006C300E9F0000/game.tsv
+! dm/games/0100F43008C44000/game.tsv
+
+# --- dropped: upstream has it, this fork does not carry it ---
+# (none yet; `git rm` the file and add a line here when something is only ever upstream's)

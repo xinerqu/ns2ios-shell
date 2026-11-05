@@ -3,9 +3,10 @@ name: Build shell
 # Builds the game-free shell and the Windows-side tools, then publishes them as a release.
 #
 # Two sources are supported:
-#   fork      this repository's tree (default for manual runs and pushes)
-#   upstream  the latest seedds/nxnative commit with this fork's changes copied over it, per .shell-overlay.txt
-#             (the daily schedule uses this, so an upstream update becomes a new release without anyone acting)
+#   upstream  the latest seedds/nxnative commit with this fork's changes copied over it, per .shell-overlay.txt -- what
+#             pushes, the daily schedule and a manual run all use (the input's default), so the shell always carries
+#             upstream's newest
+#   fork      this repository's tree as it stands, for looking at this checkout alone (no overlay applied)
 #
 # The output contains no game content: a few MB of app plus five Windows executables (the packer's tools, zstd among
 # them, so a user never has to hunt for one). Users pack their own game files into the shell with scripts/nxn_pack.py
@@ -238,6 +239,10 @@ jobs:
             git clone --depth 1 https://github.com/seedds/nxnative.git up
             UP=$(git -C up rev-parse HEAD)
             echo "upstream commit $UP"
+            # Before anything is copied onto it: every difference this fork has from upstream must be declared in
+            # .shell-overlay.txt, or the change is in this tree and not in the shell, with nothing failing. Runs on the
+            # clone, which is upstream untouched; after the copies below it would be comparing the fork with itself.
+            python3 fork/scripts/check_tree.py fork up
             # Apply this fork onto the upstream tree. Files this fork adds are copied; files it modifies are patched, so an
             # upstream edit elsewhere in the same file survives instead of being overwritten by a whole-file copy.
             while IFS= read -r line; do

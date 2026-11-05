@@ -1638,6 +1638,37 @@ def text_tables_to_lf(root):
     return n
 
 
+def shader_library(msl_dir, app):
+    """The app's copy of the game's shader library (whose folder name is the chain version the shell reads at run time), and
+    the number of shaders in it.
+
+    One file, <app>/msl/b-<chain>.img (dm/tools/shader_lib.py), the shape upstream's iOS build packs: the host reads it in
+    place with one descriptor and maps only a shader's pages, and the app carries a thousand fewer files to copy at install.
+    Only what the host reads goes in (metallib, reflection json, the stamp), not the .metal sources or the build report.
+    A library with no _b.metallib -- a GL package, whose shaders are under msl/gl -- keeps its folder.
+
+    Read back through romfs before the pack is called good: a shader the image lacks draws nothing on the phone, with the
+    sound still playing and one [RED] line per shader in the log (nvn_mtl.m shader_load).
+    """
+    sys.path.insert(0, str(TOOLS))
+    import romfs, shader_lib
+    (app / 'msl').mkdir(parents=True, exist_ok=True)
+    n = len(list(msl_dir.glob('*_b.metallib')))
+    if not n:
+        shutil.copytree(msl_dir, app / 'msl' / msl_dir.name)
+        return 0
+    dst = app / 'msl' / (msl_dir.name + '.img')
+    want = shader_lib.app_files(msl_dir)
+    got = shader_lib.subset(msl_dir, dst)
+    with romfs.scandir(str(dst)) as it: have = {e.name for e in it}
+    if have != set(want) or got != len(want):
+        die('the shader library image %s holds %d files, expected %d: the app would draw those shaders as nothing'
+            % (dst.name, len(have), len(want)))
+    say('shader source for %d shaders -> msl/%s.img (%d files, %d bytes)'
+        % (n, msl_dir.name, len(have), dst.stat().st_size))
+    return n
+
+
 def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, tid, msl_dir, work, aoc_dir=None):
     """Unpack the shell and put the game into it: guest library, MSL source, RomFS, tables, icon, identity."""
     # Move a previous stage aside instead of deleting it: this environment counts file deletions and refuses to go past a
@@ -1680,10 +1711,7 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
 
     # shader libraries: the directory name is the chain version, which the shell reads at run time
     if msl_dir.is_dir():
-        dst = A / 'msl' / msl_dir.name
-        shutil.copytree(msl_dir, dst)
-        n = len(list(dst.glob('*_b.metallib')))
-        if n: say('shader source for %d shaders -> msl/%s' % (n, msl_dir.name))   # empty for a GL package, whose shaders go to msl/gl instead
+        shader_library(msl_dir, A)
 
     romfs = game / 'RomFS'
     if romfs.is_file():

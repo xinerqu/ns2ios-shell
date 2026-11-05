@@ -4605,6 +4605,19 @@ static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
         int open_errno = errno; romfs_img *img; const img_ent *x = msl_image_file(path, &img); msl_map f;
         if (x && msl_image_map(img, x, &f)) {
             t_lib_layer = memmem(f.data, f.size, "render_target_array_index", 25) != NULL;
+#ifdef DM_SHELL
+            // A package made on a machine without Apple's Metal compiler carries its shaders as source inside these
+            // entries (dm/gfx/tools/nometal_run.py), and a packed library reaches the host through this branch only: the
+            // folder branch below compiles that source, so this one must as well (scripts/nxn_pack.py packs the library
+            // into <App>/msl/b-<chain>.img). The string copies the bytes, so the mapping goes at once.
+            if (f.size >= 4 && memcmp(f.data, "MTLB", 4) != 0) {
+                NSString *src = [[NSString alloc] initWithBytes:f.data length:f.size encoding:NSUTF8StringEncoding];
+                munmap(f.base, f.base_len);
+                id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;
+                if (!lib && err) *err = [NSError errorWithDomain:@"dm" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"not a compiled library and not readable source: %@", path]}];
+                return lib;
+            }
+#endif
             void *base = f.base; size_t base_len = f.base_len;
             dispatch_data_t d = dispatch_data_create(f.data, f.size, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ munmap(base, base_len); });
             return [g_dev newLibraryWithData:d error:err];
