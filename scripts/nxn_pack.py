@@ -1413,7 +1413,7 @@ def oodle_archives(game, mods):
     sys.path.insert(0, str(DM / 'games'))
     try:
         import profile_guess
-        src = profile_guess.build_sources(game / 'ExeFS', game / 'RomFS', mods)
+        src = profile_guess.build_sources(game / 'ExeFS', romfs_source(game), mods)
     except Exception as e:                                    # noqa: BLE001 - any failure here only costs the early stop
         warn('could not scan the RomFS for Oodle-compressed shader archives (%s): packing on as before' % e)
         return {}

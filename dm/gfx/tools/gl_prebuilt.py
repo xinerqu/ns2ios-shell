@@ -85,16 +85,22 @@ def generate(game_dir, gles=False):
         sys.exit('%s: the wrapper ran but registered no default shaders' % main)
 
     out = []
-    romfs = os.path.join(game_dir, 'RomFS')
+    # The game files may be one RomFS.img rather than a RomFS/ folder (dm/tools/romfs_image.py; the packer makes one for
+    # every game). dm/tools/romfs.py serves an image as a folder, so walking and reading go through it: with plain
+    # os.walk over '<extract>/RomFS' this found no .fs at all once the folder was gone, and Balatro failed with 31 of its
+    # 35 shader keys missing (2026-11-06).
+    sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools'))
+    import romfs
+    root = os.fspath(romfs.source(game_dir))
     n_fs = 0
-    for d, _, fs in os.walk(romfs):
+    for d, _, fs in romfs.os.walk(root):
         for f in sorted(fs):
             if not f.endswith('.fs'): continue        # LÖVE's merged stage file: vertex and pixel in one
             p = os.path.join(d, f)
-            src = open(p, 'rb').read()                # bytes: CRLF is part of the text the game hashes
+            src = romfs.open(p, 'rb').read()           # bytes: CRLF is part of the text the game hashes
             n_fs += 1
             v, px = fn(gles, src)
-            where = os.path.relpath(p, romfs).replace(os.sep, '/')
+            where = os.path.relpath(p, root).replace(os.sep, '/')
             for txt, stage in ((v, 'vert'), (px, 'frag')):
                 if txt: out.append((hashlib.sha256(txt).hexdigest()[:16], stage, txt, where))
     # LÖVE's own shaders, which every game can use: the default vertex (a .fs with no vertex stage uses it), the default
