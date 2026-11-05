@@ -4611,6 +4611,9 @@ static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
             // folder branch below compiles that source, so this one must as well (scripts/nxn_pack.py packs the library
             // into <App>/msl/b-<chain>.img). The string copies the bytes, so the mapping goes at once.
             if (f.size >= 4 && memcmp(f.data, "MTLB", 4) != 0) {
+                static _Atomic int said;
+                if (!atomic_exchange_explicit(&said, 1, memory_order_relaxed))
+                    MLOG("shader libraries: %s holds Metal source, compiled on the device (the packing machine had no Metal compiler)", path.lastPathComponent.UTF8String);
                 NSString *src = [[NSString alloc] initWithBytes:f.data length:f.size encoding:NSUTF8StringEncoding];
                 munmap(f.base, f.base_len);
                 id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;

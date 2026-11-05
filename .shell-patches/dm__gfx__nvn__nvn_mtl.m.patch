@@ -94,7 +94,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint8_t up_color;   // such a shader's colour, from its code at load with DM_UPSCALER=metalfx (up_mfx_color; UP_COLOR_UNREAD otherwise)
      int gs_loc, lay_loc; char gs_comp, lay_comp;   // a slice-writing geometry shader (no function: the layer comes from input gs_loc.gs_comp) / a vertex shader with layer entry points writing output lay_loc.lay_comp (dmsh_build.py gs_slice, vs_layer_entry); -1 = none
      // The argument buffer encoded last time
-@@ -4576,6 +4605,19 @@
+@@ -4576,6 +4605,22 @@
          int open_errno = errno; romfs_img *img; const img_ent *x = msl_image_file(path, &img); msl_map f;
          if (x && msl_image_map(img, x, &f)) {
              t_lib_layer = memmem(f.data, f.size, "render_target_array_index", 25) != NULL;
@@ -104,6 +104,9 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +            // folder branch below compiles that source, so this one must as well (scripts/nxn_pack.py packs the library
 +            // into <App>/msl/b-<chain>.img). The string copies the bytes, so the mapping goes at once.
 +            if (f.size >= 4 && memcmp(f.data, "MTLB", 4) != 0) {
++                static _Atomic int said;
++                if (!atomic_exchange_explicit(&said, 1, memory_order_relaxed))
++                    MLOG("shader libraries: %s holds Metal source, compiled on the device (the packing machine had no Metal compiler)", path.lastPathComponent.UTF8String);
 +                NSString *src = [[NSString alloc] initWithBytes:f.data length:f.size encoding:NSUTF8StringEncoding];
 +                munmap(f.base, f.base_len);
 +                id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;
@@ -114,7 +117,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              void *base = f.base; size_t base_len = f.base_len;
              dispatch_data_t d = dispatch_data_create(f.data, f.size, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ munmap(base, base_len); });
              return [g_dev newLibraryWithData:d error:err];
-@@ -4585,6 +4627,18 @@
+@@ -4585,6 +4630,18 @@
      if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) { if (fd >= 0) close(fd); if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"cannot open %@", path]}]; return nil; }
      size_t len = (size_t)st.st_size; void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
      t_lib_layer = m != MAP_FAILED && memmem(m, len, "render_target_array_index", 25) != NULL;   // the library's functions use the layer: for a vertex library, its output (shader_load)
@@ -133,7 +136,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (m == MAP_FAILED) { if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"mmap failed %@", path]}]; return nil; }
      dispatch_data_t d = dispatch_data_create(m, len, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ munmap(m, len); });
      return [g_dev newLibraryWithData:d error:err];
-@@ -4666,7 +4720,7 @@
+@@ -4666,7 +4723,7 @@
      NSError *e = nil;
      NSData *jd = msl_data([NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]);
      NSDictionary *j = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
@@ -142,7 +145,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          NvShader *o = [NvShader new]; o->stage = 2; o->lay_loc = -1; strlcpy(o->key, pc.UTF8String, sizeof o->key);
          o->gs_loc = [j[@"gs_slice"][@"loc"] intValue]; o->gs_comp = [[j[@"gs_slice"][@"comp"] description] UTF8String][0];
          return o;
-@@ -4675,13 +4729,13 @@
+@@ -4675,13 +4732,13 @@
      NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
      id<MTLLibrary> lib = lib_from_file(lp, &e);
      if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); return nil; }
@@ -158,7 +161,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // (rf.c1 is freed by dealloc when o goes: freeing it here too was a double free, which aborted FINAL FANTASY RESONANCE at its first such shader)
          MLOG("[RED] shader %s reflection conversion failed: a texture handle the translator could not trace to one slot (profile key tex_dyn_slots off)", pc.UTF8String); return nil; }
      if (rt_range_on()) o->range_ro=rt_range_bindings_ro(j);
-@@ -6991,6 +7045,95 @@
+@@ -6991,6 +7048,95 @@
      g_pt_spec_ns += bp_now() - ts;
      return ps;
  }
@@ -254,7 +257,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static id<MTLRenderPipelineState> pso_build(MTLRenderPipelineDescriptor *d, NSError **e) { return pso_build_ex(d, e, 1); }
  // Pipeline key: current state S + pass formats (normal pass; a merged pass additionally carries lmap / specialized function, filled in by pso_get)
  static void pso_key_fill(pso_key *k, NvShader *vs, NvShader *fs, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples, int lmap) {
-@@ -7194,7 +7337,7 @@
+@@ -7194,7 +7340,7 @@
  // The base of one pair as the draws make it (pso_desc_pull / pso_desc), or nil when the pair is left to the draws. Call inside an autorelease pool
  static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int zero) {
      NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
@@ -263,7 +266,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
      int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
      if (!pull && [vj[@"vertex_inputs"] count]) return nil;   // stage inputs and no pulling library: its pipelines need the draw's layout
-@@ -7234,7 +7377,7 @@
+@@ -7234,7 +7380,7 @@
  // the same for the archive it makes offline, from the same files
  static NSString *pre_stamp(NSString *txt, int zero) {
      NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding]; uint8_t h[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(d.bytes, (CC_LONG)d.length, h);
@@ -272,7 +275,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
  }
  static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
-@@ -7448,6 +7591,11 @@
+@@ -7448,6 +7594,11 @@
              vs->layer_out = 1; MLOG("vertex shader %s writes the layer: its pipelines get the triangle input primitive class", vs->key);
              e = nil; d = pso_desc(&k, vs, fs, ms_fn ? ms_fn : g_pso_fsfn, g_pso_lmap != NULL); ps = pso_build(d, &e);
          }
@@ -284,7 +287,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      if (!took) {   // the draw waited (built here, made from its queued build, or waited for its running build)
          uint64_t w = bp_now() - bt - (g_pt_pred_ns - pred0); g_pw_n[why]++; g_pw_ns[why] += w;
-@@ -11446,7 +11594,7 @@
+@@ -11446,7 +11597,7 @@
      // textures from the CPU, reads them back with ReadTexels on its own thread before any draw uses them, and copies the blocks into its 5120x5120 roughness atlas. Read from the
      // never-uploaded host texture they were zeros, the atlas stayed empty, and the opening cave's stone blocks got roughness 0 and no torch light
      int nvn_ft_written(const tex_t *);
@@ -293,7 +296,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // A sparse pool's texture is read through a copy gathered from its page table, unmapped pages as 0, as pkg_upload_ uploads it: where nothing is mapped its address range is
          // inaccessible (reading the storage directly stopped the host with SIGBUS)
          const uint8_t *mem = t->mem; uint8_t *part = NULL;
-@@ -12254,7 +12402,7 @@
+@@ -12254,7 +12405,7 @@
                  PD("Y signal_event cmd=%p dst=%p mode=%u value=%u", p, val, m, v); mtl_sub_event(val, m, v); break; }
              case OP_REPORT_COUNTER: { uint64_t t, ad; memcpy(&t, a, 8); memcpy(&ad, (const uint8_t *)a + 8, 8); g_cnt_report[t & 31]++;
                  PD("Q report type=%llu cmd=%p dst=%#llx", (unsigned long long)t, p, (unsigned long long)ad);
@@ -302,7 +305,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
                  if (t == NVN_COUNTER_TYPE_SAMPLES_PASSED) { post((post_op){3, NULL, 0, 0, ad, (uint32_t)t, vis_snapshot()}); g_vis_cur = -1; }
                  else mtl_sub_counter(ad, (uint32_t)t);
                  break; }
-@@ -12895,13 +13043,27 @@
+@@ -12895,13 +13046,27 @@
  static up_mfx_scaler g_up_mfx[UP_MFX_SCALERS]; static int g_up_mfx_next;
  static uint64_t g_up_mfx_n, g_up_mfx_kept;   // dispatches drawn by MetalFX, dispatches of a named shader left to it
  void mtl_up_mfx_stats(uint64_t *n, uint64_t *kept) { *n = g_up_mfx_n; *kept = g_up_mfx_kept; }
@@ -331,7 +334,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return v;
  }
  // The colour a variant of the network takes and writes, from the sRGB curves in its code (their constants are immediates, whole bytes in the code). The variants differ inside a pack, so this is the shader's and not the game's:
-@@ -12923,13 +13085,13 @@
+@@ -12923,13 +13088,13 @@
  #undef UP_F16
      return enc32 && dec32 && !enc16 && !dec16 ? UP_COLOR_LINEAR : dec16 && !enc16 && !enc32 && !dec32 ? UP_COLOR_SRGB : UP_COLOR_KEEP;
  }
@@ -348,7 +351,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint32_t nctl, ncode = 0; if (sd->control) nvn_ctl_lens(sd->control, &nctl, &ncode);
      cs->up_color = sd->data && ncode && ncode < (1u << 24) ? up_mfx_color((const void *)(uintptr_t)sd->data, ncode) : UP_COLOR_KEEP;
      MLOG("upscaler %s: %s", cs->key, cs->up_color == UP_COLOR_LINEAR ? "linear input and output, MetalFX in HDR mode" : cs->up_color == UP_COLOR_SRGB ? "sRGB-encoded input, linear output, MetalFX in perceptual mode" : "neither of the colour shapes MetalFX draws; the game's shader runs");
-@@ -12938,7 +13100,7 @@
+@@ -12938,7 +13103,7 @@
  static int up_mfx_wanted(NvShader *cs) {
      if (cs->up_mfx) return cs->up_mfx == 1;
      cs->up_mfx = 2;
