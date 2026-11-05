@@ -573,6 +573,18 @@ jobs:
           # is not a build failure but a SetHeapSize abort on the phone. Demand a real value rather than the file existing.
           env = z.read('Payload/DmIOS.app/dm/env.txt').decode('utf-8', 'replace') if 'Payload/DmIOS.app/dm/env.txt' in names else ''
           libs = [n for n in names if '/msl/b-' in n and n.endswith('_b.metallib')]
+          # Since shader_lib.py packs a game's library into one file beside its folder name, a package may carry
+          # msl/b-<chain>.img instead of a thousand msl/b-<chain>/<key>_b.metallib entries. Count what the host would
+          # find inside it, not the image's own name: an image that holds no library installs and draws nothing.
+          images = [n for n in names if '/msl/b-' in n and n.endswith('.img')]
+          if images:
+              import tempfile
+              sys.path.insert(0, 'dm/tools')
+              import romfs
+              tmp = tempfile.mkdtemp()
+              z.extract(images[0], tmp)
+              with romfs.scandir(os.path.join(tmp, images[0])) as it:
+                  libs = [e.name for e in it if e.name.endswith('_b.metallib')]
           # The shell's own stamp is what lets the packer refuse a shell that cannot dispatch something it wrote. If the
           # build stops writing it, that protection is gone without anything else failing -- so check the stamp itself.
           info = z.read('Payload/DmIOS.app/dm/shell_info.txt').decode('utf-8', 'replace') if 'Payload/DmIOS.app/dm/shell_info.txt' in names else ''
