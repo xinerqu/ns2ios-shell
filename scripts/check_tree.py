@@ -26,8 +26,10 @@ import sys
 
 SKIP_DIRS = {'.git', '__pycache__', 'obj', 'bin', 'dmsh_xlate_bin'}
 # Made per profile or per machine at build time (packer_sync.py SKIP_NAMES): not sources, and a packing run rewrites them.
+# shader_facts.tsv is one of these too: a profile ships it as a one-line stub and the shader step fills it in, which is
+# why this fork never commits the filled one (packer_sync would bring the stub back on the next base move).
 # Only an undeclared copy is skipped -- the placeholder profile's own dmsh_chain.h is a "+" entry and has to be there.
-SKIP_NAMES = {'c1_full.tsv', 'cb_extent.tsv', 'dmsh_chain.h', 'dmsh_chain.lock'}
+SKIP_NAMES = {'c1_full.tsv', 'cb_extent.tsv', 'shader_facts.tsv', 'dmsh_chain.h', 'dmsh_chain.lock'}
 
 
 def read_overlay(path):
