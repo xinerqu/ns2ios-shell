@@ -67,16 +67,35 @@ The schedule runs at 08:00 Beijing time (00:00 UTC) and **only builds when upstr
 commit with the version in the newest release and skips in a few seconds when they agree. So when upstream adds support for a
 new game, the shell downloaded from here plays it — nobody has to follow up by hand.
 
-This repository is not a clone of upstream; it only carries the difference, in two kinds:
+This repository is not a clone of upstream; it only carries the difference, in four kinds:
 
-| File | Meaning |
+| Line in `.shell-overlay.txt` | Meaning |
 |---|---|
-| lines starting with `+` in `.shell-overlay.txt` | files this fork **adds**, copied wholesale onto the upstream tree |
-| `.shell-patches/*.patch` | this fork's changes to files upstream **already has**; `git apply`'d onto the upstream tree |
+| `+ path` | a file this fork **adds**, copied wholesale onto the upstream tree |
+| `~ path` | a file this fork **changes**: `.shell-patches/<path>.patch` is `git apply`'d onto upstream's copy |
+| `- path` | a file upstream has and this fork **does not carry**: the build must not copy it, and it has to be absent here |
+| `! path` | **outside what this fork maintains**: the build does not use it, and a difference there is not drift (this fork's own tools and pages, upstream's Mac front end and iOS tests, the screenshots, upstream's own CI) |
 | `.shell-base.txt` | the upstream commit the patches were generated against |
 
 Patches rather than whole-file copies exist so that an upstream edit elsewhere in the same file survives. The **only** case that
 conflicts is upstream changing the same lines a patch touches.
+
+### The hole this closes
+
+A change in a file that no overlay line names never reaches the shell: CI assembles from upstream and copies only what the
+overlay says, so the build succeeds and the app behaves as upstream does. `applied N of want` does not catch it either — it
+counts the `~` lines that exist, not the file that was edited and never added.
+
+`scripts/check_tree.py` closes it: every difference between this tree and an upstream checkout must be one of the four kinds
+above, and CI runs it in `Assemble the source tree` on the fresh clone, before anything is copied onto it. Run it here too,
+with an upstream checkout beside this repository (`../nx-orig`):
+
+```
+python scripts/check_tree.py                 # this tree vs ../nx-orig
+python scripts/check_tree.py . ../nx-orig    # the same, spelled out
+```
+
+It also says when a `~` entry has stopped earning its keep (identical to upstream) and when a `-` entry is still present.
 
 ### When it conflicts
 
