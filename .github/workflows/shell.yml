@@ -243,6 +243,11 @@ jobs:
             # .shell-overlay.txt, or the change is in this tree and not in the shell, with nothing failing. Runs on the
             # clone, which is upstream untouched; after the copies below it would be comparing the fork with itself.
             python3 fork/scripts/check_tree.py fork up
+            # The same idea for the packer's own arguments: every nx_extract option upstream's build script passes must be
+            # passed by fork/scripts/nxn_pack.py too, or explained in that script. A missing option is invisible in the
+            # package -- 2026-11-06: this packer unpacked a loose RomFS and packed it into an image afterwards, 16 minutes
+            # of Tears of the Kingdom that the upstream script never pays, while every shape assertion passed.
+            python3 fork/scripts/check_reference_calls.py fork up
             # Apply this fork onto the upstream tree. Files this fork adds are copied; files it modifies are patched, so an
             # upstream edit elsewhere in the same file survives instead of being overwritten by a whole-file copy.
             while IFS= read -r line; do

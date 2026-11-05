@@ -817,22 +817,47 @@ def check_keys(nx, keys, fam, picks, versions, work, tid):
     die(red[0] if red else 'prod.keys cannot open %s: dump prod.keys again from a newer console' % ', '.join(p.name for p in pkgs))
 
 
+def extract_cmd(nx, keys, base, upd, dst, allow_damaged=False):
+    """nx_extract's arguments for one version: the game files as one RomFS.img, never a loose tree.
+
+    --romfs-image makes nx_extract write the image while it reads the RomFS: the same pass that would otherwise write the
+    loose files (Tears of the Kingdom: hundreds of thousands), which then had to be read again and packed into an image --
+    15 minutes, plus a minute to delete the tree (measured 2026-11-06) -- for a package that is an image either way.
+    Upstream's build_ipa_from_nsp.py:1241 has passed it all along ("No RomFS folder or individual resource files are
+    written", docs/development.md:418); this route unpacked to a folder first and packed it afterwards, so it paid twice
+    for the same bytes. nx_extract writes ExeFS, control.nacp and icon.jpg as before (Program.cs:101-137), in its own
+    <dst>.part, so a failed extraction leaves no half image.
+
+    A dump folder is the user's own and is never written to: step_extract is not called for one at all.
+    """
+    return [nx, keys, base, upd if upd else '-', dst, '--romfs-image'] + (['--allow-damaged'] if allow_damaged else [])
+
+
 def step_extract(nx, keys, folder, picks, work, versions, allow_damaged=False):
     ex = work / 'extract'
     ex.mkdir(parents=True, exist_ok=True)
     dirs = {}
     for ver in versions:
         dst = ex / ver
-        if dst.is_dir() and (dst / 'ExeFS').is_dir(): say('reusing the extracted %s' % ver); dirs[ver] = dst; continue
+        if dst.is_dir() and (dst / 'ExeFS').is_dir() and ((dst / 'RomFS.img').is_file() or (dst / 'RomFS').is_dir()):
+            say('reusing the extracted %s' % ver); dirs[ver] = dst; continue
         base, upd = picks[ver]
         tmp = ex / (ver + '.partial')
         shutil.rmtree(tmp, ignore_errors=True)
-        run([nx, keys, base, upd if upd else '-', tmp] + (['--allow-damaged'] if allow_damaged else []), log=work / 'logs' / ('extract_%s.log' % ver),
+        run(extract_cmd(nx, keys, base, upd, tmp, allow_damaged), log=work / 'logs' / ('extract_%s.log' % ver),
             what='extracting %s (%s)' % (ver, base.name))
         # A previous run can leave <ver> behind without an ExeFS (an interrupted extraction, or one made before the folder
         # held an update as well), and a rename onto a non-empty directory fails on Windows. Clear it and take the new one.
         if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
         tmp.replace(dst)
+        if (dst / 'RomFS').is_dir():
+            # The one outcome to report: an nx_extract that does not know the option (an older tools folder) writes the
+            # loose tree, romfs_images then packs it, and nothing else says the pack just became minutes slower. The count
+            # is in logs/extract_<ver>.log either way ("image with N entries" when it took the option).
+            warn('%s: nx_extract wrote a loose RomFS, not the image it was asked for (an nx_extract without --romfs-image?):'
+                 ' it is packed here afterwards, which takes minutes on a large game' % ver)
+        elif (dst / 'RomFS.img').is_file():
+            say('extracted %s: RomFS.img (%.2f GB, one file)' % (ver, (dst / 'RomFS.img').stat().st_size / 2**30))
         dirs[ver] = dst
     return dirs
 
@@ -858,15 +883,18 @@ def _romfs_image():
 
 
 def aoc_image(out, idx):
-    """One DLC's RomFS as `<out>/<index>.img`, its folder removed: what upstream's extract_aoc writes.
+    """A DLC folder left by an older run (or an nx_extract without --romfs-image) packed into `<out>/<index>.img`.
+
+    The pack itself no longer makes this image: step_aoc asks nx_extract for it (`aoc_cmd`), one write instead of two
+    passes. This is the fallback, for a `--keep-work` folder from an earlier version and for an old tools folder.
 
     Same reason as the game's own RomFS: a DLC is a whole RomFS tree (Monster Hunter Rise ships 250 DLC), and the app
-    copies those files one by one at install while one image is copied once and mapped page by page by the host. The
+    copies those files one by one at install, where one image is one file and one descriptor for the whole mount. The
     shell reads either form -- hle_misc.c takes `<index>` and `<index>.img`, and reports a legacy folder and its image
     as the same DLC once -- so nothing depends on which one the package carries.
 
-    Called after the folder is complete (nx_extract writes `<index>.partial` and it is renamed into place), so an image
-    is never made from a half-extracted DLC. The folder goes only after the image's entry count matches what was packed.
+    Called after the folder is complete, so an image is never made from a half-extracted DLC. The folder goes only after
+    the image's entry count matches what was packed.
     """
     romfs_image = _romfs_image()
     d, img = out / str(idx), out / ('%d.img' % idx)
@@ -884,13 +912,17 @@ def aoc_image(out, idx):
 
 
 def romfs_images(dirs, work, force=False):
-    """Each extracted version's loose RomFS packed into `<ver>/RomFS.img`, and the loose tree dropped.
+    """A loose RomFS left by an older run packed into `<ver>/RomFS.img`, and the loose tree dropped.
 
-    Why: a loose RomFS is a hundred thousand files inside the app (Tears of the Kingdom: about 800,000), which iOS copies
-    one by one at install and which the IPA writer streams one by one as well. One image file is mapped by the host
-    (dm/host/romfs_image.h) with only the pages a game file lies on, and dm/tools/romfs.py serves it as a folder to every
-    tool here, so nothing downstream changes -- upstream's NSP script has written this image while extracting since the
-    RomFS became an image (pack_dump.pack_version), and this route extracted files first, so it is made here.
+    The pack does not make this image any more: step_extract asks nx_extract for it (`extract_cmd`, --romfs-image), so the
+    bytes are written once, as one file, on the way out of the NCA. This is left for a work folder that an earlier version
+    of this script unpacked as a tree (`--keep-work` keeps such a folder for weeks) and for an nx_extract too old to know
+    the option; it costs a full read and write of the game, which is what the option avoids.
+
+    Why the package wants the image at all: a loose RomFS is a hundred thousand files inside the app (Tears of the
+    Kingdom, hundreds of thousands), which iOS copies one by one at install and whose open files the phone's file service
+    runs out of. One image file is read by the host (dm/host/romfs_image.h) with only the pages a game file lies on, and
+    dm/tools/romfs.py serves it as a folder to every tool here.
 
     A dump folder is the user's own: an image is never written into it (DumpVersion carries whatever the dump has).
 
@@ -933,8 +965,19 @@ def aoc_hint(text, name):
     return None
 
 
+def aoc_cmd(nx, keys, pkg, dst, allow_damaged=False):
+    """nx_extract's arguments for one DLC: its RomFS as one image, at the path given (upstream's extract_aoc,
+    build_ipa_from_nsp.py:1313, asks pack_nup/pack_dump for the same one-file shape).
+
+    Same reason as the game's own RomFS and the same saving: a DLC is a whole RomFS tree (Monster Hunter Rise ships 250),
+    and packing it as a second pass reads and writes it all again. The host reads `<index>.img` through the RomFS image
+    reader (hle_fs.c), so which one the package carries does not matter to it.
+    """
+    return [nx, keys, '--aoc', pkg, dst, '--romfs-image'] + (['--allow-damaged'] if allow_damaged else [])
+
+
 def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
-    """The RomFS of every DLC in the folder, at work/aoc/<index>/ (index = its title ID - the base game's - 0x1000).
+    """The RomFS of every DLC in the folder, at work/aoc/<index>.img (index = its title ID - the base game's - 0x1000).
 
     The shell mounts these through DM_AOC_DIR: main.m points that at <App>/aoc when it exists, hle_fs.c's
     fs::MountAddOnContent opens DM_AOC_DIR/<index> read-only, and hle_misc.c reports the directory names as the owned
@@ -942,8 +985,8 @@ def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
     put in the folder, and nothing when the folder has none -- same as a console without the DLC installed.
 
     One extraction serves every version: add-on content is not part of the update, and a folder usually holds exactly one
-    DLC set. nx_extract --aoc reads the DLC NSP's data NCA; a directory is only renamed into place once the extraction
-    finished, so an interrupted run leaves <index>.partial and is redone.
+    DLC set. nx_extract --aoc --romfs-image reads the DLC NSP's data NCA and writes `<index>.partial`, which is renamed
+    into place once it finished, so an interrupted run is redone.
     """
     if not dlcs: return None
     # The same DLC can sit in the folder twice (a dump and its update, or two copies of the same file): take the highest
@@ -991,14 +1034,23 @@ def step_aoc(nx, keys, dlcs, work, tid, force=False, allow_damaged=False):
             aoc_image(out, idx)          # a folder from a run before this one becomes the image here
             say('reusing the extracted DLC %d (title ID %s)' % (idx, t)); continue
         tmp = out / ('%d.partial' % idx)
-        shutil.rmtree(tmp, ignore_errors=True)
-        run([nx, keys, '--aoc', p, tmp] + (['--allow-damaged'] if allow_damaged else []),
+        if tmp.is_dir(): shutil.rmtree(tmp, ignore_errors=True)
+        elif tmp.exists(): tmp.unlink()
+        run(aoc_cmd(nx, keys, p, tmp, allow_damaged),
             log=work / 'logs' / ('dlc_%d.log' % idx), what='extracting DLC %d (%s)' % (idx, p.name),
             hint=lambda t, n=p.name: aoc_hint(t, n))
-        if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
-        tmp.replace(dst)
+        img = out / ('%d.img' % idx)
+        if tmp.is_dir():
+            # An nx_extract without --romfs-image (an older tools folder) leaves a folder: pack it here, and say so, because
+            # this is the extra pass the option exists to avoid. aoc_image removes it once the image checks out.
+            warn('DLC %d: nx_extract wrote a folder, not the image it was asked for (an nx_extract without --romfs-image?)' % idx)
+            if dst.exists(): shutil.rmtree(dst, ignore_errors=True)
+            tmp.replace(dst)
+            aoc_image(out, idx)
+        else:
+            if img.exists(): img.unlink()
+            tmp.replace(img)
         done[str(idx)] = src
-        aoc_image(out, idx)
     stamp.write_text(''.join('%s\t%s\n' % (i, '\t'.join(done[i])) for i in sorted(want, key=int) if i in done),
                      encoding='utf-8')
     return out
