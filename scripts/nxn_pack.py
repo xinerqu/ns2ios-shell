@@ -821,6 +821,60 @@ def step_extract(nx, keys, folder, picks, work, versions, allow_damaged=False):
     return dirs
 
 
+def romfs_source(d):
+    """One extracted version's RomFS: the image when it is that one file, the folder otherwise.
+
+    dm/tools/romfs.py serves an image as a folder to every reader, and the app's romfs_locate looks for romfs.img first,
+    so both forms work everywhere below. A dump folder answers through DumpVersion, which already picks its own name
+    (`romfs` lowercase, or RomFS.img).
+    """
+    if not isinstance(d, Path):
+        return d / 'RomFS'
+    sys.path.insert(0, str(TOOLS))
+    import romfs
+    return Path(romfs.source(str(d)))
+
+
+def romfs_images(dirs, work, force=False):
+    """Each extracted version's loose RomFS packed into `<ver>/RomFS.img`, and the loose tree dropped.
+
+    Why: a loose RomFS is a hundred thousand files inside the app (Tears of the Kingdom: about 800,000), which iOS copies
+    one by one at install and which the IPA writer streams one by one as well. One image file is mapped by the host
+    (dm/host/romfs_image.h) with only the pages a game file lies on, and dm/tools/romfs.py serves it as a folder to every
+    tool here, so nothing downstream changes -- upstream's NSP script has written this image while extracting since the
+    RomFS became an image (pack_dump.pack_version), and this route extracted files first, so it is made here.
+
+    A dump folder is the user's own: an image is never written into it (DumpVersion carries whatever the dump has).
+
+    The loose tree is removed only after the image is published and its entry count matches the tree's: keeping both
+    would cost the game's size twice, and a run that stopped halfway must not leave the folder gone and no image.
+    """
+    sys.path.insert(0, str(TOOLS))
+    import romfs_image
+    for ver in sorted(dirs):
+        d = dirs[ver]
+        if not isinstance(d, Path): continue                 # a dump folder: nothing is written there
+        src, img = d / 'RomFS', d / 'RomFS.img'
+        if not src.is_dir(): continue
+        files = dirs_n = 0
+        for _, subdirs, names in os.walk(src):
+            dirs_n += len(subdirs); files += len(names)
+        t0 = time.time()
+        n = romfs_image.pack(src, img, reuse=not force)
+        with open(img, 'rb') as f:
+            magic, _, _, packed = romfs_image.HEAD.unpack(f.read(romfs_image.HEAD.size))
+        if magic != romfs_image.MAGIC or packed != n:
+            die('%s: the image header says %d entries, packing %d files returned %d' % (img, packed, files, n))
+        if n != files + dirs_n + 1:   # every file, every folder, the root
+            die('%s holds %d entries, the folder has %d files and %d folders' % (img, n, files, dirs_n))
+        say('RomFS image: %s, %d files -> %s (%.2f GB, %.1f s)'
+            % (ver, files, img.name, img.stat().st_size / 2**30, time.time() - t0))
+        try:
+            shutil.rmtree(src)
+        except OSError as e:
+            warn('the loose RomFS stays next to %s until it can be removed (%s)' % (img.name, e))
+
+
 def aoc_hint(text, name):
     """The one DLC failure worth translating: a package that carries the ticket but no data NCA.
 
@@ -1111,7 +1165,7 @@ def capture_gl(game, gdir, patched, work, tid):
     shutil.rmtree(cap, ignore_errors=True); shutil.rmtree(rd, ignore_errors=True)
     cap.mkdir(parents=True)
     for x in ('save', 'temp', 'msl'): (rd / x).mkdir(parents=True)
-    env = dict(os.environ, DM_ROMFS=str(game / 'RomFS'), DM_SAVE=str(rd / 'save'), DM_TEMP=str(rd / 'temp'),
+    env = dict(os.environ, DM_ROMFS=str(romfs_source(game)), DM_SAVE=str(rd / 'save'), DM_TEMP=str(rd / 'temp'),
                DM_MSL_DIR=str(rd / 'msl'), DM_GL_CAPTURE=str(cap))
     say('booting the game in the Mac host to capture the GLSL it assembles at run time (%s keys)'
         % ('all %d' % len(want) if want else 'any'))
@@ -1377,7 +1431,7 @@ def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
     # asks for it (split_shaders, names + ('pso_pairs.tsv',)). Several versions go in as comma-separated lists in the
     # same order as the profile's shader_versions, because the tables on disk are a union over exactly that set.
     names = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
-    run([PY, GFX / 'shader_split.py', ','.join(str(dirs[v] / 'RomFS') for v in versions),
+    run([PY, GFX / 'shader_split.py', ','.join(str(romfs_source(dirs[v])) for v in versions),
          ','.join(str(dirs[v] / 'ExeFS' / 'main') for v in versions), pkg] + [tb / n for n in names],
         env={'DM_GAME': tid}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
         hint=shader_split_hint)
@@ -1713,7 +1767,7 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     if msl_dir.is_dir():
         shader_library(msl_dir, A)
 
-    romfs = game / 'RomFS'
+    romfs = romfs_source(game)
     if romfs.is_file():
         # <App>/romfs.img, the shape upstream's build_ipa.sh gives a package whose extraction holds an image, and the one
         # main.m looks for first (romfs_locate). One file instead of a hundred thousand, and the app stops paying to copy them.
@@ -2131,6 +2185,7 @@ def main():
         check_keys(nx, keys, fam, picks, versions, work, tid)
         dirs = step_extract(nx, keys, folder, picks, work, versions, a.allow_damaged)
         aoc_dir = step_aoc(nx, keys, fam['dlc'], work, tid, a.force, a.allow_damaged)
+    romfs_images(dirs, work, a.force)
     if a.stop_after == 'extract': return say('stopped after extract')
     game = dirs[pkg]
     if pkg == UNKNOWN_VER:
@@ -2244,7 +2299,7 @@ def main():
         # SPIR-V in the RomFS (Hades: 74 files in Content/EffectsForgeSwitch), so nothing has to be captured; a game that
         # builds its modules at run time needs --vk-capture with what DM_VK_CAPTURE wrote.
         root = work / 'build' / 'vkroot'
-        ins = [game / 'RomFS'] + ([Path(a.vk_capture).resolve()] if a.vk_capture else [])
+        ins = [romfs_source(game)] + ([Path(a.vk_capture).resolve()] if a.vk_capture else [])
         run([PY, GFX / 'vk_shaders.py', *ins, root, '--source-only'],
             log=work / 'logs' / 'vk_shaders.log', what='translating the SPIR-V to Metal source',
             hint=vk_capture_hint)
