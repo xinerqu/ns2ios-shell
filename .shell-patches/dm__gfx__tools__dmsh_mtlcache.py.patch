@@ -1,12 +1,14 @@
 diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 --- a/dm/gfx/tools/dmsh_mtlcache.py
 +++ b/dm/gfx/tools/dmsh_mtlcache.py
-@@ -8,17 +8,34 @@
+@@ -8,19 +8,36 @@
  # Filling from earlier builds: every imported library must record the current compiler identity and flags in its reflection. Legacy libraries without that identity are not imported.
  # A fresh compile of two shaders per stage also checks their bytes. Each folder is read once per compiler identity (filled.json remembers its number of libraries).
  # Not part of the chain version (dmsh_chain.py): the cache never changes an output, it only skips recompiling one. Change FORMAT when what it stores changes.
--import os, re, json, shutil, ctypes, hashlib, threading, subprocess, collections
-+import os, re, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
+-import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections
++import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
+ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools'))
+ import romfs, shader_lib   # the libraries of an earlier build may be one file (shader_lib.py), read in place
  
  FORMAT = b'dmsh_mtlcache 2'   # earlier prefill could misclassify an unsampled library from another compiler
  OUTPUT = re.compile(r'[0-9a-f]{16}_b\.metal')   # a shader's MSL in dmsh_build.py's outputs: <key>_b.metal
@@ -38,8 +40,8 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 +    _replace(tmp, dst)
  
  
- def compiler_id(sdk):
-@@ -57,7 +74,7 @@
+ def copy_in(src, dst):   # clone, from a file that may lie inside a library's image
+@@ -66,7 +83,7 @@
              clone(p, lib); self.count((target, 'reused')); return
          tmp = f'{lib}.tmp-{os.getpid()}-{threading.get_ident()}'
          self._compile(target, msl, tmp)

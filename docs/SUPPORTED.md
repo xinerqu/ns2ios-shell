@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**140 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**143 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -52,6 +52,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
 | Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 |  |
+| DRAGON QUEST BUILDERS 2 | `010042000A986000` | 1.7.3d |  |
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
 | DRAGON QUEST III HD-2D Remake | `01003E601E324000` | 1.1.2 | 60 fps |
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
@@ -119,6 +120,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
 | Splatoon Raiders | `0400380020056000` | v65536 |  |
+| Star Fox | `0400E88025B1A000` | v131072 |  |
 | Stardew Valley | `0100E65002BB8000` | 1.6.15.13 |  |
 | SteamWorld Dig | `01009320084A4000` | 1.12.0 |  |
 | SteamWorld Dig 2 | `0100CA9002322000` | 4.1.1 |  |
@@ -154,4 +156,5 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Xenoblade Chronicles 2 | `0100E95004038000` | 2.1.0 |  |
 | Xenoblade Chronicles 3 | `010074F013262000` | 2.2.1 |  |
 | Xenoblade Chronicles: Definitive Edition | `0100FF500E34A000` | 1.1.2 |  |
+| Yoshi and the Mysterious Book | `0400245021D2C000` | 1.0.2 |  |
 | Yoshi's Crafted World | `01006000040C2000` | 1.0.1 |  |
