@@ -158,3 +158,4 @@ pack: every run keeps its step timings in logs/steps.log	打包日志：每一�
 Move the patch base to b4318c7a: a linear-texture read path and one more game	跟上上游 b4318c7a：新增《大神 HD》的配置（共 146 款），以及线性纹理在任意线程读取的修正。
 basemove: catch up to upstream in one command	内部工具：一条命令把补丁基座追到上游最新（遇到冲突会停下等人）。
 shaders: the first part of the guest memory can stay anonymous, out of the files	内存：客人内存块的前一段可以留在匿名内存里（GPU 不必等磁盘），其余仍走文件。
+render: the pools the GPU reads are wired, so it never waits for a reclaimed page	渲染：GPU 要读的内存池会被钉在内存里，不再等被回收的页。

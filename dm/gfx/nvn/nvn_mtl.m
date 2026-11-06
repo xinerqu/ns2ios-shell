@@ -641,6 +641,29 @@ enum { BIG_MIN = 512u << 20, BIG_S = 16u << 20, BIG_UNKNOWN = 64u << 20, BIG_MAX
 typedef struct { uintptr_t lo, hi, a, b; const void *mem; int *chunk, full; NSMutableArray *old; } big_pool;   // chunk: stride → g_pools index + 1; full: the whole pool's entry + 1; old: buffers a longer chunk replaced, alive with the pool
 static big_pool g_big[BIG_MAX]; static int g_nbig;
 static int big_of(uint64_t addr) { for (int i = 0; i < g_nbig; i++) if (addr >= g_big[i].lo && addr < g_big[i].hi) return i; return -1; }
+int dm_guest_in_files(void);   // hle_svc.c: the guest's memory is in files, so its pages are the kernel's to reclaim
+
+// Wire a pool's pages so the GPU never waits for a page the kernel reclaimed. Metal's own wiring (the residency set) does not reach
+// pages of a file mapping: Donkey Kong Bananza read its geometry every frame out of a pool whose pages the kernel kept taking back,
+// and whole frames cost 821-847 ms with submit+present at 33 ms and GPU at 1,530-2,383 ms on an iPhone 15 Pro. Pinned pages count in
+// phys_footprint again, so this is capped (DM_GUEST_PIN_MAX in MB, default 3.5 GB, 0 turns it off): past the cap the rest is left the
+// way it was, which is upstream's behaviour, and one [RED] line says so. Only a guest whose memory is in files is wired -- an
+// anonymous guest's pools are not taken from it that way, and wiring them would only keep the compressor off them.
+static size_t g_pinned, g_pin_cap; static int g_pin_init;
+static void pin_guest(uintptr_t a, size_t n) {
+    if (!dm_guest_in_files() || !n) return;
+    if (!g_pin_init) { const char *e = getenv("DM_GUEST_PIN_MAX"); g_pin_cap = e && *e ? (size_t)atoi(e) << 20 : (size_t)3584 << 20; g_pin_init = 1; }
+    if (!g_pin_cap) return;
+    if (g_pinned + n > g_pin_cap) {
+        static int said; if (!said++) MLOG("[RED] [mem] pools are wired up to %zu MB: the rest of the guest's memory stays reclaimable, and the GPU may wait for it", g_pin_cap >> 20);
+        return;
+    }
+    if (mlock((const void *)a, n)) {
+        static int said; if (said++ < 4) MLOG("[RED] [mem] could not wire %#lx+%#lx (errno %d): the GPU may wait for those pages", (unsigned long)a, (unsigned long)n, errno);
+        return;
+    }
+    g_pinned += n; static int said2; if (said2++ < 3) MLOG("[mem] pool wired: %#lx+%#lx, %zu MB wired in all", (unsigned long)a, (unsigned long)n, g_pinned >> 20);
+}
 void mtl_pool_add(const void *mem, uint64_t size) {
     mtl_init(); g_reg_gen++;
     uintptr_t pg = (uintptr_t)getpagesize(), lo = (uintptr_t)mem, hi = lo + size;
@@ -670,6 +693,7 @@ void mtl_pool_add(const void *mem, uint64_t size) {
         }
         MDIE("memory pool %p+%#llx: failed to create the zero-copy buffer over %#lx..%#lx", mem, (unsigned long long)size, (unsigned long)a, (unsigned long)b);
     }
+    pin_guest(a, b - a);
     pthread_mutex_lock(&g_mu);
     if (g_npool == g_cap) { g_cap = g_cap ? g_cap * 2 : 64; g_pools = realloc_or_die(g_pools, g_cap * sizeof *g_pools, "the memory pool table"); }
     g_pidx_ok = 0; g_plast = -1; atomic_fetch_add(&g_pool_gen, 1);   // the address index and the per-thread caches are invalid (pool_find, pc_get)
@@ -722,6 +746,7 @@ static void pidx_sort(void) {
 static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, uint64_t unk) {   // caller holds g_mu: a new entry for [lo, end) of the pool, looked up for addresses in [lo, hi)
     id<MTLBuffer> buf = [g_dev newBufferWithBytesNoCopy:(void *)lo length:end - lo options:MTLResourceStorageModeShared deallocator:nil];
     if (!buf) { MLOG("[RED] memory pool %p: the zero-copy buffer over %#lx..%#lx was refused", b->mem, (unsigned long)lo, (unsigned long)end); return -1; }
+    pin_guest(lo, end - lo);
     if (g_npool == g_cap) { g_cap = g_cap ? g_cap * 2 : 64; g_pools = realloc_or_die(g_pools, g_cap * sizeof *g_pools, "the memory pool table"); }
     g_pidx_ok = 0; atomic_fetch_add(&g_pool_gen, 1);
     g_pools[g_npool++] = (pool_ent){lo < b->lo ? b->lo : lo, hi > b->hi ? b->hi : hi, lo, buf, buf.gpuAddress, b->mem, 0, clock_gettime_nsec_np(CLOCK_MONOTONIC), end > b->hi ? b->hi : end, unk};

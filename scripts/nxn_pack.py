@@ -1609,7 +1609,11 @@ ENV_OVERRIDES = {
     # DM_GUEST_FILE_ANON keeps the first 4 GB of the block anonymous (this fork's addition to hle_svc.c). Anonymous pages are
     # not reclaimed that way, and the pools a game makes first -- the geometry and textures the GPU streams every frame -- sit
     # at the start of a heap that grows up. 4 GB of 9.75 leaves 5.75 GB in files, still far more than the limit.
-    '040074a01bf12000': {'DM_GUEST_FILE': '1', 'DM_GUEST_FILE_ANON': '4G'},
+    # The split (DM_GUEST_FILE_ANON) was tried and is NOT used: 5 GB anonymous made it worse, because iOS compresses anonymous
+    # pages instead of swapping them -- 2.97 GB of the 5 were compressed, compression counts in phys_footprint anyway, and a
+    # compressed page costs the GPU a decompression, so the collapse came at frame 1,645 instead of 4,677. What is left is the
+    # wiring in nvn_mtl.m (pin_guest): the pools the GPU reads are mlock'd, so the kernel can neither reclaim nor compress them.
+    '040074a01bf12000': {'DM_GUEST_FILE': '1'},
 }
 
 
