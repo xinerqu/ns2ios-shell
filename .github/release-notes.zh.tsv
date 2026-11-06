@@ -151,3 +151,4 @@ pack: deflate a big file in blocks on the pool, not on one core	打包快了一�
 pack: as many translator and splitter threads as the machine has, up to 16	打包时翻译和拆分着色器两步都用满本机线程：从固定 8 个改成"按逻辑核数、最多 16"，8 线程及以下的机器保持原样。
 Move the patch base to 75c1a8cf: the Mac alias region, a movie decoder thread, two more Switch 2 games	跟上上游 18 个提交：Mac 侧改用 Switch 同尺寸的 64 GB 地址别名区、过场视频解码改到独立线程（修好马力欧足球开场的崩溃）、新增两款 Switch 2 游戏（时之笛、卡比空中骑手）。
 Move the patch base to 0cefa868: readable-tile shader functions found by their numbers	跟上上游 0cefa868：着色器的可读贴图函数改成按编号查找，荒野之息每帧约 270 次贴图读取不再反复拼字符串。
+Move the patch base to 671c68e1: the test suite checks Metal objects before using them	跟上上游 671c68e1（测试代码的健壮性修正，不影响打包与游戏）。
