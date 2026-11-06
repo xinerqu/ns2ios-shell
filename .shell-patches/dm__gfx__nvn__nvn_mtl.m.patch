@@ -94,7 +94,15 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint8_t up_color;   // such a shader's colour, from its code at load with DM_UPSCALER=metalfx (up_mfx_color; UP_COLOR_UNREAD otherwise)
      int gs_loc, lay_loc; char gs_comp, lay_comp;   // a slice-writing geometry shader (no function: the layer comes from input gs_loc.gs_comp) / a vertex shader with layer entry points writing output lay_loc.lay_comp (dmsh_build.py gs_slice, vs_layer_entry); -1 = none
      uint64_t cbs_seen; uint32_t cbs_runs;   // the command buffer that listed this shader last, and how many have (cbs_note)
-@@ -4772,6 +4801,22 @@
+@@ -4652,6 +4681,7 @@
+     NSString *ventry; id<MTLFunction> vfn; int vfn_state;
+     id<MTLFunction> pfn; int pfn_state, has_pull;
+     id<MTLFunction> afn[4]; int afn_state, has_alpha;
++    id<MTLLibrary> blib;   // 基础库 <key>_b：在没装苹果编译器的机器上打的包里，它装的本身就是源码，而且已经含 <entry>_a / <entry>_l（nometal_run.py 的 split_into_one_library），at_fn / lo_fn 找不到侧库时从这里取   // the base library <key>_b: a package made on a machine without Apple's compiler carries it as source that already holds the <entry>_a / <entry>_l too (nometal_run.py split_into_one_library), and at_fn / lo_fn take them from here when there is no side library
+     id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; } @end   // llib: the side library <key>_bx for logic operations, lfn: its fn_u / fn_m specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry points of fn, fn_u, fn_m, fn_d in the side library <key>_bx (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names them, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
+ @implementation NvShader
+ - (void)dealloc { free(rf.c1); free(geo_slot); }
+@@ -4772,6 +4802,22 @@
          int open_errno = errno; romfs_img *img; const img_ent *x = msl_image_file(path, &img); msl_map f;
          if (x && msl_image_map(img, x, &f)) {
              t_lib_layer = memmem(f.data, f.size, "render_target_array_index", 25) != NULL;
@@ -117,7 +125,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              void *base = f.base; size_t base_len = f.base_len;
              dispatch_data_t d = dispatch_data_create(f.data, f.size, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ munmap(base, base_len); });
              return [g_dev newLibraryWithData:d error:err];
-@@ -4781,6 +4826,18 @@
+@@ -4781,6 +4827,18 @@
      if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) { if (fd >= 0) close(fd); if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"cannot open %@", path]}]; return nil; }
      size_t len = (size_t)st.st_size; void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
      t_lib_layer = m != MAP_FAILED && memmem(m, len, "render_target_array_index", 25) != NULL;   // the library's functions use the layer: for a vertex library, its output (shader_load)
@@ -136,7 +144,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (m == MAP_FAILED) { if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"mmap failed %@", path]}]; return nil; }
      dispatch_data_t d = dispatch_data_create(m, len, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ munmap(m, len); });
      return [g_dev newLibraryWithData:d error:err];
-@@ -4862,7 +4919,7 @@
+@@ -4862,7 +4920,7 @@
      NSError *e = nil;
      NSData *jd = msl_data([NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]);
      NSDictionary *j = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
@@ -145,7 +153,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          NvShader *o = [NvShader new]; o->stage = 2; o->lay_loc = -1; strlcpy(o->key, pc.UTF8String, sizeof o->key);
          o->gs_loc = [j[@"gs_slice"][@"loc"] intValue]; o->gs_comp = [[j[@"gs_slice"][@"comp"] description] UTF8String][0];
          return o;
-@@ -4871,13 +4928,13 @@
+@@ -4871,13 +4929,13 @@
      NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
      id<MTLLibrary> lib = lib_from_file(lp, &e);
      if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); return nil; }
@@ -161,7 +169,39 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // (rf.c1 is freed by dealloc when o goes: freeing it here too was a double free, which aborted FINAL FANTASY RESONANCE at its first such shader)
          MLOG("[RED] shader %s reflection conversion failed: a texture handle the translator could not trace to one slot (profile key tex_dyn_slots off)", pc.UTF8String); return nil; }
      if (rt_range_on()) o->range_ro=rt_range_bindings_ro(j);
-@@ -7234,6 +7291,95 @@
+@@ -4913,6 +4971,9 @@
+     if (stage == 0 && !layer) o->has_pull = [j[@"pull"] isKindOfClass:[NSDictionary class]];
+     if (stage == 1) o->has_alpha = [j[@"alpha"] isKindOfClass:[NSDictionary class]];
+     if (stage == 1) o->has_logic = [j[@"logic"] isKindOfClass:[NSDictionary class]];
++    // 只有真需要侧入口的着色器才留着库：别的路径永远问不到它，而库被函数引用着就释放不掉。Mac 的包里 at_fn 先找到 <key>_bx，轮不到这里。
++    // Only a shader that needs one keeps the library: nothing else would ever ask for it. On a Mac's package at_fn finds <key>_bx first.
++    if (o->has_alpha || o->has_logic) o->blib = lib;
+     // A function that declares function constants cannot go into a pipeline until it is specialized, even when every constant is optional. SPIRV-Cross declares one for shaders that read a
+     // texel buffer (spvLinearTextureAlignmentOverride, used only through is_function_constant_defined; one of Pokémon Legends: Z-A's imgui pixel shaders, 2bd5037003980716): an empty set of
+     // values keeps its default. Without it the first pipeline with that shader failed Metal's validation (`fragmentFunction main0 cannot be used to build a pipeline state`)
+@@ -6547,7 +6608,9 @@
+     if (!fs->afn_state) {
+         fs->afn_state = 2;
+         size_t kl = strlen(fs->key); NSString *path = [NSString stringWithFormat:@"%@/%.*s_bx.metallib", g_msl_dir, (int)(kl > 2 ? kl - 2 : kl), fs->key];
+-        NSError *e = nil; id<MTLLibrary> lib = lib_from_file(path, &e); const char *why = lib ? NULL : "no library";
++        NSError *e = nil; id<MTLLibrary> lib = lib_from_file(path, &e);
++        if (!lib && fs->blib) { lib = fs->blib; e = nil; }   // no side library: the package came from a machine without Apple's compiler, whose one library holds these entry points too (nometal_run.py)
++        const char *why = lib ? NULL : "no library";
+         id<MTLFunction> own[4] = {fs->fn, fs->fn_u, fs->fn_m, fs->fn_d};
+         for (int i = 0; i < 4 && !why; i++) {
+             if (!own[i]) continue;
+@@ -6620,7 +6683,9 @@
+     if (!fs->lfn_state) {
+         fs->lfn_state = 2;
+         size_t kl = strlen(fs->key); NSString *path = [NSString stringWithFormat:@"%@/%.*s_bx.metallib", g_msl_dir, (int)(kl > 2 ? kl - 2 : kl), fs->key];
+-        if ((fs->llib = lib_from_file(path, &e))) { fs->lfn_state = 1; fs->lfn = [NSMutableDictionary dictionary]; static int n; if (++n <= 3 || !(n & (n - 1))) MLOG("logic operation: side library of %s loaded (%d shaders so far)", fs->key, n); }
++        fs->llib = lib_from_file(path, &e);
++        if (!fs->llib && fs->blib) { fs->llib = fs->blib; e = nil; }   // no side library: the base one holds these entry points too (nometal_run.py, as at_fn)
++        if (fs->llib) { fs->lfn_state = 1; fs->lfn = [NSMutableDictionary dictionary]; static int n; if (++n <= 3 || !(n & (n - 1))) MLOG("logic operation: side library of %s loaded (%d shaders so far)", fs->key, n); }
+         else why = "no library";
+     }
+     id<MTLFunction> f = nil; NSNumber *k = @(w << 8 | (targets & 0xff));
+@@ -7234,6 +7299,95 @@
      g_pt_spec_ns += bp_now() - ts;
      return ps;
  }
@@ -257,7 +297,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static id<MTLRenderPipelineState> pso_build(MTLRenderPipelineDescriptor *d, NSError **e) { return pso_build_ex(d, e, 1); }
  // Pipeline key: current state S + pass formats (normal pass; a merged pass additionally carries lmap / specialized function, filled in by pso_get)
  static void pso_key_fill(pso_key *k, NvShader *vs, NvShader *fs, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples, int lmap) {
-@@ -7437,7 +7583,7 @@
+@@ -7437,7 +7591,7 @@
  // The base of one pair as the draws make it (pso_desc_pull / pso_desc), or nil when the pair is left to the draws. Call inside an autorelease pool
  static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int zero) {
      NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
@@ -266,7 +306,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
      int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
      if (!pull && [vj[@"vertex_inputs"] count]) return nil;   // stage inputs and no pulling library: its pipelines need the draw's layout
-@@ -7477,7 +7623,7 @@
+@@ -7477,7 +7631,7 @@
  // the same for the archive it makes offline, from the same files
  static NSString *pre_stamp(NSString *txt, int zero) {
      NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding]; uint8_t h[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(d.bytes, (CC_LONG)d.length, h);
@@ -275,7 +315,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
  }
  static NSArray<NSArray<NSString *> *> *pre_parse(NSString *txt) {   // (vertex key, pixel key) per line, without empty lines, comments and repeated lines
-@@ -7691,6 +7837,11 @@
+@@ -7691,6 +7845,11 @@
              vs->layer_out = 1; MLOG("vertex shader %s writes the layer: its pipelines get the triangle input primitive class", vs->key);
              e = nil; d = pso_desc(&k, vs, fs, ms_fn ? ms_fn : g_pso_fsfn, g_pso_lmap != NULL); ps = pso_build(d, &e);
          }
@@ -287,7 +327,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      if (!took) {   // the draw waited (built here, made from its queued build, or waited for its running build)
          uint64_t w = bp_now() - bt - (g_pt_pred_ns - pred0); g_pw_n[why]++; g_pw_ns[why] += w;
-@@ -11956,7 +12107,7 @@
+@@ -11956,7 +12115,7 @@
          for (size_t y = 0; y < hb; y++) memcpy(dst + y * row, (const uint8_t *)t->mem + (y0 + y) * srow + x0, wb);
          return;
      }
@@ -296,7 +336,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // A sparse pool's texture is read through a copy gathered from its page table, unmapped pages as 0, as pkg_upload_ uploads it: where nothing is mapped its address range is
          // inaccessible (reading the storage directly stopped the host with SIGBUS)
          const uint8_t *mem = t->mem; uint8_t *part = NULL;
-@@ -12780,7 +12931,7 @@
+@@ -12780,7 +12939,7 @@
                  PD("Y signal_event cmd=%p dst=%p mode=%u value=%u", p, val, m, v); mtl_sub_event(val, m, v); break; }
              case OP_REPORT_COUNTER: { uint64_t t, ad; memcpy(&t, a, 8); memcpy(&ad, (const uint8_t *)a + 8, 8); g_cnt_report[t & 31]++;
                  PD("Q report type=%llu cmd=%p dst=%#llx", (unsigned long long)t, p, (unsigned long long)ad);
@@ -305,7 +345,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
                  if (t == NVN_COUNTER_TYPE_SAMPLES_PASSED) { post((post_op){3, NULL, 0, 0, ad, (uint32_t)t, vis_snapshot()}); g_vis_cur = -1; }
                  else mtl_sub_counter(ad, (uint32_t)t);
                  break; }
-@@ -13434,13 +13585,27 @@
+@@ -13434,13 +13593,27 @@
  static up_mfx_scaler g_up_mfx[UP_MFX_SCALERS]; static int g_up_mfx_next;
  static uint64_t g_up_mfx_n, g_up_mfx_kept;   // dispatches drawn by MetalFX, dispatches of a named shader left to it
  void mtl_up_mfx_stats(uint64_t *n, uint64_t *kept) { *n = g_up_mfx_n; *kept = g_up_mfx_kept; }
@@ -334,7 +374,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return v;
  }
  // The colour a variant of the network takes and writes, from the sRGB curves in its code (their constants are immediates, whole bytes in the code). The variants differ inside a pack, so this is the shader's and not the game's:
-@@ -13462,13 +13627,13 @@
+@@ -13462,13 +13635,13 @@
  #undef UP_F16
      return enc32 && dec32 && !enc16 && !dec16 ? UP_COLOR_LINEAR : dec16 && !enc16 && !enc32 && !dec32 ? UP_COLOR_SRGB : UP_COLOR_KEEP;
  }
@@ -351,7 +391,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint32_t nctl, ncode = 0; if (sd->control) nvn_ctl_lens(sd->control, &nctl, &ncode);
      cs->up_color = sd->data && ncode && ncode < (1u << 24) ? up_mfx_color((const void *)(uintptr_t)sd->data, ncode) : UP_COLOR_KEEP;
      MLOG("upscaler %s: %s", cs->key, cs->up_color == UP_COLOR_LINEAR ? "linear input and output, MetalFX in HDR mode" : cs->up_color == UP_COLOR_SRGB ? "sRGB-encoded input, linear output, MetalFX in perceptual mode" : "neither of the colour shapes MetalFX draws; the game's shader runs");
-@@ -13477,7 +13642,7 @@
+@@ -13477,7 +13650,7 @@
  static int up_mfx_wanted(NvShader *cs) {
      if (cs->up_mfx) return cs->up_mfx == 1;
      cs->up_mfx = 2;

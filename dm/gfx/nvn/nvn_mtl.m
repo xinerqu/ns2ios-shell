@@ -4681,6 +4681,7 @@ static void shmap_read(void) {
     NSString *ventry; id<MTLFunction> vfn; int vfn_state;
     id<MTLFunction> pfn; int pfn_state, has_pull;
     id<MTLFunction> afn[4]; int afn_state, has_alpha;
+    id<MTLLibrary> blib;   // 基础库 <key>_b：在没装苹果编译器的机器上打的包里，它装的本身就是源码，而且已经含 <entry>_a / <entry>_l（nometal_run.py 的 split_into_one_library），at_fn / lo_fn 找不到侧库时从这里取   // the base library <key>_b: a package made on a machine without Apple's compiler carries it as source that already holds the <entry>_a / <entry>_l too (nometal_run.py split_into_one_library), and at_fn / lo_fn take them from here when there is no side library
     id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; } @end   // llib: the side library <key>_bx for logic operations, lfn: its fn_u / fn_m specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry points of fn, fn_u, fn_m, fn_d in the side library <key>_bx (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names them, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
 @implementation NvShader
 - (void)dealloc { free(rf.c1); free(geo_slot); }
@@ -4970,6 +4971,9 @@ static NvShader *shader_load(NSString *pc, int stage, int layer) {
     if (stage == 0 && !layer) o->has_pull = [j[@"pull"] isKindOfClass:[NSDictionary class]];
     if (stage == 1) o->has_alpha = [j[@"alpha"] isKindOfClass:[NSDictionary class]];
     if (stage == 1) o->has_logic = [j[@"logic"] isKindOfClass:[NSDictionary class]];
+    // 只有真需要侧入口的着色器才留着库：别的路径永远问不到它，而库被函数引用着就释放不掉。Mac 的包里 at_fn 先找到 <key>_bx，轮不到这里。
+    // Only a shader that needs one keeps the library: nothing else would ever ask for it. On a Mac's package at_fn finds <key>_bx first.
+    if (o->has_alpha || o->has_logic) o->blib = lib;
     // A function that declares function constants cannot go into a pipeline until it is specialized, even when every constant is optional. SPIRV-Cross declares one for shaders that read a
     // texel buffer (spvLinearTextureAlignmentOverride, used only through is_function_constant_defined; one of Pokémon Legends: Z-A's imgui pixel shaders, 2bd5037003980716): an empty set of
     // values keeps its default. Without it the first pipeline with that shader failed Metal's validation (`fragmentFunction main0 cannot be used to build a pipeline state`)
@@ -6604,7 +6608,9 @@ static id<MTLFunction> at_fn(NvShader *fs, id<MTLFunction> base) {   // the side
     if (!fs->afn_state) {
         fs->afn_state = 2;
         size_t kl = strlen(fs->key); NSString *path = [NSString stringWithFormat:@"%@/%.*s_bx.metallib", g_msl_dir, (int)(kl > 2 ? kl - 2 : kl), fs->key];
-        NSError *e = nil; id<MTLLibrary> lib = lib_from_file(path, &e); const char *why = lib ? NULL : "no library";
+        NSError *e = nil; id<MTLLibrary> lib = lib_from_file(path, &e);
+        if (!lib && fs->blib) { lib = fs->blib; e = nil; }   // no side library: the package came from a machine without Apple's compiler, whose one library holds these entry points too (nometal_run.py)
+        const char *why = lib ? NULL : "no library";
         id<MTLFunction> own[4] = {fs->fn, fs->fn_u, fs->fn_m, fs->fn_d};
         for (int i = 0; i < 4 && !why; i++) {
             if (!own[i]) continue;
@@ -6677,7 +6683,9 @@ static id<MTLFunction> lo_fn(NvShader *fs, id<MTLFunction> base, uint32_t target
     if (!fs->lfn_state) {
         fs->lfn_state = 2;
         size_t kl = strlen(fs->key); NSString *path = [NSString stringWithFormat:@"%@/%.*s_bx.metallib", g_msl_dir, (int)(kl > 2 ? kl - 2 : kl), fs->key];
-        if ((fs->llib = lib_from_file(path, &e))) { fs->lfn_state = 1; fs->lfn = [NSMutableDictionary dictionary]; static int n; if (++n <= 3 || !(n & (n - 1))) MLOG("logic operation: side library of %s loaded (%d shaders so far)", fs->key, n); }
+        fs->llib = lib_from_file(path, &e);
+        if (!fs->llib && fs->blib) { fs->llib = fs->blib; e = nil; }   // no side library: the base one holds these entry points too (nometal_run.py, as at_fn)
+        if (fs->llib) { fs->lfn_state = 1; fs->lfn = [NSMutableDictionary dictionary]; static int n; if (++n <= 3 || !(n & (n - 1))) MLOG("logic operation: side library of %s loaded (%d shaders so far)", fs->key, n); }
         else why = "no library";
     }
     id<MTLFunction> f = nil; NSNumber *k = @(w << 8 | (targets & 0xff));
