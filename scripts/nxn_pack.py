@@ -1599,20 +1599,18 @@ FT_PY = None      # the free-threaded interpreter once found, '' when this machi
 ENV_OVERRIDES = {
     # Donkey Kong Bananza (Switch 2). Its memory pool is 9.00 GB and the room to the iPhone's 6,139 MB limit is 5.97 GB, so
     # the host puts the guest's memory in unlinked sparse files (hle_svc.c, DM_GUEST_FILE) -- the figure iOS ends an app at
-    # leaves file pages out, which is the point, and the game is killed within 37 s without them (footprint 4.5 GB).
+    # leaves file pages out, which is the point, and the game is killed within 37 s without them (footprint 4.5 GB, measured
+    # 2026-11-06 on an iPhone 15 Pro).
     #
-    # But the GPU does not page: nvn_mtl.m hands Metal the guest's memory itself (newBufferWithBytesNoCopy), so a file page
-    # the kernel reclaims costs the GPU a disk read, not a CPU fault. On an iPhone 15 Pro that was whole frames of 821-847 ms
-    # with submit+present at 33 ms and GPU at 1,530-2,383 ms, after 100 s of steady 60 fps (2026-11-06, log 2). 64 MB chunks
-    # changed nothing, which fits: the cost is the reclaim, not the file's size.
-    #
-    # DM_GUEST_FILE_ANON keeps the first 4 GB of the block anonymous (this fork's addition to hle_svc.c). Anonymous pages are
-    # not reclaimed that way, and the pools a game makes first -- the geometry and textures the GPU streams every frame -- sit
-    # at the start of a heap that grows up. 4 GB of 9.75 leaves 5.75 GB in files, still far more than the limit.
-    # The split (DM_GUEST_FILE_ANON) was tried and is NOT used: 5 GB anonymous made it worse, because iOS compresses anonymous
-    # pages instead of swapping them -- 2.97 GB of the 5 were compressed, compression counts in phys_footprint anyway, and a
-    # compressed page costs the GPU a decompression, so the collapse came at frame 1,645 instead of 4,677. What is left is the
-    # wiring in nvn_mtl.m (pin_guest): the pools the GPU reads are mlock'd, so the kernel can neither reclaim nor compress them.
+    # Two attempts at the frames that still cost 800 ms were made that night and REMOVED again, both answered by the phone:
+    #   DM_GUEST_FILE_ANON (keep the first N GB of the block anonymous) made it worse -- iOS compresses anonymous pages
+    #     instead of swapping, 2.97 GB of 5 were compressed, compression counts in phys_footprint anyway and a compressed page
+    #     costs the GPU a decompression, so the collapse came at frame 1,645 instead of 4,677;
+    #   pin_guest (mlock the pools the GPU reads) covered 73 MB: the device holds three guest pools of that size and the GPU's
+    #     2.3 GB is Metal's own allocations, so the stalls did not move.
+    # What the clean run showed instead: 60 fps (p99 16.67 ms, 0 dropped) for ~3,000 frames with the footprint at 1.2 GB and
+    # 4.9 GB of headroom, and then GPU 1,714-3,484 ms with submit+present at 37 ms. Not memory, not jetsam, not a CPU fault:
+    # what the game starts drawing at that point is the next thing to look at.
     '040074a01bf12000': {'DM_GUEST_FILE': '1'},
 }
 
