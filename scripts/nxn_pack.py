@@ -1594,25 +1594,6 @@ def map_overflow(pkg_dir, table):
 FT_PY = None      # the free-threaded interpreter once found, '' when this machine has none (so it is looked for once)
 
 
-# dm/env.txt lines this fork adds for a game, keyed by title ID. Measured on a phone, so they belong to this fork and not to
-# a profile upstream maintains for the Mac (and a changed profile is a tree difference the CI's check refuses anyway).
-ENV_OVERRIDES = {
-    # Donkey Kong Bananza (Switch 2). Its memory pool is 9.00 GB and the room to the iPhone's 6,139 MB limit is 5.97 GB, so
-    # the host puts the guest's memory in unlinked sparse files (hle_svc.c, DM_GUEST_FILE) -- the figure iOS ends an app at
-    # leaves file pages out, which is the point, and the game is killed within 37 s without them (footprint 4.5 GB, measured
-    # 2026-11-06 on an iPhone 15 Pro).
-    #
-    # Two attempts at the frames that still cost 800 ms were made that night and REMOVED again, both answered by the phone:
-    #   DM_GUEST_FILE_ANON (keep the first N GB of the block anonymous) made it worse -- iOS compresses anonymous pages
-    #     instead of swapping, 2.97 GB of 5 were compressed, compression counts in phys_footprint anyway and a compressed page
-    #     costs the GPU a decompression, so the collapse came at frame 1,645 instead of 4,677;
-    #   pin_guest (mlock the pools the GPU reads) covered 73 MB: the device holds three guest pools of that size and the GPU's
-    #     2.3 GB is Metal's own allocations, so the stalls did not move.
-    # What the clean run showed instead: 60 fps (p99 16.67 ms, 0 dropped) for ~3,000 frames with the footprint at 1.2 GB and
-    # 4.9 GB of headroom, and then GPU 1,714-3,484 ms with submit+present at 37 ms. Not memory, not jetsam, not a CPU fault:
-    # what the game starts drawing at that point is the next thing to look at.
-    '040074a01bf12000': {'DM_GUEST_FILE': '1'},
-}
 
 
 def translate_python(tools):
@@ -1853,12 +1834,6 @@ def env_for(rows, gdir=None):
     # has none, so the row never appears and nothing changes.
     ups = upscaler_keys(gdir) if gdir else []
     if ups: lines.append('DM_NVN_UPSCALER_KEYS=' + ','.join(ups))
-    # This fork's own overrides, on top of whatever the profile says. They live here and not in the game profile because a
-    # changed game.tsv is a difference from upstream that the CI refuses ("no overlay line names it"), and every one of these
-    # is a measurement made on an iPhone, which upstream's profiles are not written for.
-    for name, value in sorted(ENV_OVERRIDES.get((one(rows, "program_id") or "").lower(), {}).items()):
-        lines = [l for l in lines if not l.startswith(name + '=')]
-        lines.append('%s=%s' % (name, value))
     return lines
 
 
