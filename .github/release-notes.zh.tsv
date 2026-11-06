@@ -148,3 +148,4 @@ Smoke pack counts the shader libraries inside the image	内部：自动打包自
 A game's DLC ships as one file per add-on, like its own files	DLC（追加内容）也打成一个文件：一个 DLC 一个镜像，和游戏本体一样。@NL@- 以前本体是一个文件、DLC 却是一堆目录，装在手机上要逐个拷；现在统一了。
 extract: ask nx_extract for the image instead of packing one afterwards	打包快了很多：游戏文件（含每个 DLC）在解包时直接写成一个镜像，不再先解成几十万个碎文件、再读一遍打回镜像、再删掉。王国之泪这种大作一次省 15 分钟以上，装到手机上也要快得多。
 pack: deflate a big file in blocks on the pool, not on one core	打包快了一个数量级：游戏镜像那种大文件不再由一个核从头压到尾，改成切块交给多核一起压，压缩率基本不变（王泪实测：镜像这一段 432 秒 → 40 秒，包只大 99 KB）。
+pack: as many translator and splitter threads as the machine has, up to 16	打包时翻译和拆分着色器两步都用满本机线程：从固定 8 个改成"按逻辑核数、最多 16"，8 线程及以下的机器保持原样。

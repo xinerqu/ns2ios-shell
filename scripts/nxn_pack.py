@@ -52,6 +52,10 @@ DM = REPO / 'dm'
 GFX = DM / 'gfx' / 'tools'
 IOS = DM / 'ios'
 TOOLS = DM / 'tools'
+# The tools that walk the game in parallel (shader_split.py, dmsh_build.py) take their process and thread count from J, and
+# both default to the machine's own: a shader task spends a good part of its time waiting on the disk or on spirv-cross.
+# The 16 cap keeps a 64-core machine from opening 64 processes over one game. J in the environment overrides, both ways.
+JOBS = int(os.environ.get('J', str(min(os.cpu_count() or 8, 16))))
 
 # What an update is called when its version cannot be read: its file name has no [v<N>] tag and the package keeps only an
 # encrypted cnmt.nca (no plaintext cnmt.xml to take <Version> from). The string is a path component -- extract/<ver> and
@@ -1530,7 +1534,7 @@ def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
     names = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
     run([PY, GFX / 'shader_split.py', ','.join(str(romfs_source(dirs[v])) for v in versions),
          ','.join(str(dirs[v] / 'ExeFS' / 'main') for v in versions), pkg] + [tb / n for n in names],
-        env={'DM_GAME': tid}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
+        env={'DM_GAME': tid, 'J': str(JOBS)}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
         hint=shader_split_hint)
     stamp.write_text(key, encoding='utf-8')   # the reuse above must not serve another set of versions
     diff = []
@@ -1617,7 +1621,7 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     run([PY, nometal, GFX / 'dmsh_chain.py', '--header'], env=genv,
         log=work / 'logs' / 'chain_header.log', what='dmsh_chain --header')
     run([PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
-        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': os.environ.get('J', '8'), 'DM_GAME': tid},
+        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(JOBS), 'DM_GAME': tid},
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
