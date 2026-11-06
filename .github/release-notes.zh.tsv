@@ -155,3 +155,4 @@ Move the patch base to 671c68e1: the test suite checks Metal objects before usin
 pack: translate the shaders under a free-threaded Python, when the tools carry one	翻译着色器改用工具包自带的"无 GIL"Python：王国之泪那 2.8 万个着色器的翻译从 11 分 20 秒降到 7 分 45 秒。
 pack: the tools archive keeps its runtime in pyft, with no duplicate copies beside it	内部修正：工具包里不再多出四个重复的解释器文件（pyft 仍在内）。
 pack: every run keeps its step timings in logs/steps.log	打包日志：每一步带时间戳写进 logs/steps.log（不再只在控制台）。
+Move the patch base to b4318c7a: a linear-texture read path and one more game	跟上上游 b4318c7a：新增《大神 HD》的配置（共 146 款），以及线性纹理在任意线程读取的修正。
