@@ -693,7 +693,9 @@ jobs:
           # pyft/ goes in as a folder beside them: the free-threaded interpreter the translation step runs under
           # (scripts/nxn_pack.py, translate_python). Without it everything still packs, one thread of Python at a time.
           mkdir -p flat
-          find tools -name '*.exe' -type f -exec cp {} flat/ \;
+          # -not -path '*/pyft/*': pyft holds python.exe and its aliases, and a bare `find -name '*.exe'` copies them to
+          # the top of the archive beside the runtime they belong to (v0.0.0029 shipped four such duplicates).
+          find tools -name '*.exe' -type f -not -path '*/pyft/*' -exec cp {} flat/ \;
           rm -rf flat/pyft
           if [ -d tools/pyft ]; then cp -r tools/pyft flat/pyft; else echo "::error::the windows-tools artifact has no pyft/"; exit 1; fi
           ls -l flat | head -12
