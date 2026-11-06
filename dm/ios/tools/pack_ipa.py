@@ -24,6 +24,7 @@ BIG = 256 << 20      # files above this are streamed by the writer; smaller ones
 WINDOW = 2 << 30     # input bytes in the pool at once
 QUEUE = 4096         # entries in the pool at once (folders of tiny files)
 CHUNK = 16 << 20
+INFLIGHT = 2 * (os.cpu_count() or 4)   # 16 MB blocks of one big file in the pool at once: one core is not the whole pack
 L32, L16 = 0xFFFFFFFF, 0xFFFF
 DIR_MODE = stat.S_IFDIR | 0o755   # a parent folder no source folder stands for (Payload/, msl/); its time is 1980-01-01, so it is the same in every pack
 Entry = collections.namedtuple('Entry', 'name path st root')   # st None: a synthetic parent; root: the mapping's source folder
@@ -86,6 +87,16 @@ def load(path, deflate):   # in the pool: (method, CRC, the bytes to write, unco
         c = zlib.compressobj(LEVEL, zlib.DEFLATED, -15); z = c.compress(data) + c.flush()
         if len(z) < len(data): return 8, crc, z, usize
     return 0, crc, data, usize
+
+
+def deflate_block(b, last):   # in the pool: one block of a big file, ended so the block after it can start a fresh window
+    """Deflate's stream is a row of blocks, each starting where the one before ended. A full flush pads to a byte boundary,
+    empties the 32 KB window and emits an empty stored block, so the next block may be compressed on another core from
+    nothing and the row still reads back as one standard deflate stream. The last block finishes the stream instead: a full
+    flush there would leave a trailing empty block and no end-of-stream marker.
+    The cost is the matches across each boundary, which is where the 0.001% larger archives come from (pigz does the same)."""
+    c = zlib.compressobj(LEVEL, zlib.DEFLATED, -15); z = c.compress(b)
+    return z + c.flush(zlib.Z_FINISH if last else zlib.Z_FULL_FLUSH)
 
 
 def dos_time(t):
@@ -162,23 +173,30 @@ class Zip:
     def patch(self, at, b):
         self.f.seek(at); self.f.write(b); self.written += len(b)
 
-    def stream(self, e, deflate):   # a big file: the local header first, its CRC (and a deflated size) patched in afterwards
+    def stream(self, e, deflate, pool=None):   # a big file: the local header first, its CRC (and a deflated size) patched in afterwards
         usize = e.st.st_size; z64 = usize >= L32   # a deflate that is not smaller is redone stored, so the deflated size stays below usize
         h = self.local(e, 8 if deflate else 0, 0, 0 if deflate else usize, usize, z64)
-        crc, csize, read, c = 0, 0, 0, zlib.compressobj(LEVEL, zlib.DEFLATED, -15) if deflate else None
+        par = deflate and pool is not None   # blocks of this file go to the pool (deflate_block); the CRC stays here, in order
+        crc, csize, read, c = 0, 0, 0, zlib.compressobj(LEVEL, zlib.DEFLATED, -15) if deflate and not par else None
+        pend, n, i = collections.deque(), (usize + CHUNK - 1) // CHUNK, 0
         with open(e.path, 'rb') as f:
             while b := f.read(CHUNK):
                 read += len(b); crc = zlib.crc32(b, crc)
+                if par:
+                    i += 1; pend.append(pool.submit(deflate_block, b, i == n)); self.stats['blocks'] += 1
+                    while len(pend) > INFLIGHT: b = pend.popleft().result(); self.w(b); csize += len(b)
+                    continue
                 if c: b = c.compress(b)
                 self.w(b); csize += len(b)
             if c: b = c.flush(); self.w(b); csize += len(b)
+            while pend: b = pend.popleft().result(); self.w(b); csize += len(b)
         if read != usize: sys.exit(f'[RED] pack_ipa: {e.path} changed size while it was packed')
-        if c and csize >= usize:   # not smaller: stored instead
+        if deflate and csize >= usize:   # not smaller: stored instead
             self.f.seek(h[0]); self.f.truncate(); self.pos = h[0]; return self.stream(e, False)
         self.patch(h[0] + 14, struct.pack('<I', crc) + (b'' if z64 else struct.pack('<II', csize, usize)))
         if z64: self.patch(h[0] + 30 + len(h[1]) + 4, struct.pack('<QQ', usize, csize))
         self.f.seek(self.pos)
-        self.central(e, h, 8 if c else 0, crc, csize, usize)
+        self.central(e, h, 8 if deflate else 0, crc, csize, usize)
 
     def reuse(self, e, info, h, old):   # copy already compressed bytes, after the checked local header
         method, crc, csize, usize = info.compress_type, info.CRC, info.compress_size, info.file_size
@@ -288,6 +306,7 @@ def main():
     es = entries(maps, {s.strip('/') for s in a.skip}, tuple(a.skip_suffix))
     total = sum(e.st.st_size for e in es if e.st and stat.S_ISREG(e.st.st_mode))
     print(f'pack: {len(es)} entries, {total} bytes', flush=True)
+    print(f'pack: a file over {BIG >> 20} MB is deflated in {CHUNK >> 20} MB blocks by the pool, {INFLIGHT} blocks in flight', flush=True)
     apfs = {root: fs_type(root) == b'apfs' for root in {src for _, src in maps}}
     disabled = '; '.join(f'reuse off for {arc}: not APFS' for arc, src in maps if not apfs[src])
     flags = [not e.name.lower().endswith(store) if store else True for e in es]   # each file's deflate flag
@@ -324,7 +343,7 @@ def main():
                 if h is not None: pend.append(('reuse', e, (info, h))); continue
                 if e.st.st_size > BIG:
                     while pend: inflight -= one()
-                    z.stream(e, deflate); continue
+                    z.stream(e, deflate, pool); continue
                 while pend and (len(pend) >= QUEUE or inflight + e.st.st_size > WINDOW): inflight -= one()
                 pend.append(('load', e, pool.submit(load, e.path, deflate))); inflight += e.st.st_size
             while pend: inflight -= one()
@@ -344,6 +363,7 @@ def main():
         os.replace(ipart, a.out + '.idx'); z.written += len(blob)
     except OSError as x: print(f'[RED] pack_ipa: index not written, the next pack packs every file again: {x}', flush=True)
     s, dt = z.stats, time.time() - t0
+    if s['blocks']: print(f'pack: {s["blocks"]} blocks of a big file were deflated in the pool', flush=True)
     print(f'packed: {len(es)} entries, stored {s["stored"] / 2**30:.2f} GB, deflated {s["deflated"] / 2**30:.2f} GB, archive {st.st_size / 2**30:.2f} GB, '
           f'kept {kept / 2**30:.2f} GB, reused {s["reused"]} files in {dt:.0f} s, wrote {z.written / 2**30:.2f} GB' + (f'; {disabled}' if disabled else ''), flush=True)
 
