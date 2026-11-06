@@ -908,9 +908,9 @@ jobs:
             echo "Source: ${{ needs.shell.outputs.origin }}"
             echo "Fingerprint: ${{ needs.shell.outputs.fp }}"
             if [ "${{ needs.smoke.outputs.verified }}" = '1' ]; then
-              echo "Smoke test: **passed** — a real game was packed with this shell on Windows before publishing. <br> 冒烟测试：**通过**——发布前已用真实游戏在 Windows 上完整打过一次包。"
+              echo "Smoke test: **passed** — a real game was packed with this shell on Windows before publishing."
             else
-              echo "> **Not smoke-tested** — the test data could not be fetched, so nothing was packed with this shell before publishing. <br> **未做冒烟测试**：取不到测试数据，这一版发布前没有用它打过包。"
+              echo "> **Not smoke-tested** — the test data could not be fetched, so nothing was packed with this shell before publishing."
             fi
             echo
             cat notes.md
