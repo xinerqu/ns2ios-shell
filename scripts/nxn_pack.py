@@ -1691,6 +1691,10 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         if not res or any(r.get('st') != 'ok' for r in res): return False
         d = iosout / marks[-1].parent.name
         have = {x.name for x in d.glob('*_b.metallib')} if d.is_dir() else set()
+        # A library built before the one-library route has no alpha test / logic operation entry points inside it, and it looks
+        # complete either way: every <key>_b.metallib is there. The stamp nometal_run.py leaves is the only thing that says the
+        # entry points are in them (2026-11-07, issue #12: the old check reused such a library and the picture stayed wrong).
+        if not (d / '_b_side_one.stamp').is_file(): return False
         return all(r['key'] + '_b.metallib' in have for r in res)
     if not force and done():
         say('shader libraries already there (chain %s)' % cur); return

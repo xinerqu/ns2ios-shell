@@ -23,9 +23,60 @@
 # Result: the "library files" (*_b.metallib / *_bf.metallib) contain shader source. When the graphics layer of the shell (DM_SHELL build) finds that a library is not a compiled one, it compiles it on the device
 # (gfx/nvn/nvn_mtl.m); the system caches the compiled result, and from the second launch on nothing is compiled again.
 # The one check that is lost: in normal mode Apple's compiler also verifies along the way that every source compiles; here that is not verified, and one that fails to compile only reports a failure when it is used on the device.
-import os, runpy, shutil, subprocess, sys
+import os, runpy, shutil, subprocess, sys, threading, time
 
 _real = subprocess.run
+
+# 侧库（<key>_bx）在这条路上没有：上游把它从编好的库里切出来（dmsh_side.cut 在 MTLB 二进制里挑函数），这里没有编译器。
+# 所以不去假造那个二进制的活，改成让**编译单元**（<key>_bu.metal，dmsh_side.unit 的产物，本来就已经同时含 plain 入口和
+# <entry>_a / <entry>_l）整份当 <key>_b 的库交出去，并且不写 <key>_bx。设备端先找侧库，找不到就用基础库里的这些入口
+# （nvn_mtl.m 的 at_fn / lo_fn）。代价：库大约大 19.6%（283 个像素着色器实测，每个约 +3 KB）；侧库也写一份同样文本是 +100%。
+# 这条不碰任何参与链版本的译器文件（dmsh_mtlcache.py 不在 dmsh_chain.FILES 里），所以链号不变、已发的库照旧复用。
+# The side library (<key>_bx) cannot exist on this route: upstream cuts it out of the compiled library (dmsh_side.cut picks
+# functions out of the MTLB binary) and there is no compiler here. Rather than fake that binary step, the compile unit
+# (<key>_bu.metal, dmsh_side.unit's output, which already holds the plain entry points and <entry>_a / <entry>_l) becomes the
+# <key>_b library itself, and no <key>_bx is written. The host tries the side library first and falls back to these entry
+# points in the base library (nvn_mtl.m at_fn / lo_fn). Cost: libraries about 19.6% larger (283 pixel shaders measured, about
+# +3 KB each); writing the same text as a side library too would be +100%. No file that feeds the chain version is touched
+# (dmsh_mtlcache.py is not in dmsh_chain.FILES), so the chain name stays and earlier libraries keep being reused.
+SIDE_KEYS = set()   # pixel shaders whose one library also holds their alpha test / logic operation entry points
+SIDE_DIRS = set()   # the library folders that got them (the stamp goes there)
+SIDE_STAMP = '_b_side_one.stamp'   # not a suffix shader_lib.APP_SUFFIXES takes, so it stays out of the package
+
+
+def split_into_one_library(self, target, msl, a, b, split):
+    """dmsh_mtlcache.Cache.compile_split on a machine without Apple's compiler: the unit's source (msl) is the library, and
+    the side library is not written (it would be the same text twice). Raises nothing, so dmsh_build.ps_libraries counts the
+    shader as built and names its entry points in the reflection, which is what the host reads (has_alpha / has_logic)."""
+    with open(msl, 'rb') as f: src = f.read().replace(b'\r\n', b'\n')   # 与 `metal -c` 那条一样归一 LF：同样的输入各系统才会出同样的包 | normalized to LF as the `metal -c` branch above, or a Windows pack differs from a Mac's
+    SIDE_KEYS.add(os.path.basename(a))
+    SIDE_DIRS.add(os.path.dirname(os.path.abspath(a)))
+    try:
+        with open(a, 'rb') as f:
+            if f.read() == src:   # 上一轮已经写过同一份：第二次打包不必重写两万份（这里没有 CAS，判据就是这个比较）
+                try: os.unlink(b)
+                except OSError: pass
+                return            # already this very text (a second pack of the same game): no reason to write it again
+    except OSError: pass
+    tmp = f'{a}.tmp-{os.getpid()}-{threading.get_ident()}'
+    with open(tmp, 'wb') as g: g.write(src)
+    for i in range(40):   # os.replace onto a file a scanner still has open raises WinError 5 on Windows (dmsh_mtlcache._replace)
+        try: os.replace(tmp, a); break
+        except PermissionError:
+            if i == 39: raise
+            try: os.unlink(a)
+            except OSError: pass
+            time.sleep(0.05)
+    try: os.unlink(b)     # an earlier build on another machine may have left a compiled one here (a Mac's, of another chain)
+    except OSError: pass
+
+
+def patch_side_libraries():
+    """Makes the one library carry the side entry points, for every cache the shader build makes (dmsh_build.py's MTL)."""
+    try: import dmsh_mtlcache
+    except ImportError: return False
+    dmsh_mtlcache.Cache.compile_split = split_into_one_library
+    return True
 
 
 def _done(args, out=''):
@@ -73,5 +124,16 @@ def run(args, *a, **k):
 if __name__ == '__main__':
     if len(sys.argv) < 2: sys.exit(__doc__ or '用法：nometal_run.py <脚本.py> [参数…]')
     subprocess.run = run
+    patched = patch_side_libraries()
+    if not patched: print('nometal_run: dmsh_mtlcache is not importable here, so the libraries keep no alpha test / logic operation entry points', flush=True)
+    else: print('nometal_run: no Apple compiler, so no <key>_bx is cut: one library per pixel shader carries its alpha test and logic operation entry points (the device takes them from it)', flush=True)
+    def _report():   # 判据（铁律 15）：没这行就当没接线 | the line that proves this took effect (rule 15: no line, not wired)
+        if not SIDE_KEYS: return
+        for d in SIDE_DIRS:   # 给 nxn_pack.step_translate 的 done() 看：没有这个戳的旧库要重建一次，否则复用上一轮没有侧入口的库
+            try:
+                with open(os.path.join(d, SIDE_STAMP), 'w') as f: f.write(f'{len(SIDE_KEYS)} shaders: the one library holds the alpha test and logic operation entry points too (nometal_run.py)\n')
+            except OSError: pass
+        print(f'nometal_run: {len(SIDE_KEYS)} pixel shader libraries hold their alpha test / logic operation entry points too (no side library on this route)', flush=True)
+    if patched: import atexit; atexit.register(_report)
     script = os.path.abspath(sys.argv[1]); sys.argv = sys.argv[1:]; sys.path.insert(0, os.path.dirname(script))
     runpy.run_path(script, run_name='__main__')

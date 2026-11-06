@@ -94,10 +94,6 @@ int proc_pid_rusage(int pid, int flavor, rusage_info_t *buffer);   // libproc.h,
 #define GF_MAX 1024
 static int g_gf_tab[GF_MAX];       // the files, open for reading and writing
 static int g_gf_n;                 // how many; 0 while the guest is anonymous. Set by mem_init_once, whose pthread_once orders it before every reader
-static size_t g_gf_anon;           // bytes at the start of the block mapped MAP_ANON instead (DM_GUEST_FILE_ANON); 0 = the whole block in files
-// Is the guest's memory in files (DM_GUEST_FILE)? The graphics layer asks before wiring a pool: pages of a file mapping are the
-// kernel's to reclaim, so a zero-copy buffer over them faults to disk under the GPU, and Metal's own wiring does not reach them
-int dm_guest_in_files(void) { return g_gf_n != 0; }
 static uint64_t g_gf_min_free;     // DM_GUEST_FILE_MIN_FREE in bytes: the free space on the files' disk under which the game is stopped; 0 = never
 
 // Every second the free space on the files' disk (they all lie on one volume): under DM_GUEST_FILE_MIN_FREE the game is stopped (exit code 87; the memory watchdog's is 86, hle_nvn.c), before a full
@@ -157,14 +153,7 @@ static int guest_file_class(int fd, char *why, size_t nwhy) {
 }
 #endif
 // The block in files of chunk bytes, the last one holding the rest: 1 with the files in g_gf_tab and mapped; 0 with why filled in, every file closed and the whole block anonymous PROT_NONE again, as reserved
-//
-// anon (DM_GUEST_FILE_ANON, this fork) keeps that many bytes at the start of the block anonymous and puts only the rest in
-// files. It exists because the GPU does not page: nvn_mtl.m hands Metal the guest's memory itself (newBufferWithBytesNoCopy,
-// MTLResourceStorageModeShared), so when the kernel reclaims a file page the GPU waits for the disk on it -- Donkey Kong
-// Bananza measured whole frames of 821-847 ms with submit+present at 33 ms and GPU at 1,530-2,383 ms, after 100 s of steady
-// 60 fps. Anonymous pages are not reclaimed that way, and the allocations a game makes first (its persistent geometry and
-// texture pools) sit at the start of the heap, which grows up. 0, the default, maps the whole block as upstream does.
-static int guest_files_map(const char *dir, size_t chunk, int n, struct statfs *fs, char *why, size_t nwhy, size_t anon) {
+static int guest_files_map(const char *dir, size_t chunk, int n, struct statfs *fs, char *why, size_t nwhy) {
     const double G = 1073741824.0; char path[1100]; int made = 0, ok = 1;
     const char *sep = dir[0] && dir[strlen(dir) - 1] == '/' ? "" : "/";
     for (int k = 0; ok && k < n; k++) {
@@ -185,11 +174,8 @@ static int guest_files_map(const char *dir, size_t chunk, int n, struct statfs *
 #endif
         if ((uint64_t)fs->f_bavail * fs->f_bsize < want) { snprintf(why, nwhy, "%.1f GB free on their disk, under %.1f", (double)fs->f_bavail * fs->f_bsize / G, want / G); ok = 0; }
     }
-    if (anon && mmap(g_as, anon, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) != g_as) {
-        snprintf(why, nwhy, "cannot map the first %.2f GB anonymous, errno %d", anon / G, errno); ok = 0;
-    }
     for (int k = 0; ok && k < n; k++) {
-        size_t sz = k == n - 1 ? (g_reserve - anon) - (size_t)k * chunk : chunk; uint8_t *at = g_as + anon + (size_t)k * chunk;
+        size_t sz = k == n - 1 ? g_reserve - (size_t)k * chunk : chunk; uint8_t *at = g_as + (size_t)k * chunk;
         if (ftruncate(g_gf_tab[k], (off_t)sz)) { snprintf(why, nwhy, "cannot size file %d to %.2f GB, errno %d", k, sz / G, errno); ok = 0; }
         else if (mmap(at, sz, PROT_NONE, MAP_SHARED | MAP_FIXED, g_gf_tab[k], 0) != at) { snprintf(why, nwhy, "cannot map file %d, errno %d", k, errno); ok = 0; }
     }
@@ -209,19 +195,14 @@ static void guest_file_init(void) {
 #endif
     if (!want) return;
     g_gf_min_free = mf && *mf ? env_size("DM_GUEST_FILE_MIN_FREE", 0, 0x100000) : (uint64_t)5 << 30;
-    // DM_GUEST_FILE_ANON: how much of the block stays anonymous (see guest_files_map). Whole MB, never more than the block;
-    // a block that is all anonymous is not the file path at all, so say so and leave it anonymous.
-    size_t anon = env_size("DM_GUEST_FILE_ANON", 0, 0x100000);
-    if (anon >= g_reserve) { LOG("[mem] guest memory: anonymous (DM_GUEST_FILE_ANON=%zu covers the whole block)", anon); return; }
     size_t chunk = env_size("DM_GUEST_FILE_CHUNK", (size_t)64 << 20, 0x100000); if (!chunk) chunk = (size_t)1 << 30;
-    if ((g_reserve - anon + chunk - 1) / chunk > GF_MAX) chunk = ((g_reserve - anon + GF_MAX - 1) / GF_MAX + 0xfffff) & ~(size_t)0xfffff;
-    int n = (int)((g_reserve - anon + chunk - 1) / chunk); char dir[1024] = "", why[1400]; struct statfs fs;
+    if ((g_reserve + chunk - 1) / chunk > GF_MAX) chunk = ((g_reserve + GF_MAX - 1) / GF_MAX + 0xfffff) & ~(size_t)0xfffff;
+    int n = (int)((g_reserve + chunk - 1) / chunk); char dir[1024] = "", why[1400]; struct statfs fs;
     if (d && *d) snprintf(dir, sizeof dir, "%s", d);
     else if (!confstr(_CS_DARWIN_USER_TEMP_DIR, dir, sizeof dir)) { LOG("[RED] [mem] guest memory: anonymous (DM_GUEST_FILE: no temporary folder, errno %d)", errno); return; }
-    if (!guest_files_map(dir, chunk, n, &fs, why, sizeof why, anon)) { LOG("[RED] [mem] guest memory: anonymous (DM_GUEST_FILE: %s)", why); return; }
-    g_gf_n = n; g_gf_anon = anon;
-    if (anon) LOG("[mem] guest memory: the first %.2f GB of the block is anonymous and never written out, so the GPU reads it without a fault", anon / G);
-    LOG("[mem] guest memory: %d files of %.2f GB in %s (unlinked, sparse, shared), %.2f GB in all, on the %s volume, %.1f GB free on it", n, chunk / G, dir, (g_reserve - anon) / G, fs.f_fstypename, (double)fs.f_bavail * fs.f_bsize / G);
+    if (!guest_files_map(dir, chunk, n, &fs, why, sizeof why)) { LOG("[RED] [mem] guest memory: anonymous (DM_GUEST_FILE: %s)", why); return; }
+    g_gf_n = n;
+    LOG("[mem] guest memory: %d files of %.2f GB in %s (unlinked, sparse, shared), %.2f GB in all, on the %s volume, %.1f GB free on it", n, chunk / G, dir, g_reserve / G, fs.f_fstypename, (double)fs.f_bavail * fs.f_bsize / G);
     if (strcmp(fs.f_fstypename, "apfs") || !(fs.f_flags & MNT_LOCAL)) LOG("[RED] [mem] guest file: not on a local APFS volume, where it may not be sparse, or be slow");
     pthread_t th; int rc = pthread_create(&th, NULL, guest_file_thread, NULL);
     if (!rc) pthread_detach(th);
@@ -401,10 +382,7 @@ static void alias_query(uint64_t addr, uint64_t *base, uint64_t *size, int *mapp
 // it back, so the files' range only goes PROT_NONE: its pages stay file pages, out of the footprint, which the kernel writes out when it needs the room;
 // they keep their old bytes, so the call returns 0 and alias_initialize zeroes them when they are mapped again
 static int guest_release(uintptr_t lo, uintptr_t hi) {
-    // A range inside the anonymous part of a split block (DM_GUEST_FILE_ANON) is ordinary anonymous memory and goes back the
-    // ordinary way: MAP_ANON replaces it, so the pages are freed and out of the footprint until the game maps them again. Only
-    // the file part has to keep them (see above), and a range that straddles the boundary is treated as the file part.
-    if (g_gf_n && lo >= (uintptr_t)g_as + g_gf_anon) {
+    if (g_gf_n) {
         if (mprotect((void *)lo, hi - lo, PROT_NONE)) die("guest_release mprotect %#lx+%#lx errno=%d", (unsigned long)lo, (unsigned long)(hi - lo), errno);
         return 0;
     }
