@@ -4796,6 +4796,27 @@ static void pso_user_record(const char *fmt, ...) {
 // Build the library from a .metallib file without permanently occupying a file descriptor: newLibraryWithURL keeps that file open for as long as the library object lives (one per game shader - of the 258 descriptors the iOS app permanently holds in a run, 213 are these,
 // while the default soft limit of an iOS process is 256; new shaders created in other acts raise it further). Here the file is mapped into memory and closed immediately, and the library is built from the in-memory data; the mapping is released when the library's data object is freed
 static __thread int t_lib_layer;
+// 在没有苹果编译器的机器上打的包，库是源码，设备端起 newLibraryWithSource 编。上游那条 xcrun 命令行
+// （dm/ios/tools/ios_metal.py 的 METAL）带两个开关，这里必须给同样的设置，否则画面就是错的：
+//  · preserveInvariance 对应 -fpreserve-invariance：[[invariant]] 的顶点位置只有在两个着色器都带这个标志时
+//    才保证算出同一个值。少了它，帽之国的 depth pre-pass 和 less-equal 的 G-buffer 用两套顶点着色器得出
+//    略微不同的深度，G-buffer 的片元被丢弃、留着上一帧，地面就出现一块块 32×32 的旧画面
+//    （dm/games/0100000000010000/README.md：「Resolved: the Cap Kingdom ground showed 32×32 blocks…」）。
+//  · mathMode = relaxed 对应 -fmetal-math-mode=relaxed：默认的 fast 允许后端把 isnan 判断当成恒假，而译出来的
+//    着色器靠 isnan 还原 Maxwell 的 NaN 语义（12,809 个里 8,337 个用到）。少了它，开场那几帧会出现几十万
+//    NaN 像素，表现就是黑带和黑边发亮（ios_metal.py 自己的注释：A20 Pro 上 727k 像素）。
+// The two switches the packing chain's xcrun command carries (dm/ios/tools/ios_metal.py METAL) and that the device
+// compile has to repeat, or the picture is wrong without any failing library: -fpreserve-invariance (invariant position
+// outputs agree across shaders only with it: a depth pre-pass followed by a less-equal G-buffer otherwise keeps the
+// previous frame in 32x32 blocks, the Cap Kingdom's ground) and -fmetal-math-mode=relaxed (the default fast mode lets the
+// backend treat the isnan selects that reproduce Maxwell's NaN semantics as always false: hundreds of thousands of NaN
+// pixels, which is the black band and the black-edged glow in the opening frames).
+static MTLCompileOptions *src_compile_options(void) {
+    MTLCompileOptions *o = [MTLCompileOptions new];
+    o.preserveInvariance = YES;
+    if (@available(iOS 18.0, *)) o.mathMode = MTLMathModeRelaxed;
+    return o;
+}
 static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
     int fd = open(path.fileSystemRepresentation, O_RDONLY); struct stat st;
     if (fd < 0) {   // not in the folder: the library's image, whose one descriptor is shared, and only this file's pages are mapped
@@ -4813,7 +4834,7 @@ static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
                     MLOG("shader libraries: %s holds Metal source, compiled on the device (the packing machine had no Metal compiler)", path.lastPathComponent.UTF8String);
                 NSString *src = [[NSString alloc] initWithBytes:f.data length:f.size encoding:NSUTF8StringEncoding];
                 munmap(f.base, f.base_len);
-                id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;
+                id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:src_compile_options() error:err] : nil;
                 if (!lib && err) *err = [NSError errorWithDomain:@"dm" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"not a compiled library and not readable source: %@", path]}];
                 return lib;
             }
@@ -4834,7 +4855,7 @@ static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
     // once and the game does not compile anything again. Without this every library is rejected as "Invalid library file".
     if (m != MAP_FAILED && len >= 4 && memcmp(m, "MTLB", 4) != 0) {
         NSString *src = [[NSString alloc] initWithBytes:m length:len encoding:NSUTF8StringEncoding];
-        id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:nil error:err] : nil;
+        id<MTLLibrary> lib = src ? [g_dev newLibraryWithSource:src options:src_compile_options() error:err] : nil;
         if (!lib && err) *err = [NSError errorWithDomain:@"dm" code:1 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"not a compiled library and not readable source: %@", path]}];
         return lib;
     }
@@ -7358,7 +7379,7 @@ static id<MTLFunction> learn_fn(NvShader *fs, unsigned mask) {
     free(w);
     if (!t2) { MLOG("[RED] shader %s: the rewritten source is not text", fs->key); return nil; }
     NSError *ce = nil;
-    id<MTLLibrary> lib = [g_dev newLibraryWithSource:t2 options:nil error:&ce];   // the same call dm_shader_prep makes: the cache answers at once
+    id<MTLLibrary> lib = [g_dev newLibraryWithSource:t2 options:src_compile_options() error:&ce];   // the same call dm_shader_prep makes, with the packing chain's flags (src_compile_options): the cache answers at once
     if (!lib) { MLOG("[RED] shader %s: the rewritten source does not compile: %s", fs->key, ce.localizedDescription.UTF8String); return nil; }
     id<MTLFunction> fn = fn4_note([lib newFunctionWithName:fs->ventry], lib, fs->ventry, nil);
     if (!fn) { MLOG("[RED] shader %s: the rewritten source has no %s", fs->key, fs->ventry.UTF8String); return nil; }
