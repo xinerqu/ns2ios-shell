@@ -149,3 +149,4 @@ A game's DLC ships as one file per add-on, like its own files	DLC（追加内容
 extract: ask nx_extract for the image instead of packing one afterwards	打包快了很多：游戏文件（含每个 DLC）在解包时直接写成一个镜像，不再先解成几十万个碎文件、再读一遍打回镜像、再删掉。王国之泪这种大作一次省 15 分钟以上，装到手机上也要快得多。
 pack: deflate a big file in blocks on the pool, not on one core	打包快了一个数量级：游戏镜像那种大文件不再由一个核从头压到尾，改成切块交给多核一起压，压缩率基本不变（王泪实测：镜像这一段 432 秒 → 40 秒，包只大 99 KB）。
 pack: as many translator and splitter threads as the machine has, up to 16	打包时翻译和拆分着色器两步都用满本机线程：从固定 8 个改成"按逻辑核数、最多 16"，8 线程及以下的机器保持原样。
+Move the patch base to 75c1a8cf: the Mac alias region, a movie decoder thread, two more Switch 2 games	跟上上游 18 个提交：Mac 侧改用 Switch 同尺寸的 64 GB 地址别名区、过场视频解码改到独立线程（修好马力欧足球开场的崩溃）、新增两款 Switch 2 游戏（时之笛、卡比空中骑手）。
