@@ -160,3 +160,13 @@ basemove: catch up to upstream in one command	内部工具：一条命令把补�
 shaders: the first part of the guest memory can stay anonymous, out of the files	内存：客人内存块的前一段可以留在匿名内存里（GPU 不必等磁盘），其余仍走文件。
 render: the pools the GPU reads are wired, so it never waits for a reclaimed page	渲染：GPU 要读的内存池会被钉在内存里，不再等被回收的页。
 revert: drop the guest-memory split and the pool wiring, both measured and neither helping	回退：去掉内存分段与池子钉住（都实测过，都没帮上忙）。
+shell: compile the device-side shader source with the packing chain's two switches	壳：设备端编译着色器源码时，用上打包链给的两份编译开关（画面块状残影与发白的根源）。
+pack: no per-game env override; the host's own memory rule decides	打包：不再按游戏往环境里写内存覆盖，内存规则由宿主自己决定。
+shaders: put the host-side fallback back (a concurrent revert dropped it)	着色器：把宿主端的后备查找补回来（它被一次并发的回退冲掉了）。
+pack: the override's comment says what the two memory experiments answered	打包：那段覆盖的注释改成两次内存实验的结论。
+shaders: the one library a Windows pack makes carries the alpha test entry points	着色器：Windows 包里那一份着色器库也带上 alpha test 与逻辑运算的入口。
+render: wire the pools the GPU reads, so it never waits for a reclaimed page	渲染：给 GPU 读的内存池接线，不再等被回收的页。
+mem: a released range in the anonymous part goes back as anonymous memory	内存：匿名段里释放的区间按匿名内存归还。
+mem: keep the first part of the guest block anonymous, the rest in files	内存：客人内存块的前一段留在匿名内存里，其余仍走文件。
+Move the patch base to b4318c7a: linear-texture reads and one more game	移基座到 b4318c7a：线性纹理读取，另加一款游戏。
+pack: write every step's timing to logs/steps.log	打包：每一步的耗时写进 logs/steps.log。
