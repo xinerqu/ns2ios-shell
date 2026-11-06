@@ -93,7 +93,7 @@ On the **packing machine**:
 |---|---|
 | The packer | `Source code (zip)` from the release — **`dm/` must be there**, see above |
 | Python 3.9+ | `python -m pip install lz4 capstone fonttools backports.zstd pillow`, into **the interpreter that runs the packer** |
-| Five executables | From `nxnative-windows-tools.zip`, passed with `--tools`. They cover everything the packer shells out to, `zstd` included, so no separate utility hunt |
+| Five executables | From `nxnative-windows-tools.zip`, passed with `--tools`. They cover everything the packer shells out to, `zstd` included, so no separate utility hunt. The archive also carries `pyft\`, a free-threaded Python (no GIL) that only the shader translation runs under: the same code there finishes about a third sooner. Nothing is installed, and a bundle without it translates as it always did |
 | `prod.keys` | Dumped from your own console. It never leaves your machine: it is passed to `nx_extract` as an argument and is not written to any log |
 
 No .NET SDK, no C++ toolchain, no Mac. (Building the tools yourself is possible: `dotnet publish dm/tools/nx_extract -r win-x64

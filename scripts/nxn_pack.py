@@ -1567,6 +1567,41 @@ def map_overflow(pkg_dir, table):
     return None
 
 
+FT_PY = None      # the free-threaded interpreter once found, '' when this machine has none (so it is looked for once)
+
+
+def translate_python(tools):
+    """Which interpreter runs dmsh_build.py: the free-threaded runtime the tools carry (tools/pyft), or this one.
+
+    The translate is the one step that is Python-bound: one interpreter runs one thread of Python at a time (the GIL), so
+    a 16-thread pool measured 3.4 cores of 16 and Tears of the Kingdom's 28,669 shaders cost 11.3 minutes. CPython's
+    free-threaded build has no GIL; the same dmsh_build.py, one process, 16 threads, took 1.7x less (2026-11-06: 36.0 s ->
+    21.4 s on 1,200 shaders) and wrote the same bytes. The rest of the translation's time is spirv-cross processes and
+    the disk, which no interpreter can parallelise, so that 1.7x is the whole of what this buys.
+
+    Only this step uses it. shader_split.py and cb_extent.py are already several processes; the packer's pools wait on
+    zlib, which releases the GIL; and every other step needs lz4/capstone/pillow, which the runtime beside the
+    executables does not carry (it is a bare CPython, deliberately: that is what proves the translate needs nothing else).
+
+    Nothing is installed and nothing is put on PATH: it is a folder next to the executables, and a machine without it
+    translates exactly as before. PYTHON_GIL=0 because a 3.13t build starts with the GIL on; on 3.14t and later it
+    changes nothing, and the probe below refuses a build that still has it.
+    """
+    global FT_PY
+    if FT_PY is None:
+        exe = Path(tools) / 'pyft' / 'python.exe'
+        FT_PY = ''
+        if exe.is_file():
+            try:
+                r = subprocess.run([str(exe), '-c', 'import sys; raise SystemExit(0 if not sys._is_gil_enabled() else 1)'],
+                                   capture_output=True, timeout=120, env=dict(os.environ, PYTHON_GIL='0'))
+                if r.returncode == 0: FT_PY = str(exe)
+                else: warn('tools/pyft is not a free-threaded build (the GIL is still on): translating on one thread of Python')
+            except (OSError, subprocess.SubprocessError) as e:
+                warn('tools/pyft could not be started (%s): translating on one thread of Python' % e)
+    return FT_PY or None
+
+
 def step_translate(pkg, work, xlate, iosout, tid, force=False):
     """dmsh_build.py, with no metal compiler: nometal_run.py turns `xcrun metal` into a copy, so the "libraries" hold MSL
     source and the phone compiles them once on first launch. dmsh_build.py creates <iosout>/b-<chain version> itself."""
@@ -1620,8 +1655,11 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     # when the toolchain lock changes. It reads the tables, so it costs nothing to do every time.
     run([PY, nometal, GFX / 'dmsh_chain.py', '--header'], env=genv,
         log=work / 'logs' / 'chain_header.log', what='dmsh_chain --header')
-    run([PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
-        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(JOBS), 'DM_GAME': tid},
+    fpy = translate_python(Path(xlate).parent)
+    if fpy: say('translating with the free-threaded interpreter (%s): the GIL is off, so the pool runs on %d threads at once'
+                % (Path(fpy).parent.name, JOBS))
+    run([fpy or PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
+        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(JOBS), 'DM_GAME': tid, 'PYTHON_GIL': '0'},
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).

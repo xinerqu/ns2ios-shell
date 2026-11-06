@@ -168,6 +168,28 @@ jobs:
           unzip -q -j zstd.zip 'zstd-v1.5.7-win64/zstd.exe' -d out/zstd
           ./out/zstd/zstd.exe --version
 
+      - name: Fetch the free-threaded Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The one step that is Python-bound rather than disk- or process-bound: the shader translation. One interpreter
+          # runs one thread of Python at a time, so its 16-thread pool measured 3.4 cores of 16 and Tears of the Kingdom's
+          # 28,669 shaders cost 11.3 minutes. CPython's free-threaded build (no GIL) does the same work in 1.47x less
+          # (measured 2026-11-06: 681 s -> 464 s, same bytes out), and nxn_pack.py hands it only that step
+          # (scripts/nxn_pack.py, translate_python). Nothing is installed on a packing machine: this is a folder beside
+          # the executables, and a machine without it translates exactly as before.
+          #
+          # Pinned by sha256, not just by version: this is a third-party binary that ships to users inside our bundle.
+          py=python-3.15.2t-embeddable-amd64.zip
+          url="https://www.python.org/ftp/python/3.15.2/$py"
+          want=0e750de866fd1a2b4fcc092b382f765c79364fd02437e5f020a2675c5eb6c313
+          curl -sSfL -o "$py" "$url"
+          got=$(sha256sum "$py" | cut -d' ' -f1)
+          [ "$got" = "$want" ] || { echo "::error::$url: sha256 $got, expected $want"; exit 1; }
+          mkdir -p stage/pyft
+          unzip -q "$py" -d stage/pyft
+          ./stage/pyft/python.exe -c "import sys; print(sys.version); assert not sys._is_gil_enabled(), 'this build still has the GIL'"
+
       - name: Collect
         shell: bash
         run: |
@@ -533,8 +555,11 @@ jobs:
             exit 0
           fi
           mkdir -p data tools
-          # the artifact should be flat, but do not depend on it: take every .exe wherever it landed
-          find tools-in -name '*.exe' -type f -exec cp {} tools/ \;
+          # the artifact should be flat, but do not depend on it: take every .exe wherever it landed. pyft/ comes along as
+          # a folder: it is the free-threaded interpreter the translation step runs under, and this pack is the only place
+          # that proves it works before a release ships it (scripts/nxn_pack.py, translate_python).
+          find tools-in -maxdepth 1 -name '*.exe' -type f -exec cp {} tools/ \;
+          if [ -d tools-in/pyft ]; then cp -r tools-in/pyft tools/pyft; else echo "::warning::the windows-tools artifact carries no pyft/: this pack translates on one thread of Python"; fi
           ls -l tools
           for t in nx_extract dmsh_xlate spirv-cross; do
             test -f "tools/$t.exe" || { echo "::error::the windows-tools artifact has no $t.exe"; exit 1; }
@@ -664,14 +689,19 @@ jobs:
       - name: Pack the tools
         run: |
           set -euo pipefail
-          # flatten: the archive must unpack into the .exe files, which is what --tools expects
+          # flatten the executables: the archive must unpack into the .exe files, which is what --tools expects.
+          # pyft/ goes in as a folder beside them: the free-threaded interpreter the translation step runs under
+          # (scripts/nxn_pack.py, translate_python). Without it everything still packs, one thread of Python at a time.
           mkdir -p flat
           find tools -name '*.exe' -type f -exec cp {} flat/ \;
-          ls -l flat
+          rm -rf flat/pyft
+          if [ -d tools/pyft ]; then cp -r tools/pyft flat/pyft; else echo "::error::the windows-tools artifact has no pyft/"; exit 1; fi
+          ls -l flat | head -12
           for t in nx_extract dmsh_xlate spirv-cross glslangValidator zstd; do
             test -f "flat/$t.exe" || { echo "::error::the windows-tools artifact has no $t.exe"; exit 1; }
           done
-          (cd flat && zip -q ../dist/nxnative-windows-tools.zip ./*.exe)
+          test -f flat/pyft/python.exe || { echo "::error::pyft/python.exe is missing"; exit 1; }
+          (cd flat && zip -q -r ../dist/nxnative-windows-tools.zip ./*.exe pyft)
 
       - name: Check the release notes table
         # The Chinese section is built by looking each commit subject up in .github/release-notes.zh.tsv, and none of the
@@ -770,7 +800,7 @@ jobs:
           |---|---|
           | **`ns2ios-packer.exe`** | **One file, the whole tool.** It downloads the shell, the tools and the packer below by itself, then packs your game with a few clicks. Windows 10 or newer; see *Use it*. |
           | `<version>.zip` | The shell: an unsigned iOS app with no game content. Pack your own game files into it. |
-          | `nxnative-windows-tools.zip` | `nx_extract.exe`, `dmsh_xlate.exe`, `spirv-cross.exe`, `glslangValidator.exe`, `zstd.exe` — self-contained; no .NET SDK or C++ toolchain needed, and nothing else to install. |
+          | `nxnative-windows-tools.zip` | `nx_extract.exe`, `dmsh_xlate.exe`, `spirv-cross.exe`, `glslangValidator.exe`, `zstd.exe` — self-contained; no .NET SDK or C++ toolchain needed, and nothing else to install. Also `pyft\`: a free-threaded Python the shader translation runs under (about a third faster, and only that step uses it). |
 
           ## Use it
 
@@ -820,7 +850,7 @@ jobs:
           |---|---|
           | **`ns2ios-packer.exe`** | **一个文件就是全部工具。** 它自己去下壳、下工具、下打包器，然后点几下就把游戏打出来。Windows 10 及以上，用法见下。 |
           | `<version>.zip` | 壳：不含游戏内容的未签名 iOS 应用，把自己的游戏文件打进去。 |
-          | `nxnative-windows-tools.zip` | `nx_extract.exe`、`dmsh_xlate.exe`、`spirv-cross.exe`、`glslangValidator.exe`、`zstd.exe`——自包含，不需要 .NET SDK 或 C++ 工具链，也不用另装任何东西。 |
+          | `nxnative-windows-tools.zip` | `nx_extract.exe`、`dmsh_xlate.exe`、`spirv-cross.exe`、`glslangValidator.exe`、`zstd.exe`——自包含，不需要 .NET SDK 或 C++ 工具链，也不用另装任何东西。另外还有 `pyft\`：一个无 GIL 的 Python，只在翻译着色器那一步用（快三分之一左右）。 |
 
           ## 用法
 
