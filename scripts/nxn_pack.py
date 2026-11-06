@@ -64,7 +64,31 @@ JOBS = int(os.environ.get('J', str(min(os.cpu_count() or 8, 16))))
 UNKNOWN_VER = 'vunknown'
 
 
-def say(s): print('[%s] %s' % (time.strftime('%H:%M:%S'), s), flush=True)
+KEEP_WORK = [False]   # --keep-work: the stage tree is kept, so the previous one is not deleted either
+_LOG = []      # the file every say() line also goes to, once the work folder is known (see keep_steps)
+
+
+def keep_steps(path):
+    """Also write every step line to <work>/logs/steps.log, with its timestamp.
+
+    The console has these lines and nothing else does, so "which phase took 12 minutes" could only be answered by the
+    person who still had the window open (Donkey Kong Bananza, 2026-11-06: 12 minutes between the translation and the
+    package, for a RomFS half the size of a game that spent 4). One line per step, timestamps included, in the folder
+    that --keep-work already keeps and that a bug report carries.
+    """
+    _LOG[:] = [open(path, 'w', encoding='utf-8')]
+
+
+def say(s):
+    line = '[%s] %s' % (time.strftime('%H:%M:%S'), s)
+    print(line, flush=True)
+    for f in _LOG:
+        try:
+            print(line, file=f, flush=True)
+        except (OSError, ValueError):
+            pass
+
+
 def die(s): sys.exit('[x] ' + s)
 def warn(s): print('[!] ' + s, flush=True)
 
@@ -1870,9 +1894,11 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     if stage.exists():
         # A failed or interrupted run leaves its stage tree behind, and this used to move the previous one aside instead
         # of removing it, so they piled up until the disk filled (a 4 GB game leaves ~10 GB per run). Removing is what
-        # --clean does by hand and it is slow here -- every delete goes through the host's safety layer -- so try, and
-        # fall back to the old rename when that is refused.
-        for stale in sorted(stage.parent.glob('stage-old*')):
+        # --clean does by hand and it is slow here -- every delete goes through the host's safety layer -- so it is
+        # skipped under --keep-work, which asks for the tree to be kept in the first place: A 12 GB stage of 100,000
+        # files cost 12 minutes to remove here (Donkey Kong Bananza, 2026-11-06, read off logs/steps.log: the
+        # translation ended at 20:36:55 and the assembly did not start until 20:49:08).
+        for stale in sorted(stage.parent.glob('stage-old*')) if not KEEP_WORK[0] else ():
             try:
                 shutil.rmtree(stale)
                 say('removed an earlier run\'s stage tree: %s' % stale.name)
@@ -2298,6 +2324,8 @@ def main():
     work = folder / (tid + '_pack')
     work.mkdir(parents=True, exist_ok=True)
     (work / 'logs').mkdir(exist_ok=True)
+    keep_steps(work / 'logs' / 'steps.log')
+    KEEP_WORK[0] = bool(a.keep_work)
     if probed and (probed / 'extract').is_dir():
         # the probe extraction is this version's extraction: move it in rather than unpack the same few GB again
         dst = work / 'extract' / pkg
