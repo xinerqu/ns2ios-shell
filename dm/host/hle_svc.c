@@ -94,6 +94,7 @@ int proc_pid_rusage(int pid, int flavor, rusage_info_t *buffer);   // libproc.h,
 #define GF_MAX 1024
 static int g_gf_tab[GF_MAX];       // the files, open for reading and writing
 static int g_gf_n;                 // how many; 0 while the guest is anonymous. Set by mem_init_once, whose pthread_once orders it before every reader
+static size_t g_gf_anon;           // bytes at the start of the block mapped MAP_ANON instead (DM_GUEST_FILE_ANON); 0 = the whole block in files
 static uint64_t g_gf_min_free;     // DM_GUEST_FILE_MIN_FREE in bytes: the free space on the files' disk under which the game is stopped; 0 = never
 
 // Every second the free space on the files' disk (they all lie on one volume): under DM_GUEST_FILE_MIN_FREE the game is stopped (exit code 87; the memory watchdog's is 86, hle_nvn.c), before a full
@@ -215,7 +216,7 @@ static void guest_file_init(void) {
     if (d && *d) snprintf(dir, sizeof dir, "%s", d);
     else if (!confstr(_CS_DARWIN_USER_TEMP_DIR, dir, sizeof dir)) { LOG("[RED] [mem] guest memory: anonymous (DM_GUEST_FILE: no temporary folder, errno %d)", errno); return; }
     if (!guest_files_map(dir, chunk, n, &fs, why, sizeof why, anon)) { LOG("[RED] [mem] guest memory: anonymous (DM_GUEST_FILE: %s)", why); return; }
-    g_gf_n = n;
+    g_gf_n = n; g_gf_anon = anon;
     if (anon) LOG("[mem] guest memory: the first %.2f GB of the block is anonymous and never written out, so the GPU reads it without a fault", anon / G);
     LOG("[mem] guest memory: %d files of %.2f GB in %s (unlinked, sparse, shared), %.2f GB in all, on the %s volume, %.1f GB free on it", n, chunk / G, dir, (g_reserve - anon) / G, fs.f_fstypename, (double)fs.f_bavail * fs.f_bsize / G);
     if (strcmp(fs.f_fstypename, "apfs") || !(fs.f_flags & MNT_LOCAL)) LOG("[RED] [mem] guest file: not on a local APFS volume, where it may not be sparse, or be slow");
@@ -397,7 +398,10 @@ static void alias_query(uint64_t addr, uint64_t *base, uint64_t *size, int *mapp
 // it back, so the files' range only goes PROT_NONE: its pages stay file pages, out of the footprint, which the kernel writes out when it needs the room;
 // they keep their old bytes, so the call returns 0 and alias_initialize zeroes them when they are mapped again
 static int guest_release(uintptr_t lo, uintptr_t hi) {
-    if (g_gf_n) {
+    // A range inside the anonymous part of a split block (DM_GUEST_FILE_ANON) is ordinary anonymous memory and goes back the
+    // ordinary way: MAP_ANON replaces it, so the pages are freed and out of the footprint until the game maps them again. Only
+    // the file part has to keep them (see above), and a range that straddles the boundary is treated as the file part.
+    if (g_gf_n && lo >= (uintptr_t)g_as + g_gf_anon) {
         if (mprotect((void *)lo, hi - lo, PROT_NONE)) die("guest_release mprotect %#lx+%#lx errno=%d", (unsigned long)lo, (unsigned long)(hi - lo), errno);
         return 0;
     }
