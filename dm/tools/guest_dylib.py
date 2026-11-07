@@ -14,6 +14,8 @@
 #   · __LINKEDIT 放在最后，末尾留一块预留的代码签名区，里面是链接器式的自签（CS_LINKER_SIGNED，与 ld 写的同类），空间充裕，重签工具可原地写入自己的签名；
 #     zsign（LiveContainer 等设备端签名器）没法给这个文件新增签名命令，因为它只靠名为 __text 的节找装载命令的空闲空间，而 Guest 没有这个节。
 # 用法：guest_dylib.py <产物目录> <输出目录> <模块名...>     输出 <输出目录>/Guest.framework/{Guest,Info.plist}
+#       guest_dylib.py --name DmGame<tid> <产物目录> <输出目录> <模块名...>   一个 App 装多个游戏时，每个游戏一个 framework：
+#       文件名、LC_ID_DYLIB 与代码签名的标识符都跟着 --name 走，装进同一个 App 的 Frameworks/ 里互不冲突。
 # Write the rewritten module images directly as one Apple-format dynamic library Guest.framework/Guest: it holds only segments, no symbols, and nothing other than the code.
 # Uses only the Python standard library, calls no compiler, linker or any Apple tool, and produces byte-for-byte identical files on macOS / Linux / Windows.
 # Who it is for: the shell install package (ios/tools/shell_build.sh) contains no game program; after users rewrite the module images from their own game files, d2rm_pack.py calls this script
@@ -28,6 +30,7 @@
 # · __LINKEDIT goes last and ends with a reserved code-signature area holding a linker-signed ad-hoc signature (CS_LINKER_SIGNED, the same kind ld writes) with room to spare, so a re-signing tool can write its signature in place;
 # zsign (LiveContainer and other on-device signers) cannot add a signature command to this file, because it only finds free header space via a section named __text, which Guest does not have.
 # Usage: guest_dylib.py <build output directory> <output directory> <module name...>     writes <output directory>/Guest.framework/{Guest,Info.plist}
+#        guest_dylib.py --name DmGame<tid> ...      one framework per game, for the app that holds several (the name is the file name, LC_ID_DYLIB and the code-signature identifier)
 import hashlib, os, struct, sys
 
 PG = 0x4000
@@ -53,16 +56,17 @@ def dylib_cmd(cmd, name):
     return struct.pack('<IIIIII', cmd, 24 + len(name), 24, 2, 0x10000, 0x10000) + name
 
 
-def adhoc_sig(data, text_size):
+def adhoc_sig(data, text_size, ident=b'Guest'):
     # 苹果 cs_blobs.h 的 SuperBlob + CodeDirectory 0x20400，SHA-256 页哈希；用链接器式（CS_LINKER_SIGNED），重签工具不用强制标志就能替换它
     # Apple cs_blobs.h SuperBlob + CodeDirectory 0x20400 with SHA-256 page hashes; linker-signed (CS_LINKER_SIGNED), so re-signing tools replace it without needing a force flag
-    n = (len(data) + 4095) // 4096; ident = b'Guest\0'; hdr = struct.calcsize('>IIIIIIIIIBBBBIIIIQQQQ'); assert hdr == 88
+    ident = ident + b'\0'
+    n = (len(data) + 4095) // 4096; hdr = struct.calcsize('>IIIIIIIIIBBBBIIIIQQQQ'); assert hdr == 88
     cd = struct.pack('>IIIIIIIIIBBBBIIIIQQQQ', 0xfade0c02, hdr + len(ident) + 32 * n, 0x20400, 0x20002, hdr + len(ident), hdr, 0, n, len(data), 32, 2, 0, 12, 0, 0, 0, 0, 0, 0, text_size, 0)
     cd += ident + b''.join(hashlib.sha256(data[i:i + 4096]).digest() for i in range(0, len(data), 4096))
     return struct.pack('>IIIII', 0xfade0cc0, 20 + len(cd), 1, 0, 20) + cd
 
 
-def build(out, names):
+def build(out, names, fwn='Guest'):
     text, wsegs = [], []
     for n in names:
         hdr = dict(l[2:].split() for l in open(os.path.join(out, n + '.fixups.tsv')) if l.startswith('# '))
@@ -93,7 +97,7 @@ def build(out, names):
     cs_off = (off + len(strtab) + 15) & ~15; cs_size = (((cs_off // 4096 + 1) * 52 + 4095) & ~4095) + 0x40000   # 签名区：16 字节对齐；留足 SHA-1 + SHA-256 页哈希（52 字节/页）外加 256K | signature area: 16-byte aligned; room for SHA-1 + SHA-256 page hashes (52 bytes/page) plus 256K
     uuid = hashlib.sha256(body).digest()[:16]   # 由内容定：同样的输入在哪台机器上出的库都逐字节相同 | determined by content: the same input yields a byte-for-byte identical library on whatever machine it is built
     cmds += [segment('__LINKEDIT', off, r16(cs_off + cs_size - off), off, cs_off + cs_size - off, 1, []),
-             dylib_cmd(0xd, b'@rpath/Guest.framework/Guest'),                    # LC_ID_DYLIB
+             dylib_cmd(0xd, ('@rpath/%s.framework/%s' % (fwn, fwn)).encode()),  # LC_ID_DYLIB
              struct.pack('<II10I', 0x80000022, 48, *([0] * 10)),                 # LC_DYLD_INFO_ONLY：没有重定位、没有绑定、没有导出 | LC_DYLD_INFO_ONLY: no relocations, no bindings, no exports
              struct.pack('<IIIIII', 0x2, 24, off, 0, off, len(strtab)),          # LC_SYMTAB：0 个符号 | LC_SYMTAB: 0 symbols
              struct.pack('<II18I', 0xb, 80, *([0] * 18)),                        # LC_DYSYMTAB
@@ -104,16 +108,16 @@ def build(out, names):
     lc = b''.join(cmds); assert 32 + len(lc) <= PG
     mh = struct.pack('<IiiIIIII', 0xfeedfacf, 0x0100000c, 0, 6, len(cmds), len(lc), 0x00100085, 0)   # arm64、动态库 | arm64, dynamic library
     data = ((mh + lc).ljust(PG, b'\0') + body + strtab).ljust(cs_off, b'\0')
-    return (data + adhoc_sig(data, tsz)).ljust(cs_off + cs_size, b'\0')   # 签名覆盖 [0, cs_off) | the signature covers [0, cs_off)
+    return (data + adhoc_sig(data, tsz, fwn.encode())).ljust(cs_off + cs_size, b'\0')   # 签名覆盖 [0, cs_off) | the signature covers [0, cs_off)
 
 
 INFO_PLIST = '''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>Guest</string>
-<key>CFBundleIdentifier</key><string>%s</string>
+<key>CFBundleExecutable</key><string>%(name)s</string>
+<key>CFBundleIdentifier</key><string>%(bundle_id)s</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleName</key><string>Guest</string>
+<key>CFBundleName</key><string>%(name)s</string>
 <key>CFBundlePackageType</key><string>FMWK</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleVersion</key><string>1</string>
@@ -123,15 +127,21 @@ INFO_PLIST = '''<?xml version="1.0" encoding="UTF-8"?>
 '''
 
 
-def write(out, dst, names, bundle_id='local.guest'):
-    fw = os.path.join(dst, 'Guest.framework'); os.makedirs(fw, exist_ok=True)
-    data = build(out, names)
-    with open(os.path.join(fw, 'Guest'), 'wb') as f: f.write(data)
-    with open(os.path.join(fw, 'Info.plist'), 'w', encoding='utf-8', newline='\n') as f: f.write(INFO_PLIST % bundle_id)
+def write(out, dst, names, bundle_id='local.guest', name='Guest'):
+    """name: the framework's file and bundle name. One app that holds several games needs one framework per game
+    (DmGame<tid>), so the name cannot be the constant Guest there; the default keeps the one-game app's path as it was."""
+    if not os.path.isdir(out): raise SystemExit('guest_dylib: no such build output folder: %s' % out)
+    fw = os.path.join(dst, '%s.framework' % name); os.makedirs(fw, exist_ok=True)
+    data = build(out, names, name)
+    with open(os.path.join(fw, name), 'wb') as f: f.write(data)
+    with open(os.path.join(fw, 'Info.plist'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(INFO_PLIST % {'name': name, 'bundle_id': bundle_id})
     return fw, len(data)
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4: sys.exit(__doc__ or '用法：guest_dylib.py <产物目录> <输出目录> <模块名...>')
-    fw, n = write(sys.argv[1], sys.argv[2], sys.argv[3:])
+    args = sys.argv[1:]; name = 'Guest'
+    if len(args) >= 2 and args[0] == '--name': name = args[1]; args = args[2:]
+    if len(args) < 3: sys.exit(__doc__ or '用法：guest_dylib.py [--name <framework>] <产物目录> <输出目录> <模块名...>')
+    fw, n = write(args[0], args[1], args[2:], bundle_id='local.%s' % name.lower(), name=name)
     print('%s：%d 字节' % (fw, n))

@@ -89,6 +89,7 @@
 ! scripts/restore_mac_shader_marks.py
 ! scripts/basemove
 ! scripts/tests
+! scripts/shell_game_pack.py            # lays a packed game out as one DmGame<tid>.framework + ns2ios/games/<tid>/ (the several-games layout, stage 1)
 ! packer
 ! docs/CAPTURE.md
 ! docs/CAPTURE.zh-CN.md

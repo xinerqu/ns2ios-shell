@@ -114,6 +114,54 @@ static void aoc_locate(void) {
 // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
 static char g_boot_message[640];
 const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
+// An app that holds several games: one Frameworks/DmGame<title ID>.framework per game (scripts/nxn_pack.py --framework), which carries the
+// game's modules and its tables, while the big files stay in Documents -- Documents/ns2ios/games/<title ID>/{romfs.img,msl,aoc}. Adding a
+// game then reinstalls a few dozen MB instead of several GB, and the game's data and saves survive that as well as a shell update.
+// Returns the framework's dm/ (the host's module folder, argv[1]) with the environment set for that game; nil when this app is the
+// one-game kind (Frameworks/Guest.framework, the packer writes the whole game into the bundle) -- then program_env below runs as before.
+#ifdef DM_SHELL
+static NSString *shell_game_dm(NSString *doc) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *fwdir = NSBundle.mainBundle.privateFrameworksPath;
+    for (NSString *name in [fm contentsOfDirectoryAtPath:fwdir error:nil] ?: @[]) {
+        if (![name hasPrefix:@"DmGame"] || ![name hasSuffix:@".framework"] || name.length <= 6 + 10 + 1) continue;
+        NSString *base = [name stringByDeletingPathExtension];                                  // DmGame<16 hex digits>
+        NSString *tid = [base substringFromIndex:6];
+        NSString *fw = [fwdir stringByAppendingPathComponent:name], *fwdm = [fw stringByAppendingPathComponent:@"dm"];
+        NSString *exe = [fw stringByAppendingPathComponent:base];
+        if (![fm fileExistsAtPath:exe]) continue;
+        NSString *home = [doc stringByAppendingPathComponent:@"ns2ios"];
+        NSString *game = [[home stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:tid];
+        NSString *saves = [[home stringByAppendingPathComponent:@"saves"] stringByAppendingPathComponent:tid];
+        NSString *cheats = [[home stringByAppendingPathComponent:@"cheats"] stringByAppendingPathComponent:tid];
+        NSString *romfs = [game stringByAppendingPathComponent:@"romfs.img"], *aoc = [game stringByAppendingPathComponent:@"aoc"];
+        for (NSString *d in @[[home stringByAppendingPathComponent:@"games"], saves, cheats, [game stringByAppendingPathComponent:@"msl"]])
+            [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+        // Not an error the app can work around: the data is copied in from the Files app, so it says where (front_ios_boot_message).
+        if (!romfs_image_complete(romfs)) {
+            snprintf(g_boot_message, sizeof g_boot_message,
+                     "%s has no game data yet. Open the Files app, this app's folder, ns2ios/games/%s, and copy the romfs.img there.",
+                     base.UTF8String, tid.UTF8String);
+            fprintf(stderr, "[RED] boot: %s has no game data (Documents/ns2ios/games/%s/romfs.img)\n", base.UTF8String, tid.UTF8String);
+            return nil;
+        }
+        setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
+        setenv("DM_MSL_DIR", [game stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 1);
+        NSString *shmap = [fwdm stringByAppendingPathComponent:@"shader_map.tsv"];
+        if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
+        setenv("DM_ROMFS", romfs.fileSystemRepresentation, 1);
+        if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 1);
+        // Overwrite: the shared Documents/save and Documents/cheats below are for the one-game app; with several games each keeps its own,
+        // so deleting one game's data never touches another's saves.
+        setenv("DM_SAVE", saves.fileSystemRepresentation, 1);
+        setenv("DM_CHEATS", cheats.fileSystemRepresentation, 1);
+        fprintf(stderr, "boot: game framework %s\n", exe.fileSystemRepresentation);
+        fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
+        return fwdm;
+    }
+    return nil;
+}
+#endif
 // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
 // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
 // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
@@ -143,7 +191,8 @@ static int boot_env(void) {
     NSString *res = NSBundle.mainBundle.resourcePath;
     for (NSString *d in @[@"save", @"temp", @"cheats"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
-    for (NSString *d in [@[@"romfs", @"aoc", @"temp"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
+    // ns2ios/games/ is the several-games layout's data (a RomFS image per game): out, like romfs/ above. ns2ios/saves/ stays in, as save/ does.
+    for (NSString *d in [@[@"romfs", @"aoc", @"temp", @"ns2ios/games"] arrayByAddingObjectsFromArray:[romfs_document_images(doc) valueForKey:@"lastPathComponent"]]) {
         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
         if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
     }
@@ -232,6 +281,11 @@ static int boot_env(void) {
 static NSString *program_env(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
+#ifdef DM_SHELL
+    {   // Several games in one app: the game its framework and its Documents/ns2ios folder name wins over everything below
+        NSString *m = shell_game_dm(doc); if (m) return m;
+    }
+#endif
     NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
     NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
     if (plist) {

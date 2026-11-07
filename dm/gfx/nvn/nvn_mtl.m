@@ -42,7 +42,10 @@
 // Falls back to the compiled-in value (diagnostics only).
 static const char *shell_chain(void) {
     static char v[34]; if (v[0]) return v;
-    NSString *msl = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"msl"];
+    // DM_MSL_DIR first: an app that holds several games keeps each game's libraries outside its bundle (Documents/ns2ios/games/<id>/msl),
+    // and the shell's own msl/ is then empty. Unset, the one-game package's bundle msl/ is scanned as before.
+    const char *d = getenv("DM_MSL_DIR");
+    NSString *msl = d && *d ? @(d) : [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"msl"];
     for (int pass = 0; pass < 2; pass++)
         for (NSString *d in [NSFileManager.defaultManager contentsOfDirectoryAtPath:msl error:nil] ?: @[])
             if ([d hasPrefix:@"b-"] && d.length > 2 && d.length < 34 && [d hasSuffix:@".img"] == (pass == 1)) {

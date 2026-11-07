@@ -714,6 +714,10 @@ void dm_set_game_image_header(const void *mh) { g_game_image = mh; }
 // Shell (dm/ios/tools/shell_build.sh): the app carries no game content at all, so the module images are not in this executable but in
 // Frameworks/Guest.framework/Guest -- a dynamic library that holds only segments, written by dm/tools/guest_dylib.py from the user's own
 // game files. The section names are the same as in the embedded approach (gen_embed.py), so only the image header to read them from changes.
+//
+// An app that holds several games has one framework per game (DmGame<title ID>.framework, guest_dylib.py --name) and DM_GAME_IMAGE names
+// the one this run starts: dm/ios/Sources/main.m sets it from the game the launcher picked. Unset (the one-game package, and every
+// package made before the shell had a library) the path below is the Guest framework, exactly as it was.
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 static const struct mach_header_64 *shell_image_quiet(const char **why) {
@@ -721,15 +725,26 @@ static const struct mach_header_64 *shell_image_quiet(const char **why) {
     if (mh) return mh;
     if (cached) { if (why) *why = cached; return NULL; }
     char exe[4096]; uint32_t n = sizeof exe;
-    if (_NSGetExecutablePath(exe, &n)) { cached = "cannot get the executable path"; if (why) *why = cached; return NULL; }
-    char *sl = strrchr(exe, '/');
-    if (!sl || (size_t)(sl - exe) + 40 > sizeof exe) { cached = "unexpected executable path"; if (why) *why = cached; return NULL; }
-    strcpy(sl, "/Frameworks/Guest.framework/Guest");
-    if (access(exe, R_OK)) { cached = "Frameworks/Guest.framework/Guest is not in this package"; if (why) *why = cached; return NULL; }
-    if (!dlopen(exe, RTLD_NOW)) { cached = "dlopen of Frameworks/Guest.framework/Guest failed"; fprintf(stderr, "boot: dlopen %s: %s\n", exe, dlerror()); if (why) *why = cached; return NULL; }
-    for (uint32_t i = 0; i < _dyld_image_count(); i++) if (strstr(_dyld_get_image_name(i), "/Guest.framework/Guest")) mh = (const struct mach_header_64 *)_dyld_get_image_header(i);
-    if (!mh) { cached = "the Guest library is loaded but its image header was not found"; if (why) *why = cached; return NULL; }
-    fprintf(stderr, "boot: module images come from the Guest library %s\n", exe); return mh;
+    const char *given = getenv("DM_GAME_IMAGE");
+    if (given && *given) {
+        if (strlen(given) + 1 > sizeof exe) { cached = "DM_GAME_IMAGE is too long"; if (why) *why = cached; return NULL; }
+        strcpy(exe, given);
+        if (access(exe, R_OK)) { cached = "the game framework DM_GAME_IMAGE names is not readable"; if (why) *why = cached; return NULL; }
+    } else {
+        if (_NSGetExecutablePath(exe, &n)) { cached = "cannot get the executable path"; if (why) *why = cached; return NULL; }
+        char *sl = strrchr(exe, '/');
+        if (!sl || (size_t)(sl - exe) + 40 > sizeof exe) { cached = "unexpected executable path"; if (why) *why = cached; return NULL; }
+        strcpy(sl, "/Frameworks/Guest.framework/Guest");
+        if (access(exe, R_OK)) { cached = "Frameworks/Guest.framework/Guest is not in this package"; if (why) *why = cached; return NULL; }
+    }
+    if (!dlopen(exe, RTLD_NOW)) { cached = "dlopen of the game framework failed"; fprintf(stderr, "boot: dlopen %s: %s\n", exe, dlerror()); if (why) *why = cached; return NULL; }
+    // The image is found by the tail of its path, "<name>.framework/<name>", not by the whole path: dyld reports the resolved path, which
+    // can differ from the one dlopen was given (symbolic links, /private/var for /var).
+    const char *last = strrchr(exe, '/'), *tail = last ? last : exe;
+    if (last) for (const char *p = last - 1; p > exe; p--) if (*p == '/') { tail = p; break; }   // "<name>.framework/<name>"
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) { const char *nm = _dyld_get_image_name(i); if (nm && strstr(nm, tail)) mh = (const struct mach_header_64 *)_dyld_get_image_header(i); }
+    if (!mh) { cached = "the game framework is loaded but its image header was not found"; if (why) *why = cached; return NULL; }
+    fprintf(stderr, "boot: module images come from the game framework %s\n", exe); return mh;
 }
 static const struct mach_header_64 *shell_image(void) {
     const char *why = NULL; const struct mach_header_64 *mh = shell_image_quiet(&why);
