@@ -40,9 +40,19 @@ python3 tools/gen_build.py ../host Gen > Gen/dm.xcconfig || die "gen_build.py (n
 echo '// Shell: the module images are not in the executable (dm/ios/tools/shell_build.sh); host/loader.c fetches them from Frameworks/Guest.framework.' > Gen/embed.S
 # The packer overwrites Gen/dm (a resource folder) with the game's own tables; a placeholder keeps the folder non-empty.
 : > Gen/dm/placeholder.tsv
-# No app icon in the shell: the packer sets the game's icon. An empty catalog still has to exist (project.yml lists it).
+# The shell's own app icon: a library app is not a game, so its home-screen icon is ours (dm/ios/tools/app-icon.png), the same
+# single-size 1024x1024 shape build_ipa.sh writes for a single game. The packer never replaces it: it only adds DmGame frameworks.
 printf '{"info":{"author":"xcode","version":1}}\n' > Gen/Assets.xcassets/Contents.json
-echo 'DM_APPICON =' >> Gen/dm.xcconfig
+if [ -f "$DM/ios/tools/app-icon.png" ]; then
+  AI=Gen/Assets.xcassets/AppIcon.appiconset; mkdir -p "$AI" || die "mkdir $AI"
+  cp "$DM/ios/tools/app-icon.png" "$AI/icon.png" || die "copy the app icon"
+  printf '{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}\n' > "$AI/Contents.json"
+  echo 'DM_APPICON = AppIcon' >> Gen/dm.xcconfig
+  t "app icon: dm/ios/tools/app-icon.png"
+else
+  echo 'DM_APPICON =' >> Gen/dm.xcconfig
+  t "no app icon: the home-screen icon stays blank"
+fi
 # Shared-font stand-ins: ours, not game content (iOS lacks the macOS font path build_ipa.sh uses)
 cp "${STD_FONT:-/System/Library/Fonts/Supplemental/Arial Unicode.ttf}" Gen/dm/font/standard.ttf || die "copy standard font (STD_FONT=a TTF)"
 # The library's default background (Library.swift): shown behind every game that has no picture of its own.

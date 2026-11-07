@@ -24,6 +24,7 @@
 + dm/ios/Sources/CheatsView.swift          # the launcher's Cheats section: paste the codes, switch the entries on (no settings row: the list is not known until the text is parsed)
 + dm/ios/Sources/Library.swift             # the game library page of an app that holds several games (DmGame<tid>.framework per game)
 + dm/ios/tools/default-background.jpg     # the library's default background, copied into Gen/dm by shell_build.sh
++ dm/ios/tools/app-icon.png               # the shell's own home-screen icon (1024x1024), put in the asset catalog by shell_build.sh
 + dm/ios/Sources/dm_shader_prep.m         # first-launch shader compilation page
 + dm/ios/Sources/dm_shader_learn.h        # what the host learns about a shader's output types, from a refused pipeline
 + dm/ios/Sources/dm_shader_learn.m        # the rewrite that makes a colour output integer, and the rows it keeps
