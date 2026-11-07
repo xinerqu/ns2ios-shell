@@ -24,6 +24,8 @@ int front_ios_boot_ok(void);
 const char *front_ios_boot_message(void);   // main.m: why a build that keeps the game files off the IPA found none usable (NULL = the generic hint)
 const char *front_ios_device_check(void);   // main.m: why this device cannot run the games (its GPU has no BC textures; NULL = supported); makes the first Metal device
 bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
+int dm_shell_library_needed(void);   // main.m: zero or several games in the bundle -- the library picks one instead of starting at launch
+void dm_show_library(void *view_controller, void (*picked)(const char *tid), void (*cancelled)(void));   // Library.swift
 void dm_cheats_after_launcher(void);   // hle_cheats.c: the load dm_cheats_init skipped at launch, run now that the screen is done
 
 static CAMetalLayer *g_layer;
@@ -98,6 +100,15 @@ static void tv_attach(void);
 static DmRootVC *g_root;
 static CGFloat g_picture_aspect = DM_PICTURE_16_9;   // the presented picture's width / height (front_picture_shape); main thread
 static void launcher_done(void) { [g_root startGame]; }
+// The library picked a game: dm_shell_start_game() has already set its environment and begun the host's early loading (Library.swift),
+// so only that game's settings screen is left before the game view.
+static void library_picked(const char *tid) {
+    (void)tid;
+    if (!g_root) return;
+    void (^go)(void) = ^{ if (!dm_show_launcher((__bridge void *)g_root, launcher_done)) [g_root startGame]; };
+    if (g_root.presentedViewController) [g_root dismissViewControllerAnimated:YES completion:go]; else go();
+}
+static void library_cancelled(void) { }   // stays on the library: there is nothing to run yet
 @implementation DmRootVC
 - (void)loadView { self.view = [DmRootView new]; }
 - (void)showHint:(NSString *)text {   // why the game cannot start, centered over the black screen
@@ -217,6 +228,11 @@ static void launcher_done(void) { [g_root startGame]; }
     }
     if (self.launched || !front_ios_boot_ok()) return;
     self.launched = YES; g_root = self;
+    if (dm_shell_library_needed()) {   // zero or several games: the library first, and the host starts only once one is picked
+        dm_show_library((__bridge void *)self, library_picked, library_cancelled);
+        front_ios_notify_ask();
+        return;
+    }
     if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
     front_ios_notify_ask();
 }

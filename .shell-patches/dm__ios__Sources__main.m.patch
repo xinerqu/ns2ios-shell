@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,69 @@
+@@ -102,6 +114,109 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -54,23 +54,34 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +#ifdef DM_SHELL
 +// The game this app starts: the first Frameworks/DmGame<title ID>.framework, nil for the one-game package. tidp takes its title ID.
 +// The library that lets the player choose among several (and the card's icon and name) reads the same name.
-+static NSString *shell_game_framework(NSString **tidp) {
++static NSString *shell_game_framework(NSString *want_tid, NSString **tidp) {
 +    NSFileManager *fm = NSFileManager.defaultManager;
 +    NSString *fwdir = NSBundle.mainBundle.privateFrameworksPath;
 +    for (NSString *name in [fm contentsOfDirectoryAtPath:fwdir error:nil] ?: @[]) {
 +        if (![name hasPrefix:@"DmGame"] || ![name hasSuffix:@".framework"] || name.length <= 6 + 10 + 1) continue;
 +        NSString *base = [name stringByDeletingPathExtension];                                  // DmGame<16 hex digits>
++        NSString *tid = [base substringFromIndex:6];
++        if (want_tid && ![tid isEqualToString:want_tid]) continue;
 +        NSString *fw = [fwdir stringByAppendingPathComponent:name];
 +        if (![fm fileExistsAtPath:[fw stringByAppendingPathComponent:base]]) continue;
-+        if (tidp) *tidp = [base substringFromIndex:6];
++        if (tidp) *tidp = tid;
 +        return fw;
 +    }
 +    return nil;
 +}
-+static NSString *shell_game_dm(NSString *doc) {
++// How many games this app holds. Exactly one is the old flow: entered at launch, no library (a package with a single game looks and
++// behaves exactly as before). None, or several, starts on the library instead (Library.swift) and preloads only when one is picked.
++int dm_shell_game_count(void) {
++    int n = 0; NSFileManager *fm = NSFileManager.defaultManager;
++    for (NSString *name in [fm contentsOfDirectoryAtPath:NSBundle.mainBundle.privateFrameworksPath error:nil] ?: @[])
++        if ([name hasPrefix:@"DmGame"] && [name hasSuffix:@".framework"] && name.length > 6 + 10 + 1) n++;
++    return n;
++}
++int dm_shell_library_needed(void) { return dm_shell_game_count() != 1; }
++static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err, size_t errn) {
 +    NSFileManager *fm = NSFileManager.defaultManager;
-+    NSString *tid = nil, *fw = shell_game_framework(&tid);
-+    if (!fw) return nil;
++    NSString *tid = nil, *fw = shell_game_framework(want_tid, &tid);
++    if (!fw) { snprintf(err, errn, "No such game in this app."); return nil; }
 +    {
 +        NSString *base = [[fw lastPathComponent] stringByDeletingPathExtension];
 +        NSString *exe = [fw stringByAppendingPathComponent:base];
@@ -88,6 +99,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +                     "%s has no game data yet. Open the Files app, this app's folder, ns2ios/games/%s, and copy the romfs.img there.",
 +                     base.UTF8String, tid.UTF8String);
 +            fprintf(stderr, "[RED] boot: %s has no game data (Documents/ns2ios/games/%s/romfs.img)\n", base.UTF8String, tid.UTF8String);
++            snprintf(err, errn, "No game data: put romfs.img in the Files app, this app's ns2ios/games/%s folder.", tid.UTF8String);
 +            return nil;
 +        }
 +        setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
@@ -108,11 +120,39 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        return fwdm;
 +    }
 +}
++// The one-game package: the game in the bundle, entered at launch (no library).
++static NSString *shell_game_dm(NSString *doc) { char e[512] = {0}; return shell_game_dm_for(doc, nil, e, sizeof e); }
++// Called from the library (Library.swift) when the player picks a game: what boot_env does for the one-game package (the game's
++// environment and module names), then the host's early loading. One game per process -- dm_profile, the framework image and the module
++// names are read once -- so a second call is refused and returning to the library is a relaunch of the app.
++const char *dm_shell_start_game(const char *tid) {
++    static char err[512]; static int started;
++    if (started) return "A game is already running. Close the app and open it again.";
++    if (!tid || !*tid) return "No game chosen.";
++    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
++    NSString *dm = shell_game_dm_for(doc, @(tid), err, sizeof err);
++    if (!dm) return err[0] ? err : "This game cannot start.";
++    chdir(doc.fileSystemRepresentation);
++    static char *argv[16]; int argc = 0;
++    argv[argc++] = strdup("dmhost"); argv[argc++] = strdup(dm.fileSystemRepresentation);
++    { const char *mods[12]; int nm = dm_shell_modules(mods, 12);
++      for (int k = 0; k < nm && argc < 16; k++) { argv[argc++] = strdup(mods[k]); fprintf(stderr, "boot: module '%s' (from the game framework)\n", mods[k]); } }
++    dm_host_preload_start(argc, argv);   // module tables, relocation and take-over in the background while the settings page comes up
++    started = 1;
++    return NULL;
++}
++#endif
++#ifndef DM_SHELL
++// A one-game package keeps its game in the executable, so Library.swift (compiled into every build) links against these and finds no
++// library: exactly one game, entered at launch, as before.
++int dm_shell_game_count(void) { return 1; }
++int dm_shell_library_needed(void) { return 0; }
++const char *dm_shell_start_game(const char *tid) { (void)tid; return "This package runs the game it was built with."; }
 +#endif
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
  // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -129,9 +204,10 @@
+@@ -129,9 +244,10 @@
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
@@ -125,7 +165,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -153,7 +229,16 @@
+@@ -153,7 +269,16 @@
      NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
      for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
  #endif
@@ -143,7 +183,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
          for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
              NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
-@@ -174,10 +259,27 @@
+@@ -174,10 +299,43 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -154,6 +194,22 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +      fprintf(stderr, "boot: memory limit %llu MB (%s)\n", av >> 20,
 +              av < (5ull << 30) ? "no increased-memory-limit entitlement: the bigger games will be killed for memory"
 +                                : "entitlement in effect"); }
++#ifdef DM_SHELL
++    // Zero or several games: the library is the first screen and dm_shell_start_game() (Library.swift's pick) sets the game up. Only the
++    // package-wide switches belong here, before any game is known.
++    if (dm_shell_library_needed()) {
++        for (NSString *d in @[@"save", @"temp", @"cheats", @"ns2ios"])
++            [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
++        setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
++        setenv("DM_CHEATS_DEFER", "1", 1);   // the cheat load waits for Play, as in the one-game package
++        setenv("DM_CHEATS_PANEL", "1", 1);
++        setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);
++        setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);
++        chdir(doc.fileSystemRepresentation);
++        fprintf(stderr, "boot: library mode, %d game(s) in this app (the host starts when one is picked)\n", dm_shell_game_count());
++        return 1;
++    }
++#endif
      NSString *dm = program_env();
      if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
      setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
@@ -171,7 +227,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
-@@ -185,6 +287,12 @@
+@@ -185,6 +343,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -184,7 +240,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -197,6 +305,11 @@
+@@ -197,6 +361,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -196,7 +252,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -232,11 +345,19 @@
+@@ -232,11 +401,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
