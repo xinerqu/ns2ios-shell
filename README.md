@@ -36,22 +36,27 @@ files, and `prod.keys`.
 | **6** | Install `ns2ios.ipa` (SideStore, [Sideloadly](#notes-and-caveats) — which drops an entitlement, see the notes — or LiveContainer). The first launch compiles the shaders once, with a progress page. |
 | **7** | Copy the whole `ns2ios` folder into this app's folder in the Files app (the app creates it on that first launch). |
 
-**What an install looks like**: the app is called `ns2ios` and its package holds code only — one framework per game, tens of
-MB. The games themselves, RomFS and shader libraries and DLC, live in `ns2ios\games\<title ID>\` in the Files app. That
-is why a new shell costs a few tens of MB to install and touches none of the game data.
+**What an install looks like**: the app is called `ns2ios`, and on its first launch it creates a folder of its own in
+the Files app, named after the app. The package holds code only — one framework per game, tens of MB. The games
+themselves (RomFS, shader libraries, DLC) live in Files → `ns2ios` → `games` → `<title ID>`. That is why a new shell
+costs a few tens of MB to install and touches neither the game data nor the saves.
 
 ### Adding the next game
 
-Library mode (on by default) is one app holding several games, so adding one is **two** steps, and both matter:
+Library mode (the default) is one app holding several games. Adding one is two steps, and both matter — skip either
+and the game is not there on the phone:
 
-1. Point the packer at the new game and press **Start packing** again. `ns2ios\games\` gains a `<title ID>` folder, and
-   `ns2ios.ipa` grows a little — it now carries both games' code.
-2. On the phone: copy the new `games\<title ID>\` into `ns2ios\games\` (**games only — do not overwrite `save\`**,
-   which holds saves and cheats), then **install the new `ns2ios.ipa` over the old one**. Without that install the app has
-   no code for the new game and the library will not list it.
+1. **Pack it**: point the packer at the new game and press *Start packing* again. The `ns2ios` folder in the output
+   gains a game, and `ns2ios.ipa` grows a little, because it now carries both games' code.
+2. **Put it on the phone**: copy the `ns2ios` folder from the output **over** this app's folder in Files (the `games`
+   part is what changes; leave `save` alone, that is where saves and cheats live), then **install the new
+   `ns2ios.ipa` over the old one**.
 
-Only want the new shell, no new game? The packer's **Repack package only** button skips the game work and writes a fresh
-`ns2ios.ipa` in seconds.
+Neither half works alone: data without the new package is a game the library cannot list, because the app has no code
+for it; the package without the data lists a game that then asks for files it cannot find.
+
+Only want the new shell, no new game? The packer's **Repack package only** button writes a fresh `ns2ios.ipa` in
+seconds.
 
 **Where does it put things?** Everything downloaded lives beside the exe in `ns2ios-packer-data\`, one folder per release.
 Nothing is installed system-wide and the registry is untouched: delete that folder and the tool is gone.
