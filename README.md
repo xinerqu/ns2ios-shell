@@ -47,12 +47,8 @@ and the game is not there on the phone:
 
 1. **Pack it**: point the packer at the new game and press *Start packing* again. The `ns2ios` folder in the output
    gains a game, and `ns2ios.ipa` grows a little, because it now carries both games' code.
-2. **Put it on the phone**: copy the `ns2ios` folder from the output **over** this app's folder in Files (the `games`
-   part is what changes; leave `save` alone, that is where saves and cheats live), then **install the new
-   `ns2ios.ipa` over the old one**.
-
-Neither half works alone: data without the new package is a game the library cannot list, because the app has no code
-for it; the package without the data lists a game that then asks for files it cannot find.
+2. **Put it on the phone**: copy the `ns2ios` folder from the output **over** the same-named folder in the Files
+   app, then **install the new `ns2ios.ipa` over the old one**.
 
 Only want the new shell, no new game? The packer's **Repack package only** button writes a fresh `ns2ios.ipa` in
 seconds.
