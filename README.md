@@ -37,9 +37,8 @@ files, and `prod.keys`.
 | **7** | Copy the whole `ns2ios` folder into this app's folder in the Files app (the app creates it on that first launch). |
 
 **What an install looks like**: the app is called `ns2ios`, and on its first launch it creates a folder of its own in
-the Files app, named after the app. The package holds code only — one framework per game, tens of MB. The games
-themselves (RomFS, shader libraries, DLC) live in Files → `ns2ios` → `games` → `<title ID>`. That is why a new shell
-costs a few tens of MB to install and touches neither the game data nor the saves.
+the Files app, named after the app. The games themselves (RomFS, shader libraries, DLC) live in Files → `ns2ios` →
+`games` → `<title ID>`, and **reinstalling the shell touches none of it — the saves stay put too**.
 
 ### Adding the next game
 
