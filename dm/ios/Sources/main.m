@@ -120,16 +120,29 @@ const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_mes
 // Returns the framework's dm/ (the host's module folder, argv[1]) with the environment set for that game; nil when this app is the
 // one-game kind (Frameworks/Guest.framework, the packer writes the whole game into the bundle) -- then program_env below runs as before.
 #ifdef DM_SHELL
-static NSString *shell_game_dm(NSString *doc) {
+// The game this app starts: the first Frameworks/DmGame<title ID>.framework, nil for the one-game package. tidp takes its title ID.
+// The library that lets the player choose among several (and the card's icon and name) reads the same name.
+static NSString *shell_game_framework(NSString **tidp) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *fwdir = NSBundle.mainBundle.privateFrameworksPath;
     for (NSString *name in [fm contentsOfDirectoryAtPath:fwdir error:nil] ?: @[]) {
         if (![name hasPrefix:@"DmGame"] || ![name hasSuffix:@".framework"] || name.length <= 6 + 10 + 1) continue;
         NSString *base = [name stringByDeletingPathExtension];                                  // DmGame<16 hex digits>
-        NSString *tid = [base substringFromIndex:6];
-        NSString *fw = [fwdir stringByAppendingPathComponent:name], *fwdm = [fw stringByAppendingPathComponent:@"dm"];
+        NSString *fw = [fwdir stringByAppendingPathComponent:name];
+        if (![fm fileExistsAtPath:[fw stringByAppendingPathComponent:base]]) continue;
+        if (tidp) *tidp = [base substringFromIndex:6];
+        return fw;
+    }
+    return nil;
+}
+static NSString *shell_game_dm(NSString *doc) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *tid = nil, *fw = shell_game_framework(&tid);
+    if (!fw) return nil;
+    {
+        NSString *base = [[fw lastPathComponent] stringByDeletingPathExtension];
         NSString *exe = [fw stringByAppendingPathComponent:base];
-        if (![fm fileExistsAtPath:exe]) continue;
+        NSString *fwdm = [fw stringByAppendingPathComponent:@"dm"];
         NSString *home = [doc stringByAppendingPathComponent:@"ns2ios"];
         NSString *game = [[home stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:tid];
         NSString *saves = [[home stringByAppendingPathComponent:@"saves"] stringByAppendingPathComponent:tid];
@@ -160,7 +173,6 @@ static NSString *shell_game_dm(NSString *doc) {
         fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
         return fwdm;
     }
-    return nil;
 }
 #endif
 // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
@@ -215,7 +227,16 @@ static int boot_env(void) {
     NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
     for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
 #endif
-    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]]) {
+    // Several games in one app: the game's own dm/env.txt, inside its framework, stands where the bundle's dm/env.txt does -- the packer
+    // writes the profile's values (memory layout, upscaler keys, render_cond, pad layout) there, so without this the game would start on
+    // the shell's placeholder profile and stop on its first allocation.
+    NSString *dm_env = nil;
+#ifdef DM_SHELL
+    { NSString *fw = shell_game_framework(NULL);
+      if (fw) dm_env = [[fw stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]; }
+#endif
+    if (!dm_env) dm_env = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"];
+    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) {
         NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
         for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
             NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];

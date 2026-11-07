@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,55 @@
+@@ -102,6 +114,67 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -52,16 +52,29 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +// Returns the framework's dm/ (the host's module folder, argv[1]) with the environment set for that game; nil when this app is the
 +// one-game kind (Frameworks/Guest.framework, the packer writes the whole game into the bundle) -- then program_env below runs as before.
 +#ifdef DM_SHELL
-+static NSString *shell_game_dm(NSString *doc) {
++// The game this app starts: the first Frameworks/DmGame<title ID>.framework, nil for the one-game package. tidp takes its title ID.
++// The library that lets the player choose among several (and the card's icon and name) reads the same name.
++static NSString *shell_game_framework(NSString **tidp) {
 +    NSFileManager *fm = NSFileManager.defaultManager;
 +    NSString *fwdir = NSBundle.mainBundle.privateFrameworksPath;
 +    for (NSString *name in [fm contentsOfDirectoryAtPath:fwdir error:nil] ?: @[]) {
 +        if (![name hasPrefix:@"DmGame"] || ![name hasSuffix:@".framework"] || name.length <= 6 + 10 + 1) continue;
 +        NSString *base = [name stringByDeletingPathExtension];                                  // DmGame<16 hex digits>
-+        NSString *tid = [base substringFromIndex:6];
-+        NSString *fw = [fwdir stringByAppendingPathComponent:name], *fwdm = [fw stringByAppendingPathComponent:@"dm"];
++        NSString *fw = [fwdir stringByAppendingPathComponent:name];
++        if (![fm fileExistsAtPath:[fw stringByAppendingPathComponent:base]]) continue;
++        if (tidp) *tidp = [base substringFromIndex:6];
++        return fw;
++    }
++    return nil;
++}
++static NSString *shell_game_dm(NSString *doc) {
++    NSFileManager *fm = NSFileManager.defaultManager;
++    NSString *tid = nil, *fw = shell_game_framework(&tid);
++    if (!fw) return nil;
++    {
++        NSString *base = [[fw lastPathComponent] stringByDeletingPathExtension];
 +        NSString *exe = [fw stringByAppendingPathComponent:base];
-+        if (![fm fileExistsAtPath:exe]) continue;
++        NSString *fwdm = [fw stringByAppendingPathComponent:@"dm"];
 +        NSString *home = [doc stringByAppendingPathComponent:@"ns2ios"];
 +        NSString *game = [[home stringByAppendingPathComponent:@"games"] stringByAppendingPathComponent:tid];
 +        NSString *saves = [[home stringByAppendingPathComponent:@"saves"] stringByAppendingPathComponent:tid];
@@ -92,13 +105,12 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        fprintf(stderr, "boot: game files %s\n", romfs.fileSystemRepresentation);
 +        return fwdm;
 +    }
-+    return nil;
 +}
 +#endif
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
  // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -129,9 +190,10 @@
+@@ -129,9 +202,10 @@
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
@@ -111,7 +123,25 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -174,10 +236,27 @@
+@@ -153,7 +227,16 @@
+     NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
+     for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
+ #endif
+-    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]]) {
++    // Several games in one app: the game's own dm/env.txt, inside its framework, stands where the bundle's dm/env.txt does -- the packer
++    // writes the profile's values (memory layout, upscaler keys, render_cond, pad layout) there, so without this the game would start on
++    // the shell's placeholder profile and stop on its first allocation.
++    NSString *dm_env = nil;
++#ifdef DM_SHELL
++    { NSString *fw = shell_game_framework(NULL);
++      if (fw) dm_env = [[fw stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]; }
++#endif
++    if (!dm_env) dm_env = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"];
++    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) {
+         NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
+         for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+             NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
+@@ -174,10 +257,27 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -139,7 +169,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
-@@ -185,6 +264,12 @@
+@@ -185,6 +285,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -152,7 +182,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -197,6 +282,11 @@
+@@ -197,6 +303,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -164,7 +194,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -232,11 +322,19 @@
+@@ -232,11 +343,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
