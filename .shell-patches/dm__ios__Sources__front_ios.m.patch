@@ -28,7 +28,7 @@ diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
  @implementation DmRootVC
  - (void)loadView { self.view = [DmRootView new]; }
  - (void)showHint:(NSString *)text {   // why the game cannot start, centered over the black screen
-@@ -177,6 +190,9 @@
+@@ -167,6 +180,9 @@
      [self.view setNeedsLayout]; [self.view layoutIfNeeded];
      UIApplication.sharedApplication.idleTimerDisabled = YES;
      tv_attach();   // a TV connected while the launcher showed
@@ -38,7 +38,7 @@ diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
      front_ios_boot();
  }
  - (void)viewDidLayoutSubviews {
-@@ -223,6 +239,11 @@
+@@ -213,6 +229,11 @@
      }
      if (self.launched || !front_ios_boot_ok()) return;
      self.launched = YES; g_root = self;

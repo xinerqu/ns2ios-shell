@@ -1,7 +1,7 @@
 diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
 --- a/dm/ios/Sources/DmGamepad.m
 +++ b/dm/ios/Sources/DmGamepad.m
-@@ -217,8 +217,14 @@
+@@ -216,8 +216,14 @@
          __weak DmGamepad *weakSelf = self;
          [_menu addAction:[UIAction actionWithHandler:^(UIAction *a) { (void)a; [weakSelf reset]; }] forControlEvents:UIControlEventMenuActionTriggered];   // the menu opens: release every key and touch first
          [self addSubview:_menu];

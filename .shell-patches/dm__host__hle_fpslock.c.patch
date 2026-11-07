@@ -1,7 +1,7 @@
 diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
 --- a/dm/host/hle_fpslock.c
 +++ b/dm/host/hle_fpslock.c
-@@ -184,6 +184,15 @@
+@@ -181,6 +181,15 @@
      }
  }
  
@@ -10,23 +10,23 @@ diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
 +// (SHIN MEGAMI TENSEI V: Vengeance: Project.FrameRateLimit) would otherwise be left with the frame limit it sets itself.
 +static const char *ue_fps_cvar(void) {
 +    static const char *v; static int once;
-+    if (!once) { once = 1; const char *e = getenv("DM_UE_FPS_CVAR"); v = e && *e ? e : ue_fps_cvar(); }
++    if (!once) { once = 1; const char *e = getenv("DM_UE_FPS_CVAR"); v = e && *e ? e : DM_GAME_UE_FPS_CVAR; }
 +    return v;
 +}
 +
  // The row of a target frame rate the game steps by, at the place the rewriter found (dm/tools/fps_target.py; main's fixups FPS_TARGET_PTR, FPS_TARGET_FIELD): an int32 frame rate in the
  // object a global points to, which the game's readers divide 60.0 by to step it, and which the game sets to 30 or 60 itself. Fire Emblem Fortune's Weave's gxc graphics object holds it
  // (+0x1dc; its present asks for interval 60 / target), so at 60 the game asks for interval 1 and steps by 1.0 a frame. 0 rows: not found in this main
-@@ -199,7 +208,7 @@
-     static char what[4][48]; int n = 0, have = 0;
-     if (m->ue_fixed_ptr && m->ue_fixed_flag) out[n++] = (lock_t){ "", "Unreal fixed frame rate (GEngine->FixedFrameRate)", m->ue_fixed_ptr, m->ue_fixed_field, FPS_F32, 1, 0, m->ue_fixed_flag };
-     for (int k = 0; k < m->n_ue_cvar && n < 4; k++) {
+@@ -195,7 +204,7 @@
+ static int ue_rows(const module_t *m, lock_t *out, int *missing) {
+     static char what[3][48]; int n = 0, have = 0;
+     for (int k = 0; k < m->n_ue_cvar && n < 3; k++) {
 -        const char *name = m->ue_cvar[k].name; int fps = !strcmp(name, DM_GAME_UE_FPS_CVAR);
 +        const char *name = m->ue_cvar[k].name; int fps = !strcmp(name, ue_fps_cvar());
          if (!fps && strcmp(name, "rhi.SyncInterval") && strcmp(name, "nvn.SyncInterval")) continue;
          have |= fps; snprintf(what[n], sizeof what[n], "Unreal %s", name);
          out[n] = (lock_t){ "", what[n], m->ue_cvar[k].off + 0x10, 0, fps ? FPS_F32 : VSYNCS_I32, 2, 0 }; n++;
-@@ -238,7 +247,7 @@
+@@ -234,7 +243,7 @@
          if (t != 0 && t != 30 && t != 60 && t != 120) { LOG("[RED] DM_FPS_TARGET=%s: must be 0, 30, 60 or 120; leaving the game's frame limit", e); t = 0; }
          if (t == 120 && DM_GAME_FPS_MAX < 120) { LOG("[RED] DM_FPS_TARGET=120: this game's speed at 120 fps is not checked (profile fps_max); running at 60"); t = 60; }
          high = t == 120;

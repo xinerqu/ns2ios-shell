@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**149 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**146 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -52,7 +52,6 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
 | Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 |  |
-| DRAGON BALL: Sparking! ZERO | `010035F022078000` | 2.0.76 | 60 fps |
 | DRAGON QUEST BUILDERS 2 | `010042000A986000` | 1.7.3d |  |
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
 | DRAGON QUEST III HD-2D Remake | `01003E601E324000` | 1.1.2 | 60 fps |
@@ -89,7 +88,6 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
-| Minecraft Dungeons II | `0100A7C01B792000` | 1.1.3.0 |  |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
 | Monster Train 2 | `010051701FB46000` | 1.1.1 |  |
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
@@ -103,7 +101,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
 | Persona 4 Golden | `010062B01525C000` | 1.0.2 |  |
 | Persona 5 Royal | `01005CA01580E000` | 1.0.2 |  |
-| Pikmin 4 | `0100B7C00933A000` | 1.1.1 | 60 fps |
+| Pikmin 4 | `0100B7C00933A000` | 1.1.1 |  |
 | Pokemon Pokopia | `0400A3A01EE4C000` | v655360 |  |
 | Pokémon Brilliant Diamond | `0100000011D90000` | 1.3.0 | 60 fps |
 | Pokémon Legends: Arceus | `01001F5010DFA000` | 1.1.1 |  |
@@ -122,7 +120,6 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
-| Sonic Superstars | `01008F701C074000` | 1.1.8 |  |
 | Splatoon Raiders | `0400380020056000` | v65536 |  |
 | Star Fox | `0400E88025B1A000` | v131072 |  |
 | Stardew Valley | `0100E65002BB8000` | 1.6.15.13 |  |
