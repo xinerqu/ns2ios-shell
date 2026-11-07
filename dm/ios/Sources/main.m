@@ -202,11 +202,17 @@ const char *dm_shell_start_game(const char *tid) {
     NSString *dm = shell_game_dm_for(doc, @(tid), err, sizeof err);
     if (!dm) return err[0] ? err : "This game cannot start.";
     chdir(doc.fileSystemRepresentation);
-    static char *argv[16]; int argc = 0;
-    argv[argc++] = strdup("dmhost"); argv[argc++] = strdup(dm.fileSystemRepresentation);
+    // The process-wide argv, the one boot_thread hands dm_main: the host refuses a preload whose arguments differ from main's
+    // (main.c), so both must be the same array -- not a local one.
+    g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
     { const char *mods[12]; int nm = dm_shell_modules(mods, 12);
-      for (int k = 0; k < nm && argc < 16; k++) { argv[argc++] = strdup(mods[k]); fprintf(stderr, "boot: module '%s' (from the game framework)\n", mods[k]); } }
-    dm_host_preload_start(argc, argv);   // module tables, relocation and take-over in the background while the settings page comes up
+      for (int k = 0; k < nm && g_argc < 16; k++) { g_argv[g_argc++] = strdup(mods[k]); fprintf(stderr, "boot: module '%s' (from the game framework)\n", mods[k]); } }
+    // This game's own dm/env.txt: boot_env read only Documents/env.txt, because no game was known then.
+    { NSMutableArray *keys = [NSMutableArray array]; env_file_read([dm stringByAppendingPathComponent:@"env.txt"], keys);
+      NSString *prev = getenv("DM_ENV_FILE_KEYS") ? @(getenv("DM_ENV_FILE_KEYS")) : @"";
+      NSString *all = [@[prev, [keys componentsJoinedByString:@" "]] componentsJoinedByString:@" "];
+      setenv("DM_ENV_FILE_KEYS", [all stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].UTF8String, 1); }
+    dm_host_preload_start(g_argc, g_argv);   // module tables, relocation and take-over in the background while the settings page comes up
     started = 1;
     return NULL;
 }
@@ -252,8 +258,7 @@ static void env_file_read(NSString *path, NSMutableArray *from_file) {
         if (dm_player_diagnostic_key(k.UTF8String)) continue;
 #endif
         if (!getenv(k.UTF8String)) { setenv(k.UTF8String, v.UTF8String, 0); [from_file addObject:k];
-                                     fprintf(stderr, "boot: env %s=%s (%s)
-", k.UTF8String, v.UTF8String, path.lastPathComponent.UTF8String); }
+                                     fprintf(stderr, "boot: env %s=%s (%s)\n", k.UTF8String, v.UTF8String, path.lastPathComponent.UTF8String); }
     }
 }
 
