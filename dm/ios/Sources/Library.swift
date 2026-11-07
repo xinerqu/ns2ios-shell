@@ -673,12 +673,10 @@ private struct CheatsPage: View {
             }
             .ignoresSafeArea()
         }
-        .navigationTitle(LibText.t("金手指", "Cheats"))
         .navigationBarTitleDisplayMode(.inline)
-        // 导航栏那层半透明底在照片上会露成一块「很高的框体」（坤哥 2026-11-08 第二次点名）；
-        // 标题默认是浅灰，这里强制深色方案让它变白。
+        // 和设置页同一处理：**不显示标题**（「金手指」那三个字删掉，坤哥 2026-11-08 两次点名），
+        // 导航栏底色也去掉，只留返回箭头——否则照片上会露出一块「很高的框体」。
         .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 
