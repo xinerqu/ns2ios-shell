@@ -429,10 +429,14 @@ jobs:
           for cmd, want in ((['xcrun','-sdk','macosx','metal','--version'], 'none'),
                             (['xcrun','-sdk','macosx','metallib','--version'], 'none'),
                             (['xcrun','-sdk','iphoneos','--show-sdk-version'], '26.0'),
-                            (['xcrun','-sdk','iphoneos','--show-sdk-build-version'], '26A000')):
+                            (['xcrun','-sdk','iphoneos','--show-sdk-build-version'], '26A000'),
+                            # dmsh_build names the compilers with these two at import time (check=True), so a shim that
+                            # does not answer them stops every pack before the first shader: a base move found this.
+                            (['xcrun','-sdk','macosx','-f','metal'], 'xcrun'),
+                            (['xcrun','-sdk','macosx','--show-sdk-path'], '/nometal_run/iPhoneOS.sdk')):
               got = m.run(cmd, capture_output=True, text=True).stdout.strip()
               assert got == want, (cmd, got, want)
-          print('nometal_run: 4/4 probes answered')
+          print('nometal_run: 6/6 probes answered')
           PY
 
       - name: Build the shell

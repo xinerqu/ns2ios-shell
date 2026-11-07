@@ -92,6 +92,14 @@ def run(args, *a, **k):
         # dmsh_mtlcache.py fingerprints the toolchain with four probes; without a compiler they answer fixed values, so this
         # branch of the chain version is the same on every machine and its cache never mixes with the compiled one.
         if c[0] == 'xcrun' and 'metallib' in c and '--version' in c: return _done(args, enc('none\n'))
+        # `xcrun -sdk macosx -f metal` / `-f metallib` and `--show-sdk-path`: upstream's dmsh_build runs them at import
+        # time with check=True to name the compilers. There is no compiler here, but an answer is required or the whole
+        # chain stops before it starts. Answer `xcrun` itself so MAC_RUN still begins with xcrun and the branches below
+        # recognise it; the sdk path only ever travels as an -isysroot argument.
+        # 上游 dmsh_build 在 import 时用 check=True 取编译器路径：这里没有编译器，但必须答出一个值，否则整条链在起点就断。
+        # 答成 xcrun 本身，MAC_RUN 的首个参数仍是 xcrun，下面的拦截才认得出来。
+        if c[0] == 'xcrun' and '-f' in c: return _done(args, enc('xcrun\n'))
+        if c[0] == 'xcrun' and '--show-sdk-path' in c: return _done(args, enc('/nometal_run/iPhoneOS.sdk\n'))
         if c[0] == 'xcrun' and '--show-sdk-version' in c: return _done(args, enc('26.0\n'))
         if c[0] == 'xcrun' and '--show-sdk-build-version' in c: return _done(args, enc('26A000\n'))
         # 预编译头（上游 dmsh_pch.py，2026-11-04 起）：这里没有编译器，做不出也不该假造一份 pch —— 这一条**故意失败**，
