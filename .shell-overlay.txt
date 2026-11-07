@@ -32,6 +32,7 @@
 + dm/ios/DmIOS.entitlements               # increased-memory-limit: the shell is signed ad hoc with it so install tools see it
 + dm/tools/supported_list.py              # the supported-games page and release asset, from dm/games/*/game.tsv
 + dm/tools/packer_sync.py                 # keeps this fork's copies of dm/tools, dm/gfx/tools and dm/games level with upstream
++ scripts/check_shim_surface.py           # does the no-Metal shim still answer the commands upstream issues (a base move broke it three times)
 + dm/tools/nx_extract/AlignedReadStorage.cs    # 16-byte aligned reads when an update is layered over its base
 + dm/ios/tools/make_shell_patch.py        # regenerates .shell-patches/*.patch after editing a "~" file
 + dm/games/0000000000000000/game.tsv      # neutral placeholder profile the shell is compiled against

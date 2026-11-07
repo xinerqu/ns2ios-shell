@@ -93,10 +93,9 @@ def run(args, *a, **k):
     enc = (lambda s: s) if text else (lambda s: s.encode())
     if isinstance(args, (list, tuple)) and args:
         c = [str(x) for x in args]
-        if c[0] == 'xcrun' and 'metal' in c and '--version' in c: return _done(args, enc('none\n'))
+        if c[0] == 'xcrun' and '--version' in c: return _done(args, enc('none\n'))
         # dmsh_mtlcache.py fingerprints the toolchain with four probes; without a compiler they answer fixed values, so this
         # branch of the chain version is the same on every machine and its cache never mixes with the compiled one.
-        if c[0] == 'xcrun' and 'metallib' in c and '--version' in c: return _done(args, enc('none\n'))
         # `xcrun -sdk macosx -f metal` / `-f metallib` and `--show-sdk-path`: upstream's dmsh_build runs them at import
         # time with check=True to name the compilers. There is no compiler here, but an answer is required or the whole
         # chain stops before it starts. Answer `xcrun` itself so MAC_RUN still begins with xcrun and the branches below
@@ -111,23 +110,35 @@ def run(args, *a, **k):
         # dmsh_pch 会打一行 note 后照常不带 pch 编。这条路本来就一次编译都不做（库文件里放的是源码），所以没有代价。
         # A precompiled header (upstream dmsh_pch.py): there is no compiler here to build one and it must not be faked, so this one
         # fails on purpose -- dmsh_pch prints a note and compiles without it, which costs nothing on this route (nothing is compiled).
-        if c[0] == 'xcrun' and 'metal' in c and 'metal-header' in c:
+        if c[0] == 'xcrun' and 'metal-header' in c:
             return subprocess.CompletedProcess(args, 1, stdout=enc(''), stderr=enc('nometal_run：这里没有 Metal 编译器，不预编译头（编译照常进行）\n'))
         # 源码走标准输入（同一批上新的调用形式：`metal -c -x metal - -o air`，见 dmsh_pch._run）：参数里看不出源码是哪个，
         # 要从 stdin 取。写进中间件时仍把换行归一成 \n，理由同下面那条。
         # The source on standard input (`metal -c -x metal - -o air`, dmsh_pch._run): the arguments no longer name it, so the bytes
         # come from stdin. Still normalized to LF for the reason given below.
-        if c[0] == 'xcrun' and 'metal' in c and '-x' in c and '-o' in c and c[c.index('-x') + 1:c.index('-x') + 2] == ['metal'] and '-' in c:
+        if c[0] == 'xcrun' and '-x' in c and '-o' in c and c[c.index('-x') + 1:c.index('-x') + 2] == ['metal'] and '-' in c:
             o = c.index('-o'); f = k.get('stdin'); b = f.read() if f is not None else b''
             with open(c[o + 1], 'wb') as g: g.write(b.replace(b'\r\n', b'\n'))
             return _done(args, enc(''))
-        if c[0] == 'xcrun' and 'metal' in c and '-c' in c and '-o' in c:   # 源码 = metal 之后第一个不是选项、也不是 -o 的值的参数（iOS 那条命令在 -c 后面还带一个版本选项） | source = the first argument after metal that is neither an option nor the value of -o (the iOS command also carries a version option after -c)
-            o = c.index('-o'); src = [x for i, x in enumerate(c[c.index('metal') + 1:], c.index('metal') + 1) if not x.startswith('-') and i != o + 1]
-            if len(src) != 1: raise RuntimeError('nometal_run：认不出源码参数 %r' % c)
-            with open(src[0], 'rb') as f: b = f.read()
-            with open(c[o + 1], 'wb') as f: f.write(b.replace(b'\r\n', b'\n'))   # Windows 上 spirv-cross 写出的源码是 \r\n 换行：进安装包前归一，同样的输入各系统出的包才相同 | On Windows spirv-cross writes sources with CRLF line endings: normalize before they go into the install package, so the same input gives the same package on every system
+        # 编译与链接：上游现在用 `xcrun -isysroot <sdk> -c -O1 … <源码> -o <air>`、`xcrun <air> -o <库>`，
+        # **argv 里已经没有 `metal` / `metallib` 这两个词了**（编译器路径是 import 时用 `xcrun -f metal` 问出来的），
+        # 所以只能按形状认：有 `-o` 就是一次产出，带 `-c` 的是编译（把源码写成中间件），不带的是链接（拷成库）。
+        # Compile and link: upstream builds `xcrun -isysroot <sdk> -c -O1 … <source> -o <air>` and `xcrun <air> -o <lib>`,
+        # so neither `metal` nor `metallib` appears in argv any more (the compiler path is asked for once with `xcrun -f`).
+        # Recognise them by shape instead: `-o` means an output is produced, `-c` means a compile (the source becomes the
+        # intermediate file), no `-c` means a link (the intermediate file is copied out as the library).
+        if c[0] == 'xcrun' and '-o' in c:
+            o = c.index('-o')
+            skip = {0, o + 1}          # 0 = 程序名本身
+            if '-isysroot' in c: skip.add(c.index('-isysroot') + 1)
+            src = [x for i, x in enumerate(c) if i not in skip and not x.startswith('-')]
+            if len(src) != 1: raise RuntimeError('nometal_run：认不出这次调用的输入文件 %r' % c)
+            if '-c' in c:
+                with open(src[0], 'rb') as f: b = f.read()
+                with open(c[o + 1], 'wb') as g: g.write(b.replace(b'\r\n', b'\n'))   # Windows 上 spirv-cross 写出的源码是 CRLF：进包前归一，同样的输入各系统出的包才相同 | normalize CRLF so the same input gives the same package everywhere
+            else:
+                shutil.copyfile(src[0], c[o + 1])
             return _done(args, enc(''))
-        if c[0] == 'xcrun' and 'metallib' in c and '-o' in c: shutil.copyfile(c[c.index('metallib') + 1], c[c.index('-o') + 1]); return _done(args, enc(''))
         if c[0] == 'xcrun': raise RuntimeError('nometal_run：没认出的 xcrun 命令 %r' % c)
         if c[0] == 'which' and len(c) == 2: return _done(args, enc((shutil.which(c[1]) or '') + '\n'))
         if c[0] == 'cp' and len(c) == 4 and c[1] == '-c': shutil.copyfile(c[2], c[3]); return _done(args, enc(''))
