@@ -1,7 +1,7 @@
 diff --git a/dm/host/loader.c b/dm/host/loader.c
 --- a/dm/host/loader.c
 +++ b/dm/host/loader.c
-@@ -710,7 +710,80 @@
+@@ -713,7 +713,80 @@
  #include "front.h"
  static const struct mach_header_64 *g_game_image = &_mh_execute_header;
  void dm_set_game_image_header(const void *mh) { g_game_image = mh; }

@@ -50,4 +50,4 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 +        _replace(tmp, lib)
          self.store.put_file(p, lib); self.count((target, 'compiled'))
  
-     def compile_split(self, target, msl, a, b, split):
+     def compile_split(self, target, msl, libs, split):

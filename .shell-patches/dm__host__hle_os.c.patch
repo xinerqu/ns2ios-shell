@@ -1,7 +1,7 @@
 diff --git a/dm/host/hle_os.c b/dm/host/hle_os.c
 --- a/dm/host/hle_os.c
 +++ b/dm/host/hle_os.c
-@@ -158,6 +158,10 @@
+@@ -164,6 +164,10 @@
      g_sa_alloc_al = ms ? module_sym(ms, "_ZN2nn3mem17StandardAllocator8AllocateEmm") : NULL;
      if (!g_sa_alloc || !g_sa_alloc_al) die("StandardAllocator::Allocate not found in the SDK");
      g_sa_big_align = DM_GAME_ALLOC_BIG_ALIGN;
