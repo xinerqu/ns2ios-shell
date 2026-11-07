@@ -660,11 +660,24 @@ private struct CheatsPage: View {
     let game: LibraryGame
     var body: some View {
         ScrollView {
-            CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
-                .padding(.horizontal, 24).padding(.vertical, 12)
+            // 内容坐在一块深色板上：这一页背后是照片，字直接压上去读不清（坤哥 2026-11-08 点名，和设置页同一个毛病）
+            VStack(alignment: .leading, spacing: 14) {
+                CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
+            }
+            .padding(18)
+            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.14)))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Backdrop(game: game, animated: false))
+        .background {
+            ZStack {
+                Backdrop(game: game, animated: false)
+                Color.black.opacity(0.35)
+            }
+            .ignoresSafeArea()
+        }
         .navigationTitle(LibText.t("金手指", "Cheats"))
         .navigationBarTitleDisplayMode(.inline)
     }
