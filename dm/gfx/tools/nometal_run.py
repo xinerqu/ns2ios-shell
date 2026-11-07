@@ -44,7 +44,10 @@ SIDE_DIRS = set()   # the library folders that got them (the stamp goes there)
 SIDE_STAMP = '_b_side_one.stamp'   # not a suffix shader_lib.APP_SUFFIXES takes, so it stays out of the package
 
 
-def split_into_one_library(self, target, msl, a, b, split):
+def split_into_one_library(self, target, msl, libs, split):
+    # upstream renamed the two paths to one list (`compile_split(self, target, msl, libs, split)`): libs[0] is the
+    # library this route fills with the source, the rest are the side libraries it deliberately does not write.
+    a = libs[0]; b = libs[1] if len(libs) > 1 else None
     """dmsh_mtlcache.Cache.compile_split on a machine without Apple's compiler: the unit's source (msl) is the library, and
     the side library is not written (it would be the same text twice). Raises nothing, so dmsh_build.ps_libraries counts the
     shader as built and names its entry points in the reflection, which is what the host reads (has_alpha / has_logic)."""
@@ -54,8 +57,9 @@ def split_into_one_library(self, target, msl, a, b, split):
     try:
         with open(a, 'rb') as f:
             if f.read() == src:   # 上一轮已经写过同一份：第二次打包不必重写两万份（这里没有 CAS，判据就是这个比较）
-                try: os.unlink(b)
-                except OSError: pass
+                if b:
+                    try: os.unlink(b)
+                    except OSError: pass
                 return            # already this very text (a second pack of the same game): no reason to write it again
     except OSError: pass
     tmp = f'{a}.tmp-{os.getpid()}-{threading.get_ident()}'
@@ -67,8 +71,9 @@ def split_into_one_library(self, target, msl, a, b, split):
             try: os.unlink(a)
             except OSError: pass
             time.sleep(0.05)
-    try: os.unlink(b)     # an earlier build on another machine may have left a compiled one here (a Mac's, of another chain)
-    except OSError: pass
+    if b:
+        try: os.unlink(b)   # an earlier build on another machine may have left a compiled one here (a Mac's, of another chain)
+        except OSError: pass
 
 
 def patch_side_libraries():
