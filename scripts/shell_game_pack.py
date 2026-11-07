@@ -2,6 +2,9 @@
 """Lay a packed game out for the app that holds several games (the "shell library" layout).
 
     python scripts/shell_game_pack.py <pack work dir> <out dir> [--ipa <out.ipa>] [--shell <shell.zip>] [--icon <png>]
+    python scripts/shell_game_pack.py --ipa-only --library <dir> --shell <shell.zip> --ipa <out.ipa>
+        only rebuild the package: every framework already in the library, the shell as it is now; no game
+        folder and no work folder are touched, so it takes seconds
 
 <out dir> gets:
 
@@ -83,10 +86,31 @@ def chain_of(app):
     return ''
 
 
+def write_ipa(shell, lib, ipa):
+    """The shell package plus every framework in the library. Adding a game = pack it into the same library and run this
+    again; the phone reinstalls the app and its data and saves stay. --ipa-only comes straight here."""
+    with zipfile.ZipFile(shell) as z:
+        apps = sorted({n_.split('/')[1] for n_ in z.namelist() if n_.startswith('Payload/') and n_.split('/')[1].endswith('.app')})
+        if len(apps) != 1: die('the shell holds %d apps, expected 1: %s' % (len(apps), apps))
+        appname = apps[0]
+        have = sorted(p for p in lib.glob('DmGame*.framework') if p.is_dir())
+        if not have: die('the library holds no DmGame*.framework: %s' % lib)
+        with zipfile.ZipFile(ipa, 'w', zipfile.ZIP_DEFLATED) as o:
+            for it in z.infolist():
+                o.writestr(it, z.read(it.filename))
+            for fw in have:
+                for src in sorted(fw.rglob('*')):
+                    if src.is_file():
+                        o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw.name, src.relative_to(fw).as_posix()))
+    say('package %s (%s + %d game(s): %s)' % (ipa, shell.name, len(have), ', '.join(p.name for p in have)))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('work', help='the pack work folder (…/<title ID>_pack), or one of its stage/Payload/<App>.app folders')
-    ap.add_argument('out', help='where the ns2ios folder (the game data) is written')
+    ap.add_argument('work', nargs='?', default='', help='the pack work folder (…/<title ID>_pack), or one of its stage/Payload/<App>.app folders')
+    ap.add_argument('out', nargs='?', default='', help='where the ns2ios folder (the game data) is written')
+    ap.add_argument('--ipa-only', action='store_true',
+                    help='only rebuild the package from --library: no game folder and no work folder are touched')
     ap.add_argument('--library', default='', help='where the frameworks live; one folder for every game (default: the out dir)')
     ap.add_argument('--ipa', help='also write this .ipa: the shell plus every DmGame*.framework in the library')
     ap.add_argument('--shell', help='the shell zip (…/shell-<…>.zip); default: the one beside pack.cmd')
@@ -94,6 +118,17 @@ def main():
     ap.add_argument('--cover', help='a 16:9 banner for the library (cover.jpg/png beside the game files is used otherwise)')
     a = ap.parse_args()
 
+    if a.ipa_only:
+        # 只重打安装包：库里的 framework + 现在的壳。游戏目录、工作目录一律不碰。
+        if not a.ipa: die('--ipa-only needs --ipa <out.ipa>')
+        if not a.library: die('--ipa-only needs --library <dir>')
+        if not a.shell: die('--ipa-only needs --shell <shell.zip>')
+        lib = Path(a.library).resolve()
+        if not lib.is_dir(): die('no library folder: %s' % lib)
+        write_ipa(Path(a.shell).resolve(), lib, Path(a.ipa).resolve())
+        return
+
+    if not a.work or not a.out: die('pass <pack work dir> <out dir>, or --ipa-only')
     work, out = Path(a.work).resolve(), Path(a.out).resolve()
     lib = Path(a.library).resolve() if a.library else out
     lib.mkdir(parents=True, exist_ok=True)
@@ -189,26 +224,11 @@ def main():
             if src.is_file(): link_or_copy(src, data / extra / src.relative_to(app / extra))
     say('data folder %s: %s' % (data, ', '.join(how) or 'nothing'))
 
-    # ---- the test package: the shell with this one framework inside ----
     if a.ipa:
-        shell = Path(a.shell) if a.shell else next(iter(sorted(NXN.parent.glob('ns2ios-*.zip')) or sorted(NXN.parent.glob('shell-*.zip'))), None)
+        shell = Path(a.shell) if a.shell else next(iter(sorted(NXN.parent.glob('ns2ios-*.zip')) or
+                                                             sorted(NXN.parent.glob('shell-*.zip'))), None)
         if not shell or not Path(shell).is_file(): die('no shell zip (pass --shell)')
-        stem = fwdir.name
-        with zipfile.ZipFile(shell) as z:
-            apps = sorted({n_.split('/')[1] for n_ in z.namelist() if n_.startswith('Payload/') and n_.split('/')[1].endswith('.app')})
-            if len(apps) != 1: die('the shell holds %d apps, expected 1: %s' % (len(apps), apps))
-            appname = apps[0]
-            with zipfile.ZipFile(a.ipa, 'w', zipfile.ZIP_DEFLATED) as o:
-                for it in z.infolist():
-                    o.writestr(it, z.read(it.filename))
-                # every framework in the output folder, not only this run's: one .ipa that holds all the games packed so far (add a
-                # game = pack it into the same folder, then this step again; the phone reinstalls the app, its data and saves stay)
-                have = sorted(p for p in lib.glob('DmGame*.framework') if p.is_dir())
-                for fw2 in have:
-                    for src in sorted(fw2.rglob('*')):
-                        if src.is_file():
-                            o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw2.name, src.relative_to(fw2).as_posix()))
-        say('package %s (%s + %d game(s): %s)' % (a.ipa, Path(shell).name, len(have), ', '.join(p.name for p in have)))
+        write_ipa(Path(shell).resolve(), lib, Path(a.ipa).resolve())
 
     say('done: %s' % (Path(a.ipa).name if a.ipa else 'the game is in the library'))
 
