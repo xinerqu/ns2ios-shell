@@ -334,7 +334,7 @@ private struct LibraryView: View {
                 .foregroundStyle(.white.opacity(0.85))
             Spacer(minLength: 0)
             Text(LibText.t("\(model.games.count) 款游戏", "\(model.games.count) games"))
-                .font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+                .font(.footnote.weight(.semibold)).foregroundStyle(.white)
             Button { model.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28)
@@ -351,6 +351,9 @@ private struct LibraryView: View {
         GeometryReader { geo in
             let h = min(geo.size.height, 250)
             // 每个封面用自己的比例：横幅 16:9，图标是正方形。ViewBuilder 里不能写 func，所以用到 LibraryView 的方法。
+            // **滚动单元统一按最宽的那张算宽**：留白原来按"当前这张"算，滑动中 current 一变留白就跟着变，
+            // 整排内容平移 → 松手被拉回原来的位置（坤哥：第 2、第 3 个很难切）。卡片本身还是自己的比例，居中放在单元里。
+            let unit = model.games.map { cellWidth($0, height: h) }.max() ?? h
 
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 22) {
@@ -359,6 +362,7 @@ private struct LibraryView: View {
                             CoverCell(game: game, width: cellWidth(game, height: h), height: h, focused: game.tid == selected)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: unit)
                         .id(game.tid)
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                             content
@@ -369,8 +373,8 @@ private struct LibraryView: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, max(0, (geo.size.width - (current.map { cellWidth($0, height: h) } ?? h)) / 2))
             }
+            .contentMargins(.horizontal, max(0, (geo.size.width - unit) / 2), for: .scrollContent)
             .scrollTargetBehavior(.viewAligned)
             .scrollPosition(id: $selected, anchor: .center)
             .scrollIndicators(.hidden)
@@ -490,9 +494,10 @@ private struct LibraryView: View {
             // 这个功能原来只有「点封面」一个入口，没有任何提示，用户会以为它不存在
             if current?.background == nil {
                 Text(LibText.t("点封面可设置背景图", "Tap a cover to set its background"))
-                    .font(.caption2).foregroundStyle(.white.opacity(0.35))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
             } else if model.games.count > 1 {
-                Text(LibText.t("左右滑动切换", "Swipe to switch")).font(.caption2).foregroundStyle(.white.opacity(0.35))
+                Text(LibText.t("左右滑动切换", "Swipe to switch"))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
             }
         }
         .frame(height: 20)
@@ -628,6 +633,15 @@ private struct Backdrop: View {
         .init(color: .black.opacity(0.45), location: 1.00)    // 页脚
     ], startPoint: .top, endPoint: .bottom)
 
+    // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认背景时 id 不变，切过去就不会黑一下再亮。
+    private var artID: String {
+        guard let game else { return "none" }
+        if game.background != nil { return game.tid + "/own" }
+        if game.cover != nil { return game.tid + "/cover" }
+        if LibraryArt.defaultBackground != nil { return "default" }
+        return game.tid + "/icon"
+    }
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.12), .black],
@@ -646,7 +660,7 @@ private struct Backdrop: View {
                 }
                 .overlay(Backdrop.scrim)
                 .transition(.opacity)
-                .id(game?.tid ?? "none")
+                .id(artID)
             }
         }
         .ignoresSafeArea()
