@@ -1641,6 +1641,12 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     # directory the package carries. 2026-11-03: a package built after the base move kept the previous day's shaders, so
     # the LDSM fix (an 8x8 lattice of garbage in Bananza's upscaler) was still in it. Ask the toolchain for its version.
     cache = work / 'shader' / 'cache'
+    def image_of(d):
+        """上游这一版把库写成单个 <dir>.img（dmsh_build.py 的用法说明第一行就是这么写的），目录形式只在旧版出现。
+        Upstream writes the library as one <dir>.img now (dmsh_build.py's usage line says so); the directory form is
+        what older trees produced."""
+        return Path(str(d) + '.img')
+
     nometal = GFX / 'nometal_run.py'
     if not nometal.is_file():
         die('dm/gfx/tools/nometal_run.py is missing (it is what makes this work without Apple\'s compiler)')
@@ -1662,6 +1668,8 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else None
     if not cur: warn('could not read the translation chain version; a library of another version may be reused')
     def done():
+        if cur and image_of(cache / ('b-' + cur)).is_file():
+            return True                      # 新布局：库就是那个镜像文件
         if cur: marks = [cache / ('b-' + cur) / '_b_build.json']
         else: marks = sorted(cache.glob('b-*/_b_build.json'))
         if not marks or not marks[-1].is_file(): return False
@@ -1693,13 +1701,17 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
-    made = [p.name for p in iosout.glob('b-*') if p.is_dir()] if iosout.is_dir() else []
-    if cur and ('b-' + cur) not in made:
+    made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
+    if cur and ('b-' + cur) not in made and (('b-' + cur + '.img') not in made):
         warn('the shader build made %s, but this run read chain %s: the package may carry another version\'s shaders'
              % (', '.join(made) or 'nothing', cur))
     # Report per directory: a work folder that survived an interrupted run holds one b-<V> per chain version, and the
     # sum of them reads as a healthy build while the directory that gets shipped holds a handful.
     libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) if iosout.is_dir() else []
+    imgs = sorted((p for p in iosout.glob('b-*.img') if p.is_file()), key=lambda d: (d.stat().st_mtime, d.name)) if iosout.is_dir() else []
+    if not libs and imgs:
+        say('shader library image %s (%d bytes)' % (imgs[-1].name, imgs[-1].stat().st_size))
+        return
     counts = [(d.name, len(list(d.glob('*_b.metallib')))) for d in libs]
     n = sum(c for _, c in counts)
     if not n: die('no shader libraries were produced (see %s)' % (work / 'logs' / 'shaders.log'))
@@ -1935,7 +1947,13 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
             if s.is_file(): shutil.copyfile(s, A / 'dm' / s.name)
 
     # shader libraries: the directory name is the chain version, which the shell reads at run time
-    if msl_dir.is_dir():
+    if msl_dir.is_file():
+        # 库已经是打包好的镜像（上游 dmsh_build.py 的新输出）：原样放进 app/msl/，壳按 .img 读它
+        # The library already is the packed image: copy it in as it is; the shell reads a .img in place.
+        (A / 'msl').mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(msl_dir, A / 'msl' / msl_dir.name)
+        say('shader library image %s (%d bytes) -> msl/' % (msl_dir.name, msl_dir.stat().st_size))
+    elif msl_dir.is_dir():
         shader_library(msl_dir, A)
 
     romfs = romfs_source(game)
@@ -2576,7 +2594,35 @@ def main():
         lap('translate shaders')
         libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) \
             if iosout.is_dir() else []
-        if not libs: die('no shader library directory under %s' % iosout)
+        imgs = sorted((p for p in iosout.glob('b-*.img') if p.is_file()), key=lambda d: (d.stat().st_mtime, d.name)) \
+            if iosout.is_dir() else []
+        if not libs and not imgs: die('no shader library under %s' % iosout)
+        if not libs:
+            # 上游这一版只写一个 b-<链号>.img：库里已经有打包好的镜像，直接用它，不再从目录现做。
+            # 校验照样要做：镜像里少了着色器，手机上就是一片黑，只有一行 [RED]。
+            # Upstream writes a single b-<链号>.img now: the library is already packed, so ship it as it is. The
+            # completeness check still runs -- a shader the image lacks draws nothing on the phone.
+            msl_out = imgs[-1]
+            sys.path.insert(0, str(TOOLS))
+            import romfs
+            with romfs.scandir(str(msl_out)) as it:
+                names = [e.name for e in it]
+            have = sum(1 for n in names if n.endswith('_b.metallib'))
+            want = set()
+            smap = gdir / 'shader_map.tsv'
+            if not smap.is_file(): smap = work / 'shader' / 'tables' / 'shader_map.tsv'
+            if smap.is_file():
+                for line in smap.read_text(errors='replace').splitlines():
+                    c = line.split('\t')
+                    if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
+            if want and have < len(want):
+                die('%s holds %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the '
+                    'phone' % (msl_out.name, have, len(want), len(want) - have))
+            say('shader library image: %s (%d of %d shaders, %d bytes)'
+                % (msl_out.name, have, len(want) or have, msl_out.stat().st_size))
+            msl_out_is_image = True
+        else:
+            msl_out_is_image = False
         # Which directory to ship is not a matter of name order. The chain version moves whenever one of the files it
         # hashes changes (our own dmsh_build.py patch did, between two runs tonight), so a work folder that survived
         # earlier runs holds one b-<V> per run, and an earlier one can still be sitting there with a full set while the
@@ -2584,7 +2630,7 @@ def main():
         # (inputs.tsv, written last), and c1_full.tsv / cb_extent.tsv name that stamp in their header, so take the
         # newest stamped one; the app rejects both tables outright when the stamp is missing.
         stamped = [d for d in libs if (d / 'inputs.tsv').is_file()]
-        msl_out = (stamped or libs)[-1]
+        if not msl_out_is_image: msl_out = (stamped or libs)[-1]
         if len(libs) > 1:
             warn('%s holds %d shader library directories (%s): shipping %s'
                  % (iosout, len(libs), ', '.join(d.name for d in libs), msl_out.name))
@@ -2599,12 +2645,13 @@ def main():
                 # the file opens with a column-title row ("package index stage dm_ctl_sha16 source") that is not a
                 # comment, so the key has to look like one: 16 hex digits
                 if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
-        have = len(list(msl_out.glob('*_b.metallib')))
-        if want and have < len(want):
-            die('%s has %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the phone. '
-                'Delete %s and pack again (a directory left by an interrupted run is the usual cause)'
-                % (msl_out.name, have, len(want), len(want) - have, work))
-        say('shader libraries: %s (%d of %d shaders)' % (msl_out.name, have, len(want) or have))
+        if not msl_out_is_image:
+            have = len(list(msl_out.glob('*_b.metallib')))
+            if want and have < len(want):
+                die('%s has %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the phone. '
+                    'Delete %s and pack again (a directory left by an interrupted run is the usual cause)'
+                    % (msl_out.name, have, len(want), len(want) - have, work))
+            say('shader libraries: %s (%d of %d shaders)' % (msl_out.name, have, len(want) or have))
     if a.stop_after == 'guest': return say('stopped before assembly')
 
     stage = work / 'stage'
