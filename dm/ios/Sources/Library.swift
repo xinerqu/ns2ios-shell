@@ -280,6 +280,8 @@ private struct LibraryView: View {
     @State private var picked: PhotosPickerItem?
     @State private var artGame: LibraryGame?      // whose background the picker is for
     @State private var artError: String?          // 选图/写盘失败时显示在标题下面一行
+    @State private var artNote: String?           // 「背景已更新」这种一次性提示，2.6 秒后自己消失
+    @State private var artNoteSeq = 0
 
     private var current: LibraryGame? {
         model.games.first { $0.tid == selected } ?? model.games.first
@@ -405,6 +407,10 @@ private struct LibraryView: View {
             }
             if let artError {
                 Text(artError).font(.caption2).foregroundStyle(.orange.opacity(0.95)).lineLimit(2)
+            }
+            if let artNote {
+                Label(artNote, systemImage: "checkmark.circle.fill")
+                    .font(.caption2).foregroundStyle(.green.opacity(0.95)).lineLimit(2)
             }
         }
         .animation(.easeInOut(duration: 0.25), value: current?.tid)
@@ -539,6 +545,19 @@ private struct LibraryView: View {
         fputs("library: write ok \(url.lastPathComponent) \(size)/\(data.count) bytes\n", stderr)
         artError = nil
         model.refresh()      // 重扫会把新图读进来，Backdrop 取的是 background，画面自己就换了
+        // 明文告诉用户成功了：上一版没有任何反馈，看图又看不出变化，根本没法判断
+        flash(LibText.t("背景已更新", "Background updated"))
+    }
+
+    /// 标题下面闪一条提示，2.6 秒后自己消失（用序号判重，连点两次不会提前把第二条清掉）。
+    private func flash(_ text: String) {
+        artNote = text
+        artNoteSeq += 1
+        let seq = artNoteSeq
+        Task {
+            try? await Task.sleep(nanoseconds: 2_600_000_000)
+            if seq == artNoteSeq { withAnimation(.easeOut(duration: 0.3)) { artNote = nil } }
+        }
     }
 
     private var emptyHint: some View {
@@ -582,7 +601,7 @@ private struct CoverCell: View {
     }
 }
 
-// MARK: - Backdrop: the current game's art, blurred, under everything
+// MARK: - Backdrop: the current game's art, full screen and unblurred, under everything
 
 private struct Backdrop: View {
     let game: LibraryGame?
@@ -595,16 +614,19 @@ private struct Backdrop: View {
         game?.background ?? game?.cover ?? LibraryArt.defaultBackground ?? game?.icon
     }
 
-    // 模糊半径（pt）。30 会把 60pt 以下的结构全抹平（人、猫、电视全没了），18 还留得住画面主体。
-    private static let blur: CGFloat = 18
+    // 模糊半径（pt）。**0 = 原图直接铺满**：这是坤哥点名要的（2026-11-07「几乎看不到内容，不知道成功没有」）。
+    // 想加磨砂感就往大调，下面的外扩量会跟着变。30 那种等于把画面抹平，别再设回去。
+    private static let blur: CGFloat = 0
 
-    // 自上而下的暗化，替掉原来那层平铺的 0.55 黑罩（平铺把图压成 25% 亮度，等于看不见）：
-    // 顶部压住顶栏小字，中上段留亮给插画，标题与按钮那两条再压下去。
+    // 只在**有字的地方**压暗，中间整段留给插画：顶栏、标题/按钮带、页脚各一段，中间几乎不压。
+    // 原来是平铺 0.55 黑罩，图只剩 25% 亮度；现在是「哪里要读字哪里暗，别处保持原色」。
     private static let scrim = LinearGradient(stops: [
-        .init(color: .black.opacity(0.80), location: 0.00),
-        .init(color: .black.opacity(0.38), location: 0.30),
-        .init(color: .black.opacity(0.50), location: 0.62),
-        .init(color: .black.opacity(0.86), location: 1.00)
+        .init(color: .black.opacity(0.72), location: 0.00),   // 顶栏
+        .init(color: .black.opacity(0.16), location: 0.20),   // 画面主体：不挡
+        .init(color: .black.opacity(0.20), location: 0.56),
+        .init(color: .black.opacity(0.64), location: 0.70),   // 标题
+        .init(color: .black.opacity(0.74), location: 0.84),   // 按钮
+        .init(color: .black.opacity(0.90), location: 1.00)    // 页脚
     ], startPoint: .top, endPoint: .bottom)
 
     var body: some View {
@@ -622,7 +644,6 @@ private struct Backdrop: View {
                         .blur(radius: Backdrop.blur, opaque: true)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
-                        .opacity(0.88)
                 }
                 .overlay(Backdrop.scrim)
                 .transition(.opacity)
