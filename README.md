@@ -34,7 +34,7 @@ files, and `prod.keys`.
 | **4** | Pick the game folder (the one holding the NSP/XCI), your `prod.keys`, and an **output folder**. Leave Library mode ticked, which it is by default. |
 | **5** | Press **Start packing**. Every step and its output appear in the log. The output folder ends up with **two things**: `ns2ios\` (the game data, several GB) and `ns2ios.ipa` (tens of MB). |
 | **6** | Install `ns2ios.ipa` (SideStore, [Sideloadly](#notes-and-caveats) — which drops an entitlement, see the notes — or LiveContainer). The first launch compiles the shaders once, with a progress page. |
-| **7** | Copy the whole `ns2ios` folder into this app's folder in the Files app (the app creates it on that first launch). |
+| **7** | Copy the whole `ns2ios` folder into the **root of the Files app** (the app creates that folder there on its first launch). |
 
 **What an install looks like**: the app is called `ns2ios`, and on its first launch it creates a folder of its own in
 the Files app, named after the app. The games themselves (RomFS, shader libraries, DLC) live in Files → `ns2ios` →
@@ -42,13 +42,12 @@ the Files app, named after the app. The games themselves (RomFS, shader librarie
 
 ### Adding the next game
 
-Library mode (the default) is one app holding several games. Adding one is two steps, and both matter — skip either
-and the game is not there on the phone:
+Library mode (the default) is one app holding several games, and adding one is the same two moves:
 
-1. **Pack it**: point the packer at the new game and press *Start packing* again. The `ns2ios` folder in the output
-   gains a game, and `ns2ios.ipa` grows a little, because it now carries both games' code.
-2. **Put it on the phone**: copy the `ns2ios` folder from the output **over** the same-named folder in the Files
-   app, then **install the new `ns2ios.ipa` over the old one**.
+1. **Pack it**: point the packer at the new game and press *Start packing* again.
+2. **Put it on the phone**: copy the generated `ns2ios` folder into the **root of the Files app** — the folder of that
+   name the app created on its first launch — and let it overwrite what is there. Then **install the new
+   `ns2ios.ipa` over the old one**: that install is how the app learns about the new game, so **do not skip it**.
 
 Only want the new shell, no new game? The packer's **Repack package only** button writes a fresh `ns2ios.ipa` in
 seconds.
