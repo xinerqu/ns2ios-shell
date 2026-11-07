@@ -442,7 +442,10 @@ jobs:
       - name: Check the shim still covers upstream's commands
         # A base move failed here three times, fifteen minutes in each time: a probe at import, a replaced method's
         # signature, and compiles that stopped carrying the word `metal`. All of it is readable before anything builds.
-        run: python3 scripts/check_shim_surface.py . .
+        run: |
+          set -euo pipefail
+          cd "$TREE"
+          python3 scripts/check_shim_surface.py . .
 
       - name: Build the shell
         env:
