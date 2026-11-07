@@ -169,6 +169,7 @@ private struct LauncherView: View {
 // The prefix this game's saved choices live under: an app that holds several games keeps one set per title ID (main.m sets DM_APP_DM to
 // <framework>/dm), and a one-game package keeps the keys it always used (empty prefix).
 func gameSettingsPrefix() -> String {
+    guard getenv("DM_GAME_KEY") != nil else { return "" }   // main.m sets it for an app that holds several games
     guard let dm = getenv("DM_APP_DM").map({ String(cString: $0) }) else { return "" }
     let name = ((dm as NSString).deletingLastPathComponent as NSString).lastPathComponent   // DmGame<title ID>.framework
     guard name.hasPrefix("DmGame"), name.hasSuffix(".framework") else { return "" }

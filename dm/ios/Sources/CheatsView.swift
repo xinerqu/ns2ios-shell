@@ -15,10 +15,14 @@
 import SwiftUI
 import Foundation
 
+// How the panel tells one game from another: "" for a one-game package (the keys it always used), "game.<title ID>" otherwise
+// (main.m sets DM_GAME_KEY and DM_APP_DM). CheatsView.dir follows DM_CHEATS, so the file and these keys must agree.
+private func cheatKeySuffix() -> String { gameSettingsPrefix() }
+
 struct CheatsSection: View {
-    @AppStorage("cheats.text") private var text: String = ""
-    @AppStorage("cheats.on") private var onNames: String = ""
-    @AppStorage("cheats.allowCode") private var allowCode = false   // off: entries that patch instructions are not switchable
+    @AppStorage("cheats.text" + cheatKeySuffix()) private var text: String = ""
+    @AppStorage("cheats.on" + cheatKeySuffix()) private var onNames: String = ""
+    @AppStorage("cheats.allowCode" + cheatKeySuffix()) private var allowCode = false   // off: entries that patch instructions are not switchable
     @State private var expanded = false
     @State private var lastRun: [String: RunState] = [:]
     @State private var lastBuild: String = ""

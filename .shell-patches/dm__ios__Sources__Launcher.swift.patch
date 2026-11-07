@@ -9,13 +9,14 @@ diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
                      Section {
                          Button("Reset to tested defaults") { m.reset() }
                              .disabled(!m.changed)
-@@ -165,6 +166,16 @@
+@@ -165,6 +166,17 @@
      }
  }
  
 +// The prefix this game's saved choices live under: an app that holds several games keeps one set per title ID (main.m sets DM_APP_DM to
 +// <framework>/dm), and a one-game package keeps the keys it always used (empty prefix).
 +func gameSettingsPrefix() -> String {
++    guard getenv("DM_GAME_KEY") != nil else { return "" }   // main.m sets it for an app that holds several games
 +    guard let dm = getenv("DM_APP_DM").map({ String(cString: $0) }) else { return "" }
 +    let name = ((dm as NSString).deletingLastPathComponent as NSString).lastPathComponent   // DmGame<title ID>.framework
 +    guard name.hasPrefix("DmGame"), name.hasSuffix(".framework") else { return "" }
@@ -26,7 +27,7 @@ diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
  // Shows the launcher over the root view controller and calls done once the settings are in the environment; false (done is not called) when there is no launcher
  @_cdecl("dm_show_launcher")
  public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @convention(c) () -> Void) -> Bool {
-@@ -172,7 +183,7 @@
+@@ -172,7 +184,7 @@
      let dir = getenv("DM_APP_DM").map { URL(fileURLWithPath: String(cString: $0)) } ?? Bundle.main.resourceURL?.appendingPathComponent("dm")
      guard let url = dir?.appendingPathComponent("launcher.json"), let data = try? Data(contentsOf: url) else { return false }
      guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
@@ -35,7 +36,7 @@ diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
      gameMenuModel = model   // the in-game menu shows and saves the same choices (GameMenu.swift)
      if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); model.applySaved(); return false }
      let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
-@@ -181,6 +192,7 @@
+@@ -181,6 +193,7 @@
          guard let h = host else { return }
          host = nil
          model.apply()
