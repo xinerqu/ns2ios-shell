@@ -69,19 +69,19 @@ struct CheatsSection: View {
             }
             if names.isEmpty && !expanded {
                 Text(Self.L("Paste the codes below, then switch on the entries you want.", "把金手指文本粘贴到下面，然后打开你要的条目。"))
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
             }
             ForEach(names, id: \.self) { name in
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle(name, isOn: Binding(get: { selected.contains(name) }, set: { setOn(name, $0) }))
-                        .font(.body)
+                        .font(.body.weight(.semibold)).foregroundStyle(.white)
                         .disabled(isCode(name) && !allowCode)
                     if isCode(name) {
                         Text(Self.L("Patches instructions — the iPhone crashes on these, so they start off. Turn on \"Allow code patches\" to try one.",
                                     "改代码的条目 —— iPhone 上会崩，所以默认关闭。想试请先打开下面的「允许改代码」。"))
                             .font(.footnote).foregroundStyle(.orange)
                     } else if lastRun[name]?.measured == "data" {
-                        Text(Self.L("Changes values — safe", "改数值 —— 安全")).font(.footnote).foregroundStyle(.secondary)
+                        Text(Self.L("Changes values — safe", "改数值 —— 安全")).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
                     }
                     if let st = lastRun[name], st.state == "dead" || st.state == "unsupported" {
                         Text(st.state == "dead" ? Self.L("Turned off on the last run: ", "上次被关闭：") + Self.reason(st.why) : Self.L("Not supported: ", "不支持：") + Self.reason(st.why))
@@ -91,7 +91,7 @@ struct CheatsSection: View {
             }
             if !names.isEmpty {
                 Toggle(Self.L("Allow code patches (they crash the game on the iPhone)", "允许改代码（iPhone 上会崩，谨慎）"), isOn: $allowCode)
-                    .font(.body)
+                    .font(.body.weight(.semibold)).foregroundStyle(.white)
             }
             DisclosureGroup(isExpanded: $expanded) {
                 TextEditor(text: Binding(get: { text }, set: setText))
@@ -102,7 +102,7 @@ struct CheatsSection: View {
                     .accessibilityLabel("Cheat codes")
             } label: {
                 Text(names.isEmpty ? Self.L("Paste cheat codes", "粘贴金手指") : Self.L("Cheat codes (\(names.count) entries)", "金手指（\(names.count) 条）"))
-                    .font(.body)
+                    .font(.body.weight(.semibold)).foregroundStyle(.white)
             }
         } header: {
             Text(Self.L("Cheats", "金手指"))
@@ -119,7 +119,7 @@ struct CheatsSection: View {
                 }
                 Text(Self.L("Atmosphère format. The addresses belong to the version this app carries (\(version)).",
                           "Atmosphère 格式。地址属于本 App 携带的版本（\(version)）。"))
-            }.font(.footnote)
+            }.font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.9))
         }
         .onAppear {
             loadArmed()                          // a run died with these on: they are off from now, and why is on screen

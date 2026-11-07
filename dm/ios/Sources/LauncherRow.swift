@@ -21,10 +21,11 @@ struct SettingRow: View {
     }
     private var percentage: String { m.rangeLabel(s, rangeValue.wrappedValue) }
 
+    // 粗白字：这一页背后是照片，细字压上去读不清（坤哥 2026-11-08 定的口径，和 Controls/Performance 一致）
     private var settingLabel: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(s.label)
-            if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(.secondary) }
+            Text(s.label).font(.body.weight(.semibold)).foregroundStyle(.white)
+            if !note.isEmpty { Text(note).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85)) }
         }
     }
 
@@ -43,7 +44,7 @@ struct SettingRow: View {
                     HStack {
                         settingLabel
                         Spacer()
-                        Text(percentage).monospacedDigit().foregroundStyle(.secondary)
+                        Text(percentage).monospacedDigit().foregroundStyle(.white)
                     }
                     Slider(value: rangeValue, in: (s.min ?? 0)...(s.max ?? 1), step: s.step ?? 0.05)
                         .accessibilityLabel(s.label)

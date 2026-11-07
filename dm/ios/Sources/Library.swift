@@ -660,15 +660,10 @@ private struct CheatsPage: View {
     let game: LibraryGame
     var body: some View {
         ScrollView {
-            // 内容坐在一块深色板上：这一页背后是照片，字直接压上去读不清（坤哥 2026-11-08 点名，和设置页同一个毛病）
-            VStack(alignment: .leading, spacing: 14) {
-                CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
-            }
-            .padding(18)
-            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.14)))
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            // 不加半透明底板：字本身加粗纯白就够了（坤哥 2026-11-08 定的口径）
+            CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
         }
         .scrollDismissesKeyboard(.interactively)
         .background {
@@ -718,11 +713,9 @@ private struct GameDetail: View {
             .ignoresSafeArea()
         }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(game.name).font(.headline).lineLimit(1).foregroundStyle(.white)
-            }
-        }
+        // 这一页不显示游戏名（页脚左边已经有大标题）——顶部那条导航栏的半透明底在照片上会露出一块
+        // 「很高的框体」，很难看（坤哥 2026-11-08 点名）。背景去掉，只留返回箭头。
+        .toolbarBackground(.hidden, for: .navigationBar)
         .task {
             guard settings == nil else { return }
             let url = game.dmDir.appendingPathComponent("launcher.json")
@@ -766,7 +759,7 @@ private struct GameDetail: View {
             .font(.caption.weight(.medium))
             .foregroundStyle(game.dataOK ? (game.chainOK ? .green : .orange) : .yellow)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Color.black.opacity(0.45), in: Capsule())
+            
 
             if let e = model.errors[game.tid] {
                 Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).fixedSize(horizontal: false, vertical: true)
@@ -813,30 +806,27 @@ private struct GameDetail: View {
                                 .padding(.top, 4)
                             } label: {
                                 HStack(spacing: 6) {
-                                    Text(section).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                                    Text(section).font(.subheadline.weight(.bold)).foregroundStyle(.white)
                                     Spacer(minLength: 0)
-                                    Text("\(rows.count)").font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                    Text("\(rows.count)").font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.75))
                                 }
                             }
-                            .padding(14)
-                            // 面板用**深色**底：这一页背后是照片，白字压在白透明层上会跟图糊成一片（坤哥点名看不清）
-                            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.16)))
+                            .padding(.vertical, 6)
                         }
                     }
                     HStack {
                         Button(LibText.t("恢复测试默认值", "Reset to tested defaults")) {
                             withAnimation { m.reset() }
                         }
-                        .font(.footnote.weight(.medium)).disabled(!m.changed)
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white).disabled(!m.changed)
                         Spacer(minLength: 0)
                         Text(LibText.t("改动在点 PLAY 时保存", "Saved when you press PLAY"))
-                            .font(.caption2).foregroundStyle(.white.opacity(0.65))
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.white)
                     }
                     .padding(.top, 4)
                 } else {
                     Text(LibText.t("这个游戏没有启动选项。", "This game has no launch options."))
-                        .font(.footnote).foregroundStyle(.white.opacity(0.7))
+                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
                 }
                 // 金手指**不再**放这里：库页底部已经有独立的「金手指」按钮，这里是重复入口，去掉
             }
