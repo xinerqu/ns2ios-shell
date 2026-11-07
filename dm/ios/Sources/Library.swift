@@ -328,19 +328,19 @@ private struct LibraryView: View {
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            Text("ns2ios").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+            Text("ns2ios").font(.subheadline.weight(.bold)).foregroundStyle(.white)
             Text(LibText.t("游戏库", "GAME LIBRARY"))
-                .font(.caption2.weight(.medium)).tracking(2)
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.caption2.weight(.semibold)).tracking(2)
+                .foregroundStyle(.white.opacity(0.85))
             Spacer(minLength: 0)
             Text(LibText.t("\(model.games.count) 款游戏", "\(model.games.count) games"))
-                .font(.caption).foregroundStyle(.white.opacity(0.45))
+                .font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
             Button { model.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.7))
+            .foregroundStyle(.white)
             .accessibilityLabel(LibText.t("刷新", "Refresh"))
         }
     }
@@ -621,12 +621,11 @@ private struct Backdrop: View {
     // 只在**有字的地方**压暗，中间整段留给插画：顶栏、标题/按钮带、页脚各一段，中间几乎不压。
     // 原来是平铺 0.55 黑罩，图只剩 25% 亮度；现在是「哪里要读字哪里暗，别处保持原色」。
     private static let scrim = LinearGradient(stops: [
-        .init(color: .black.opacity(0.72), location: 0.00),   // 顶栏
-        .init(color: .black.opacity(0.16), location: 0.20),   // 画面主体：不挡
-        .init(color: .black.opacity(0.20), location: 0.56),
-        .init(color: .black.opacity(0.64), location: 0.70),   // 标题
-        .init(color: .black.opacity(0.74), location: 0.84),   // 按钮
-        .init(color: .black.opacity(0.90), location: 1.00)    // 页脚
+        .init(color: .black.opacity(0.30), location: 0.00),   // 顶栏：只压一点点，别再是一块黑
+        .init(color: .black.opacity(0.05), location: 0.16),   // 画面主体：几乎不压
+        .init(color: .black.opacity(0.05), location: 0.58),
+        .init(color: .black.opacity(0.22), location: 0.74),   // 标题
+        .init(color: .black.opacity(0.45), location: 1.00)    // 页脚
     ], startPoint: .top, endPoint: .bottom)
 
     var body: some View {

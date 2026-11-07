@@ -5,11 +5,14 @@
 
 <out dir> gets:
 
-    DmGame<title ID>.framework/      the game: its modules (guest_dylib.py), its tables in dm/, game.json, icon.png
     ns2ios/games/<title ID>/romfs.img, msl/, aoc/    the big files, copied to the phone's Files app
 
-With --ipa it also puts the framework into a copy of the shell package and writes that .ipa (unsigned: the sideloading tool
-signs it, as it signs every package we ship).
+--library <dir> is where the games themselves live (DmGame<title ID>.framework: its modules from guest_dylib.py, its tables
+in dm/, game.json, icon.png). It defaults to <out dir>. One library holds every game, so a game stays in the package even
+when the next one is packed into a different output folder.
+
+With --ipa it also puts every framework in the library into a copy of the shell package and writes that .ipa (unsigned: the
+sideloading tool signs it, as it signs every package we ship).
 
 Stage 1 of the several-games work: it reads a work folder scripts/nxn_pack.py already made (stage/Payload/<App>.app has every
 piece) so the device test needs no repack of a 5 GB game. The same layout is what nxn_pack.py --framework will write.
@@ -83,14 +86,17 @@ def chain_of(app):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('work', help='the pack work folder (…/<title ID>_pack), or one of its stage/Payload/<App>.app folders')
-    ap.add_argument('out', help='where the framework and the ns2ios folder are written')
-    ap.add_argument('--ipa', help='also write this .ipa: the shell plus every DmGame*.framework in the output folder')
+    ap.add_argument('out', help='where the ns2ios folder (the game data) is written')
+    ap.add_argument('--library', default='', help='where the frameworks live; one folder for every game (default: the out dir)')
+    ap.add_argument('--ipa', help='also write this .ipa: the shell plus every DmGame*.framework in the library')
     ap.add_argument('--shell', help='the shell zip (…/shell-<…>.zip); default: the one beside pack.cmd')
     ap.add_argument('--icon', help='the library icon (60x60@3x from the package is used otherwise)')
     ap.add_argument('--cover', help='a 16:9 banner for the library (cover.jpg/png beside the game files is used otherwise)')
     a = ap.parse_args()
 
     work, out = Path(a.work).resolve(), Path(a.out).resolve()
+    lib = Path(a.library).resolve() if a.library else out
+    lib.mkdir(parents=True, exist_ok=True)
     app = work if work.name.endswith('.app') else next((p for p in sorted(work.glob('stage/Payload/*.app'))), None)
     if app is None: die('no stage/Payload/<App>.app under %s' % work)
     patched = work / 'build' / 'patched'
@@ -114,7 +120,7 @@ def main():
 
     # ---- the framework: modules + tables + what a library needs to draw the game ----
     fwn = 'DmGame%s' % tid
-    fw, n = guest_dylib.write(str(patched), str(out), mods, bundle_id='org.nxnative.game.%s' % tid.lower(), name=fwn)
+    fw, n = guest_dylib.write(str(patched), str(lib), mods, bundle_id='org.nxnative.game.%s' % tid.lower(), name=fwn)
     say('framework %s (%d MB)' % (Path(fw).name, n >> 20))
 
     fwdir = Path(fw)
@@ -160,13 +166,19 @@ def main():
     else: die('the package holds neither romfs.img nor romfs/')
     if (app / 'msl').is_dir():
         # recursively: a GL or Vulkan game keeps gl/ and vk/ subfolders here, and hle_gl.m/hle_vk.m read their tables from there
+        n = 0
         for src in sorted((app / 'msl').rglob('*')):
             if src.is_file():
-                dst = data / 'msl' / src.relative_to(app / 'msl')
-                how.append('msl/%s %s' % (src.relative_to(app / 'msl'), link_or_copy(src, dst)))
+                link_or_copy(src, data / 'msl' / src.relative_to(app / 'msl'))
+                n += 1
+        how.append('msl/ %d file(s)' % n)
     if (app / 'aoc').is_dir():
         (data / 'aoc').mkdir(exist_ok=True)
-        for src in sorted((app / 'aoc').iterdir()): how.append('aoc/%s %s' % (src.name, link_or_copy(src, data / 'aoc' / src.name)))
+        n = 0
+        for src in sorted((app / 'aoc').iterdir()):
+            link_or_copy(src, data / 'aoc' / src.name)
+            n += 1
+        how.append('aoc/ %d file(s)' % n)
     # pso/ (the offline pipeline archive), html/ (offline pages) and jit/ (an nn::jit game's image): the host reads all three beside the
     # RomFS or from the bundle, so they belong to the game and travel with its data. jit/ is not optional: loader.c dies without it.
     for extra in ('pso', 'html', 'jit'):
@@ -175,7 +187,7 @@ def main():
         how.append(extra + '/ %d entries' % len([s for s in (app / extra).rglob('*') if s.is_file()]))
         for src in sorted((app / extra).rglob('*')):
             if src.is_file(): link_or_copy(src, data / extra / src.relative_to(app / extra))
-    say('data folder %s: %s' % (data, '; '.join(how) or 'nothing'))
+    say('data folder %s: %s' % (data, ', '.join(how) or 'nothing'))
 
     # ---- the test package: the shell with this one framework inside ----
     if a.ipa:
@@ -191,14 +203,14 @@ def main():
                     o.writestr(it, z.read(it.filename))
                 # every framework in the output folder, not only this run's: one .ipa that holds all the games packed so far (add a
                 # game = pack it into the same folder, then this step again; the phone reinstalls the app, its data and saves stay)
-                have = sorted(p for p in out.glob('DmGame*.framework') if p.is_dir())
+                have = sorted(p for p in lib.glob('DmGame*.framework') if p.is_dir())
                 for fw2 in have:
                     for src in sorted(fw2.rglob('*')):
                         if src.is_file():
                             o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw2.name, src.relative_to(fw2).as_posix()))
         say('package %s (%s + %d game(s): %s)' % (a.ipa, Path(shell).name, len(have), ', '.join(p.name for p in have)))
 
-    say('done: copy %s/ns2ios to the app\'s Documents (Files app), then install the package' % out)
+    say('done: %s' % (Path(a.ipa).name if a.ipa else 'the game is in the library'))
 
 
 if __name__ == '__main__':
