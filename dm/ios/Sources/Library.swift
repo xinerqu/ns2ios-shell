@@ -101,7 +101,7 @@ enum LibraryArt {
         return d
     }
     static var defaultBackground: UIImage? {
-        guard let url = Bundle.main.url(forResource: "dm/default-background", withExtension: "jpg") else { return nil }
+        guard let url = Bundle.main.url(forResource: "default-background", withExtension: "jpg", subdirectory: "dm") else { return nil }
         return UIImage(contentsOfFile: url.path)
     }
 }
@@ -259,6 +259,11 @@ private struct LibraryView: View {
     @State private var selected: String?          // the game in the middle of the flow
     @State private var shown: String?             // its title ID, one beat behind: the background crossfades on this
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var picking = false
+    @State private var picked: PhotosPickerItem?
+    @State private var showArtHint = false
+    @AppStorage("artHintShown") private var artHintShown = false
+    @State private var artGame: LibraryGame?      // whose background the picker is for
 
     private var current: LibraryGame? {
         model.games.first { $0.tid == selected } ?? model.games.first
@@ -292,6 +297,27 @@ private struct LibraryView: View {
                 }
             }
             .onAppear { if selected == nil { selected = model.games.first?.tid; shown = selected } }
+            .alert(LibText.t("为这个游戏设置 16:9 背景图", "Set a 16:9 background for this game"), isPresented: $showArtHint) {
+                Button(LibText.t("去选图", "Choose a picture")) { artHintShown = true; picking = true }
+                Button(LibText.t("取消", "Cancel"), role: .cancel) { }
+            } message: {
+                Text(LibText.t("选中的图会作为这个游戏的背景（按 16:9 裁切），不影响游戏图标。",
+                               "The picture becomes this game's background, cropped to 16:9. The game's icon is not changed."))
+            }
+            .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
+            .onChange(of: picked) { _, item in
+                guard let item, let game = artGame else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self), UIImage(data: data) != nil {
+                        try? data.write(to: LibraryArt.backgroundURL(game.tid))
+                        model.refresh()
+                        shown = nil
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        shown = game.tid
+                    }
+                    picked = nil
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }
@@ -322,12 +348,13 @@ private struct LibraryView: View {
     private var flow: some View {
         GeometryReader { geo in
             let h = min(geo.size.height, 250)
-            let w = h * 16 / 9
+            // 每个封面用自己的比例：横幅 16:9，图标是正方形。ViewBuilder 里不能写 func，所以用到 LibraryView 的方法。
+
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 22) {
                     ForEach(model.games) { game in
-                        NavigationLink(value: game) {
-                            CoverCell(game: game, width: w, height: h, focused: game.tid == selected)
+                        Button { artTapped(game) } label: {
+                            CoverCell(game: game, width: cellWidth(game, height: h), height: h, focused: game.tid == selected)
                         }
                         .buttonStyle(.plain)
                         .id(game.tid)
@@ -340,7 +367,7 @@ private struct LibraryView: View {
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.horizontal, max(0, (geo.size.width - w) / 2))
+                .padding(.horizontal, max(0, (geo.size.width - (current.map { cellWidth($0, height: h) } ?? h)) / 2))
             }
             .scrollTargetBehavior(.viewAligned)
             .scrollPosition(id: $selected, anchor: .center)
@@ -383,7 +410,21 @@ private struct LibraryView: View {
     }
 
     private var playButton: some View {
-        HStack(spacing: 12) { playAction; settingsLink }
+        HStack(spacing: 10) { playAction; settingsLink; cheatsLink }
+    }
+
+    private var cheatsLink: some View {
+        NavigationLink { if let g = current { CheatsPage(game: g) } } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "wand.and.stars")
+                Text(LibText.t("金手指", "CHEATS")).font(.footnote.weight(.semibold))
+            }
+            .frame(width: 116, height: 40)
+            .background(.white.opacity(0.12), in: Capsule())
+            .foregroundStyle(.white.opacity(0.9))
+        }
+        .buttonStyle(PressScaleStyle())
+        .disabled(current == nil)
     }
 
     private var settingsLink: some View {
@@ -392,7 +433,7 @@ private struct LibraryView: View {
                 Image(systemName: "slider.horizontal.3")
                 Text(LibText.t("设置", "SETTINGS")).font(.footnote.weight(.semibold))
             }
-            .frame(width: 132, height: 40)
+            .frame(width: 116, height: 40)
             .background(.white.opacity(0.12), in: Capsule())
             .foregroundStyle(.white.opacity(0.9))
         }
@@ -444,6 +485,17 @@ private struct LibraryView: View {
         .frame(height: 20)
     }
 
+    /// 一个封面要多宽：横幅按 16:9，图标按正方形（ViewBuilder 里不能声明函数，放在这里）。
+    private func cellWidth(_ game: LibraryGame, height: CGFloat) -> CGFloat {
+        game.cover == nil ? height : height * 16 / 9
+    }
+
+    /// 点大封面：第一次解释这是设背景，之后直接开相册。
+    private func artTapped(_ game: LibraryGame) {
+        artGame = game
+        if artHintShown { picking = true } else { showArtHint = true }
+    }
+
     private var emptyHint: some View {
         VStack(spacing: 8) {
             Image(systemName: "square.stack.3d.up.slash").font(.system(size: 30)).foregroundStyle(.white.opacity(0.35))
@@ -471,11 +523,11 @@ private struct CoverCell: View {
             if let cover = game.cover {
                 Image(uiImage: cover).resizable().scaledToFill()
             } else if let icon = game.icon {
-                LinearGradient(colors: [Color(white: 0.16), Color(white: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(uiImage: icon).resizable().scaledToFit().padding(height * 0.05)
+                // 图标本身就是圆的方的游戏封面：直接铺满，不再套一层 16:9 的深色底板
+                Image(uiImage: icon).resizable().scaledToFill()
             } else {
                 LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
-                Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.2)).foregroundStyle(.white.opacity(0.3))
+                Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.24)).foregroundStyle(.white.opacity(0.3))
             }
         }
         .frame(width: width, height: height)
@@ -544,11 +596,6 @@ private struct GameDetail: View {
     let game: LibraryGame
     @State private var settings: LauncherModel?
     @State private var open: Set<String> = []      // which settings groups are expanded: one at a time by default
-    @State private var picking = false             // the photo picker for this game's 16:9 background
-    @State private var picked: PhotosPickerItem?
-    @State private var localArt: UIImage?          // what the player just picked, shown without waiting for a rescan
-    @AppStorage("artHintShown") private var artHintShown = false
-    @State private var artHintShown2 = false
 
     private var busy: Bool { model.starting != nil }
 
@@ -567,24 +614,6 @@ private struct GameDetail: View {
                 Text(game.name).font(.headline).lineLimit(1).foregroundStyle(.white)
             }
         }
-        .alert(LibText.t("为这个游戏设置 16:9 背景图", "Set a 16:9 background for this game"), isPresented: $artHintShown2) {
-            Button(LibText.t("好", "OK")) { artHintShown = true; picking = true }
-        } message: {
-            Text(LibText.t("再点一次图片，从相册里挑一张（会按 16:9 裁切）。",
-                           "Tap the picture again to pick one from your photos (cropped to 16:9)."))
-        }
-        .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
-        .onChange(of: picked) { _, item in
-            guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) {
-                    try? data.write(to: LibraryArt.backgroundURL(game.tid))
-                    localArt = img
-                    model.refresh()
-                }
-                picked = nil
-            }
-        }
         .task {
             guard settings == nil else { return }
             let url = game.dmDir.appendingPathComponent("launcher.json")
@@ -600,9 +629,8 @@ private struct GameDetail: View {
 
     private var left: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Button { artTapped() } label: {
             Group {
-                if let art = localArt ?? game.background {
+                if let art = game.background {
                     Image(uiImage: art).resizable().scaledToFill()
                 } else if let cover = game.cover {
                     Image(uiImage: cover).resizable().scaledToFill()
@@ -616,13 +644,7 @@ private struct GameDetail: View {
             .frame(width: 330, height: 186)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "photo.badge.plus").font(.system(size: 12, weight: .semibold))
-                    .padding(6).background(.black.opacity(0.45), in: Circle())
-                    .foregroundStyle(.white.opacity(0.85)).padding(8)
-            }
-            }
-            .buttonStyle(.plain)
+
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(game.name).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
@@ -730,10 +752,6 @@ private struct GameDetail: View {
             .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
-    }
-
-    private func artTapped() {
-        if !artHintShown { artHintShown2 = true } else { picking = true }
     }
 
     private func binding(_ section: String) -> Binding<Bool> {
