@@ -696,7 +696,14 @@ private struct GameDetail: View {
         .padding(.horizontal, 28)
         .padding(.top, 8)
         .padding(.bottom, 20)
-        .background(Backdrop(game: game, animated: false))
+        // 这一页整页都是字，背景图让位给可读性：图照旧在，但压一层 0.22 的黑
+        .background {
+            ZStack {
+                Backdrop(game: game, animated: false)
+                Color.black.opacity(0.22)
+            }
+            .ignoresSafeArea()
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -719,13 +726,10 @@ private struct GameDetail: View {
     private var left: some View {
         VStack(alignment: .leading, spacing: 14) {
             Group {
-                if let art = game.background {
+                // 和库页的封面同一套规矩：玩家挑的图 > 包里带的封面 > 图标**铺满**。
+                // 原来图标是放一块深色底板里再 padding(24) 缩进去，看着就是一圈又黑又粗的边框（坤哥 2026-11-08 点名）。
+                if let art = game.background ?? game.cover ?? game.icon {
                     Image(uiImage: art).resizable().scaledToFill()
-                } else if let cover = game.cover {
-                    Image(uiImage: cover).resizable().scaledToFill()
-                } else if let icon = game.icon {
-                    LinearGradient(colors: [Color(white: 0.16), Color(white: 0.07)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .overlay(Image(uiImage: icon).resizable().scaledToFit().padding(24))
                 } else {
                     Color(white: 0.1).overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 44)).foregroundStyle(.white.opacity(0.3)))
                 }
@@ -738,7 +742,7 @@ private struct GameDetail: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(game.name).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
                 Text((game.version.map { "VERSION " + $0 } ?? "") + "  ·  " + String(game.tid.suffix(8)))
-                    .font(.caption).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
+                    .font(.caption).foregroundStyle(.white.opacity(0.72)).monospacedDigit()
             }
 
             HStack(spacing: 8) {
@@ -749,7 +753,7 @@ private struct GameDetail: View {
             .font(.caption.weight(.medium))
             .foregroundStyle(game.dataOK ? (game.chainOK ? .green : .orange) : .yellow)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(.white.opacity(0.08), in: Capsule())
+            .background(Color.black.opacity(0.45), in: Capsule())
 
             if let e = model.errors[game.tid] {
                 Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).fixedSize(horizontal: false, vertical: true)
@@ -790,20 +794,21 @@ private struct GameDetail: View {
                                 VStack(spacing: 2) {
                                     ForEach(rows) { row in
                                         SettingRow(s: row, m: m).padding(.vertical, 2)
-                                        Divider().overlay(Color.white.opacity(0.08))
+                                        Divider().overlay(Color.white.opacity(0.12))
                                     }
                                 }
                                 .padding(.top, 4)
                             } label: {
                                 HStack(spacing: 6) {
-                                    Text(section).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+                                    Text(section).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
                                     Spacer(minLength: 0)
-                                    Text("\(rows.count)").font(.caption2).foregroundStyle(.white.opacity(0.4))
+                                    Text("\(rows.count)").font(.caption2).foregroundStyle(.white.opacity(0.6))
                                 }
                             }
                             .padding(14)
-                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                            // 面板用**深色**底：这一页背后是照片，白字压在白透明层上会跟图糊成一片（坤哥点名看不清）
+                            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.16)))
                         }
                     }
                     HStack {
@@ -813,30 +818,14 @@ private struct GameDetail: View {
                         .font(.footnote.weight(.medium)).disabled(!m.changed)
                         Spacer(minLength: 0)
                         Text(LibText.t("改动在点 PLAY 时保存", "Saved when you press PLAY"))
-                            .font(.caption2).foregroundStyle(.white.opacity(0.4))
+                            .font(.caption2).foregroundStyle(.white.opacity(0.65))
                     }
                     .padding(.top, 4)
                 } else {
                     Text(LibText.t("这个游戏没有启动选项。", "This game has no launch options."))
-                        .font(.footnote).foregroundStyle(.white.opacity(0.45))
+                        .font(.footnote).foregroundStyle(.white.opacity(0.7))
                 }
-
-                // 金手指单独一页：它是我们独有的功能，不塞在设置列表底下
-                NavigationLink {
-                    CheatsPage(game: game)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "wand.and.stars")
-                        Text(LibText.t("金手指", "Cheats")).font(.subheadline.weight(.semibold))
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.white.opacity(0.4))
-                    }
-                    .padding(14)
-                    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 6)
+                // 金手指**不再**放这里：库页底部已经有独立的「金手指」按钮，这里是重复入口，去掉
             }
             .padding(.bottom, 24)
         }
