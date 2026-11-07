@@ -5,6 +5,7 @@
 // 与 icon.png；游戏数据在 Documents/ns2ios/games/<tid>/{romfs.img,msl,aoc}，romfs.img 存在且大小 > 0 才算这个游戏可以玩；
 // 壳的着色器链号在 Bundle.main 的 Info.plist 键 DMChain（可能不存在）。点卡片会调用 main.m 的 dm_shell_start_game(tid)
 // （设环境 + dlopen framework + 预加载），成功就把 tid 交给 picked，失败就在卡片下面显示错误，库本身不关闭。
+import PhotosUI
 import SwiftUI
 import UIKit
 
@@ -66,6 +67,7 @@ private struct LibraryGame: Identifiable, Hashable {
     let chainOK: Bool         // chain 为空、DMChain 缺失、或两者相等
     let icon: UIImage?
     let cover: UIImage?       // cover.jpg / cover.png beside game.json: a 16:9 banner when the packer or the player put one there
+    let background: UIImage?  // a 16:9 picture the player picked on the device (LibraryArt.backgroundURL), nil when none
     let dmDir: URL            // the framework's dm/: its launcher.json is the settings this game offers
     var id: String { tid }
     static func == (a: LibraryGame, b: LibraryGame) -> Bool { a.tid == b.tid }
@@ -82,6 +84,26 @@ private func loadImage(_ url: URL, maxSide: CGFloat) -> UIImage? {
     let k = maxSide / long
     let size = CGSize(width: image.size.width * k, height: image.size.height * k)
     return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+}
+
+// 玩家在设备上为某个游戏挑的 16:9 背景图；App 自带的默认背景（没挑过就用它）。
+enum LibraryArt {
+    static func backgroundURL(_ tid: String) -> URL {
+        let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let d = doc.appendingPathComponent("ns2ios/art", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d.appendingPathComponent(tid + ".jpg")
+    }
+    static func cheatsURL(_ tid: String) -> URL {
+        let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let d = doc.appendingPathComponent("ns2ios/cheats/\(tid)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+    static var defaultBackground: UIImage? {
+        guard let url = Bundle.main.url(forResource: "dm/default-background", withExtension: "jpg") else { return nil }
+        return UIImage(contentsOfFile: url.path)
+    }
 }
 
 private enum GameLibrary {
@@ -111,6 +133,7 @@ private enum GameLibrary {
                                      icon: loadIcon(item.appendingPathComponent("icon.png")),
                                      cover: loadImage(item.appendingPathComponent("cover.jpg"), maxSide: 1080)
                                          ?? loadImage(item.appendingPathComponent("cover.png"), maxSide: 1080),
+                                     background: loadImage(LibraryArt.backgroundURL(tid), maxSide: 1600),
                                      dmDir: item.appendingPathComponent("dm")))
         }
         return games.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -335,14 +358,14 @@ private struct LibraryView: View {
     private var caption: some View {
         VStack(spacing: 6) {
             Text(current?.name ?? LibText.t("还没有游戏", "No games yet"))
-                .font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .id(current?.tid ?? "none")
                 .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                         removal: .move(edge: .top).combined(with: .opacity)))
             if let v = current?.version, !v.isEmpty {
                 Text("VERSION " + v)
-                    .font(.caption.weight(.medium)).tracking(1.5)
+                    .font(.system(size: 10, weight: .medium)).tracking(1.2)
                     .foregroundStyle(.white.opacity(0.55))
                     .id("v" + (current?.tid ?? "none") + v)
             }
@@ -355,11 +378,30 @@ private struct LibraryView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: current?.tid)
-        .padding(.top, 10)
-        .frame(height: 96)
+        .padding(.top, 6)
+        .frame(height: 74)
     }
 
     private var playButton: some View {
+        HStack(spacing: 12) { playAction; settingsLink }
+    }
+
+    private var settingsLink: some View {
+        NavigationLink(value: current) {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                Text(LibText.t("设置", "SETTINGS")).font(.footnote.weight(.semibold))
+            }
+            .frame(width: 132, height: 40)
+            .background(.white.opacity(0.12), in: Capsule())
+            .foregroundStyle(.white.opacity(0.9))
+        }
+        .buttonStyle(PressScaleStyle())
+        .disabled(current == nil)
+        .opacity(0.9)
+    }
+
+    private var playAction: some View {
         Button {
             guard let game = current else { return }
             setenv("DM_LAUNCHER", "0", 1)   // 库页就是选择页：不再弹第二个设置页
@@ -371,9 +413,9 @@ private struct LibraryView: View {
                 } else {
                     Image(systemName: "play.fill")
                 }
-                Text(LibText.t("开始游戏", "PLAY")).font(.headline)
+                Text(LibText.t("开始游戏", "PLAY")).font(.subheadline.weight(.semibold))
             }
-            .frame(width: 260, height: 50)
+            .frame(width: 210, height: 40)
             .background(
                 LinearGradient(colors: [Color(red: 0.29, green: 0.42, blue: 1.0), Color(red: 0.55, green: 0.30, blue: 0.95)],
                                startPoint: .leading, endPoint: .trailing),
@@ -430,7 +472,7 @@ private struct CoverCell: View {
                 Image(uiImage: cover).resizable().scaledToFill()
             } else if let icon = game.icon {
                 LinearGradient(colors: [Color(white: 0.16), Color(white: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(uiImage: icon).resizable().scaledToFit().padding(height * 0.12)
+                Image(uiImage: icon).resizable().scaledToFit().padding(height * 0.05)
             } else {
                 LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
                 Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.2)).foregroundStyle(.white.opacity(0.3))
@@ -438,11 +480,7 @@ private struct CoverCell: View {
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(focused ? 0.35 : 0.10), lineWidth: focused ? 1.2 : 0.5)
-        )
-        .shadow(color: .black.opacity(focused ? 0.55 : 0.3), radius: focused ? 22 : 8, y: focused ? 12 : 4)
+        .shadow(color: .black.opacity(focused ? 0.6 : 0.3), radius: focused ? 26 : 8, y: focused ? 10 : 4)
         .accessibilityLabel(game.name)
     }
 }
@@ -457,7 +495,7 @@ private struct Backdrop: View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.12), .black],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
-            if let art = game?.cover ?? game?.icon {
+            if let art = game?.background ?? game?.cover ?? game?.icon ?? LibraryArt.defaultBackground {
                 GeometryReader { geo in
                     Image(uiImage: art)
                         .resizable().scaledToFill()
@@ -476,6 +514,21 @@ private struct Backdrop: View {
     }
 }
 
+// 金手指一页：面板要的目录是 main.m 给这个游戏设的 DM_CHEATS，库阶段还没设，所以直接给它。
+private struct CheatsPage: View {
+    let game: LibraryGame
+    var body: some View {
+        ScrollView {
+            CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
+                .padding(.horizontal, 24).padding(.vertical, 12)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(Backdrop(game: game, animated: false))
+        .navigationTitle(LibText.t("金手指", "Cheats"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct PressScaleStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -491,6 +544,11 @@ private struct GameDetail: View {
     let game: LibraryGame
     @State private var settings: LauncherModel?
     @State private var open: Set<String> = []      // which settings groups are expanded: one at a time by default
+    @State private var picking = false             // the photo picker for this game's 16:9 background
+    @State private var picked: PhotosPickerItem?
+    @State private var localArt: UIImage?          // what the player just picked, shown without waiting for a rescan
+    @AppStorage("artHintShown") private var artHintShown = false
+    @State private var artHintShown2 = false
 
     private var busy: Bool { model.starting != nil }
 
@@ -509,6 +567,24 @@ private struct GameDetail: View {
                 Text(game.name).font(.headline).lineLimit(1).foregroundStyle(.white)
             }
         }
+        .alert(LibText.t("为这个游戏设置 16:9 背景图", "Set a 16:9 background for this game"), isPresented: $artHintShown2) {
+            Button(LibText.t("好", "OK")) { artHintShown = true; picking = true }
+        } message: {
+            Text(LibText.t("再点一次图片，从相册里挑一张（会按 16:9 裁切）。",
+                           "Tap the picture again to pick one from your photos (cropped to 16:9)."))
+        }
+        .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
+        .onChange(of: picked) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: data) {
+                    try? data.write(to: LibraryArt.backgroundURL(game.tid))
+                    localArt = img
+                    model.refresh()
+                }
+                picked = nil
+            }
+        }
         .task {
             guard settings == nil else { return }
             let url = game.dmDir.appendingPathComponent("launcher.json")
@@ -524,8 +600,11 @@ private struct GameDetail: View {
 
     private var left: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Button { artTapped() } label: {
             Group {
-                if let cover = game.cover {
+                if let art = localArt ?? game.background {
+                    Image(uiImage: art).resizable().scaledToFill()
+                } else if let cover = game.cover {
                     Image(uiImage: cover).resizable().scaledToFill()
                 } else if let icon = game.icon {
                     LinearGradient(colors: [Color(white: 0.16), Color(white: 0.07)], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -536,8 +615,14 @@ private struct GameDetail: View {
             }
             .frame(width: 330, height: 186)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.15)))
             .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "photo.badge.plus").font(.system(size: 12, weight: .semibold))
+                    .padding(6).background(.black.opacity(0.45), in: Circle())
+                    .foregroundStyle(.white.opacity(0.85)).padding(8)
+            }
+            }
+            .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(game.name).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
@@ -567,7 +652,7 @@ private struct GameDetail: View {
                 HStack(spacing: 8) {
                     if model.starting == game.tid { ProgressView().controlSize(.small).tint(.white) }
                     else { Image(systemName: "play.fill") }
-                    Text(LibText.t("开始游戏", "PLAY")).font(.headline)
+                    Text(LibText.t("开始游戏", "PLAY")).font(.subheadline.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .background(LinearGradient(colors: [Color(red: 0.29, green: 0.42, blue: 1.0), Color(red: 0.55, green: 0.30, blue: 0.95)],
@@ -625,12 +710,30 @@ private struct GameDetail: View {
                         .font(.footnote).foregroundStyle(.white.opacity(0.45))
                 }
 
-                // 金手指：库阶段 DM_CHEATS 还没设，所以把本游戏的目录直接交给面板
-                CheatsSection(cheatsDir: cheatsDir)
-                    .padding(.top, 6)
+                // 金手指单独一页：它是我们独有的功能，不塞在设置列表底下
+                NavigationLink {
+                    CheatsPage(game: game)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wand.and.stars")
+                        Text(LibText.t("金手指", "Cheats")).font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.white.opacity(0.4))
+                    }
+                    .padding(14)
+                    .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
             }
             .padding(.bottom, 24)
         }
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func artTapped() {
+        if !artHintShown { artHintShown2 = true } else { picking = true }
     }
 
     private func binding(_ section: String) -> Binding<Bool> {
@@ -638,13 +741,6 @@ private struct GameDetail: View {
                 set: { v in if v { open.insert(section) } else { open.remove(section) } })
     }
 
-    /// ns2ios/cheats/<title ID>：与 main.m 给这个游戏设的 DM_CHEATS 是同一个目录。
-    private var cheatsDir: URL {
-        let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let d = doc.appendingPathComponent("ns2ios/cheats/\(game.tid)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
-        return d
-    }
 }
 
 @_cdecl("dm_show_library")

@@ -45,6 +45,8 @@ printf '{"info":{"author":"xcode","version":1}}\n' > Gen/Assets.xcassets/Content
 echo 'DM_APPICON =' >> Gen/dm.xcconfig
 # Shared-font stand-ins: ours, not game content (iOS lacks the macOS font path build_ipa.sh uses)
 cp "${STD_FONT:-/System/Library/Fonts/Supplemental/Arial Unicode.ttf}" Gen/dm/font/standard.ttf || die "copy standard font (STD_FONT=a TTF)"
+# The library's default background (Library.swift): shown behind every game that has no picture of its own.
+cp "$DM/ios/tools/default-background.jpg" Gen/dm/default-background.jpg || die "copy the default background"
 "${FONT_PY:-python3}" "$DM/tools/make_ext_font.py" Gen/dm/font/nintendo_ext.ttf > /dev/null || die "make_ext_font.py (pip install fonttools, or FONT_PY=python with fontTools)"
 # -DDM_SHELL turns on: the Guest-library image header (loader.c), source-form shader compilation (nvn_mtl.m), the runtime chain
 # version, the relaxed RomFS lookup and the first-launch shader page (dm_shader_prep.m). Appended to the generated xcconfig line.
