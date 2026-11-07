@@ -461,10 +461,6 @@ jobs:
           bash dm/ios/tools/shell_build.sh 2>&1 | tee "$RUNNER_TEMP/shell.out"
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$DM_ROOT/build/shell/nxnative-shell-build-input.zip" "$GITHUB_WORKSPACE/dist/${V}.zip"   # V already begins with shell-
-          # The same package under the extension a sideloader expects: this zip is already an unsigned IPA (Payload/<app>.app), so
-          # the copy is the whole difference. It holds the shell and no game -- a game's framework is the game's own code and is
-          # built on the player's machine from their own dump, so it can never be one of our assets.
-          cp "$GITHUB_WORKSPACE/dist/${V}.zip" "$GITHUB_WORKSPACE/dist/${V}.ipa"
           cp "$DM_ROOT/build/shell/shell_files.tsv" "$GITHUB_WORKSPACE/dist/${V}-contents.tsv"
 
       - name: Point a build error at the patch that owns that file
@@ -941,12 +937,12 @@ jobs:
               echo "::error::$TAG already names another release ($EXIST): the version number was reused, not overwritten"
               exit 1
             fi
-            gh release upload "$TAG" dist/*.zip dist/*.ipa dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$TAG" dist/*.zip dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file body.md
           else
             # --target: without it the tag lands on whatever main is at this moment, which is not the commit the
             # shell was built from (the sync step pushes its own commit, and anyone may push in between).
-            gh release create "$TAG" dist/*.zip dist/*.ipa dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" \
+            gh release create "$TAG" dist/*.zip dist/*.tsv packer/*.exe --repo "$GITHUB_REPOSITORY" \
               --title "$TITLE" --notes-file body.md --target "${{ needs.shell.outputs.sha }}"
           fi
           echo "published $TAG" >> "$GITHUB_STEP_SUMMARY"
