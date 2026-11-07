@@ -170,3 +170,34 @@ mem: a released range in the anonymous part goes back as anonymous memory	内存
 mem: keep the first part of the guest block anonymous, the rest in files	内存：客人内存块的前一段留在匿名内存里，其余仍走文件。
 Move the patch base to b4318c7a: linear-texture reads and one more game	移基座到 b4318c7a：线性纹理读取，另加一款游戏。
 pack: write every step's timing to logs/steps.log	打包：每一步的耗时写进 logs/steps.log。
+The packer exe: rebuilt from toolsrc/nxn-packer	打包器 exe 重编（改界面、加按钮之后都会重编一次）
+shell: drop the in-app what's new page	撤掉 App 里的「更新说明」页：这项要放在打包器窗口里，不是游戏里
+shell: What's new on the phone, and a packer that can rebuild only the package	打包器新增「更新说明」按钮；`shell_game_pack.py --ipa-only` 只重打安装包，不再碰游戏目录
+shell: a cover flow that stays where you put it, and text you can read	修封面流「滑过去又弹回来」：留白原来按当前卡片的宽度算，滑动时布局跟着变；改为统一的滚动单元
+packer: say what really stopped the probe	识别失败时不再把锅甩给 prod.keys：真因是上一行那句（包损坏），现在会明说
+shell: one game opens the library too	只有一个游戏也进库页（原来会跳进旧设置页），并把 per-game 设置键一起对齐
+shell: the picture is the picture, and the packer says where things went	库页那两块黑色蒙版减淡到几乎看不见；日志里的数据结构改为只报数量
+the shell is called ns2ios: its bundle ID, its display name, and its assets	壳改名 ns2ios：bundle ID、显示名、发布资产名一起改（旧包不会被覆盖，是另一个 App）
+shell: the cheats page has no title either	金手指页也去掉标题与导航栏底色，和设置页一致
+shell: settings are one flat list, the picked value is white, and the cheats bar is gone	设置页所有分组平铺（不再折叠），选择器的值改纯白，金手指页去掉顶部框
+shell: bold white text instead of dark panels, and no title bar on a game's page	设置页去掉黑色半透板，字改成粗白；游戏页顶部不再显示游戏名
+shell: the cheats page is readable and one size bigger	金手指页字号整体放大一级，并加一层深色底提升对比
+shell: a game's page reads clearly, and its picture has no frame	游戏设置页字看不清、卡片外面一圈黑框：都修了（图铺满，不再套底板）
+release: the shell is also published as an .ipa	发布时除了壳的 zip，同时挂出可以直接装的 .ipa
+shell: the library app gets its own home-screen icon	库版 App 有了自己的桌面图标
+shell: the backdrop is the picture itself, and a save says so	背景就是那张画本身；保存设置时会在界面上说一声
+shell: the default picture is the backdrop, and a picked one shows	默认背景可用，用户自选的背景会显示出来
+shell: square icon covers, the default background found, background set from the big cover	封面用方形图标、能找到默认背景、点大封面就能换背景
+shell: smaller type, settings beside PLAY, cheats on its own page, and pictures for the backdrop	字号收敛、设置挪到 PLAY 旁边、金手指单独一页、背景支持插画
+shell: a landscape Cover Flow library, art behind it, options on the game's own page	横屏封面流式游戏库，背后是插画，选项放进每个游戏自己的页面
+shell: a library that looks like one, with the settings on the game's own page	库页做成真正的游戏库样式，设置归到每个游戏自己的页面
+shell: the cheat panel's own keys are per game too	金手指面板的保存键也按游戏分开
+shell: library page that looks like a library, one set of choices per game	库页成型，每个游戏一套独立的设置
+shell: the library start fills the argv dm_main gets, and reads that game's env.txt	从库页启动时补齐 dm_main 的 argv，并读该游戏自己的 env.txt
+shell: fix what the review of the library found	修掉库页代码审查发现的问题
+shell: a library page for an app that holds several games	多游戏 App 的游戏库页面：一个 App 可以装多个游戏
+shell: the game's pipeline archive is read from its data folder	游戏的管线档案从它自己的数据目录读
+shell: the game's own dm/env.txt is read from its framework	游戏自己的 dm/env.txt 从它的 framework 里读
+shell: a game's framework also names the game's dm/ for the settings screen	framework 里也指向该游戏自己的 dm/，设置页据此显示
+shell: a game's framework, so one app can hold several games	每个游戏打成独立的 framework：一个 App 可以装多个游戏
+release: the auto-generated smoke line is English only	发布页里自动生成的那行冒烟结果固定英文
