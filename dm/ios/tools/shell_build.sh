@@ -18,8 +18,8 @@ t() { echo "[$(date +%T)] $*"; }; die() { t "FAIL: $*"; exit 1; }
 # The neutral placeholder profile: modules / romfs marker / chain version are all resolved at run time in shell mode.
 export GAME=0000000000000000
 export LC_ALL=C
-export DM_BUNDLE_ID=${DM_BUNDLE_ID:-org.nxnative.shell}
-export DM_DISPLAY_NAME=${DM_DISPLAY_NAME:-Shell}
+export DM_BUNDLE_ID=${DM_BUNDLE_ID:-org.nxnative.ns2ios}
+export DM_DISPLAY_NAME=${DM_DISPLAY_NAME:-ns2ios}
 export DM_APP_VERSION=${DM_APP_VERSION:-1.0}
 export DM_APP_CATEGORY=public.app-category.action-games
 export DM_TEAM_ID=${DM_TEAM_ID:-0000000000}
@@ -27,7 +27,7 @@ export DM_SHOW_FPS=NO
 export DM_LANG=${DM_LANG:-en-US}
 # Upstream's project.yml names the scheme "${DM_SCHEME_NAME}" and build_ipa.sh sets it from the game name; a shell has no game,
 # so it supplies its own. Without it xcodegen writes the variable name literally and xcodebuild finds no such scheme.
-export DM_SCHEME_NAME=${DM_SCHEME_NAME:-"Shell (shell)"}
+export DM_SCHEME_NAME=${DM_SCHEME_NAME:-"ns2ios"}
 
 ROOT=${DM_ROOT:-$HOME/dm-work}; O=$ROOT/build/shell; DD=$O/dd; A=$O/app
 rm -rf "$O" && mkdir -p "$O" || die "cannot create $O"

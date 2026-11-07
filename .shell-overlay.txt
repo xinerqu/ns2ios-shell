@@ -76,6 +76,7 @@
 ~ dm/tools/shader_cache.py      # os.replace retries a Windows sharing violation: the store writes each metallib to the cache, and a scanner holding the destination fails the rename
 ~ dm/ios/Sources/main.m         # modules from the Guest library, relaxed romfs lookup, shader preparation before the host
 ~ dm/ios/Sources/Launcher.swift # the Cheats section in the settings list (its view: dm/ios/Sources/CheatsView.swift)
+~ dm/ios/Sources/LauncherRow.swift # one setting row: bold white label and no blue picked value, so it reads over the game picture
 ~ dm/ios/Sources/LauncherSettings.swift # saved choices under a per-game key when the app holds several games
 ~ dm/ios/Sources/front_ios.m     # reads the cheats switches again when Play is pressed: the host loads at launch, before the screen
 ~ dm/ios/Sources/DmGamepad.m    # profile pad_layout overridable at run time (DM_PAD_LAYOUT), for the first launch only

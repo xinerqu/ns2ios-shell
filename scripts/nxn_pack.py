@@ -2011,7 +2011,7 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     # App identity: name, version, bundle ID, icon.
     #
     # The bundle ID has to be per game. iOS identifies an app by it, so every package carrying the shell's
-    # org.nxnative.shell is the same app: installing the second game replaces the first, however different the two look on
+    # org.nxnative.ns2ios is the same app: installing the second game replaces the first, however different the two look on
     # the home screen. Upstream derives it from the title ID (build_ipa_from_nsp.py), which also keeps a repack of the same
     # game an update of it rather than a second copy.
     ip = A / 'Info.plist'

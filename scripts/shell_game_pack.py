@@ -179,7 +179,7 @@ def main():
 
     # ---- the test package: the shell with this one framework inside ----
     if a.ipa:
-        shell = Path(a.shell) if a.shell else next(iter(sorted(NXN.parent.glob('shell-*.zip'))), None)
+        shell = Path(a.shell) if a.shell else next(iter(sorted(NXN.parent.glob('ns2ios-*.zip')) or sorted(NXN.parent.glob('shell-*.zip'))), None)
         if not shell or not Path(shell).is_file(): die('no shell zip (pass --shell)')
         stem = fwdir.name
         with zipfile.ZipFile(shell) as z:
