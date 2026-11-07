@@ -165,6 +165,8 @@ static NSString *shell_game_dm(NSString *doc) {
         if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
         setenv("DM_ROMFS", romfs.fileSystemRepresentation, 1);
         if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 1);
+        NSString *pso = [game stringByAppendingPathComponent:@"pso"];   // the offline pipeline archive, when the packer moved one here
+        if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 1);
         // Overwrite: the shared Documents/save and Documents/cheats below are for the one-game app; with several games each keeps its own,
         // so deleting one game's data never touches another's saves.
         setenv("DM_SAVE", saves.fileSystemRepresentation, 1);

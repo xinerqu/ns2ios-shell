@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,67 @@
+@@ -102,6 +114,69 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -97,6 +97,8 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
 +        setenv("DM_ROMFS", romfs.fileSystemRepresentation, 1);
 +        if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 1);
++        NSString *pso = [game stringByAppendingPathComponent:@"pso"];   // the offline pipeline archive, when the packer moved one here
++        if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 1);
 +        // Overwrite: the shared Documents/save and Documents/cheats below are for the one-game app; with several games each keeps its own,
 +        // so deleting one game's data never touches another's saves.
 +        setenv("DM_SAVE", saves.fileSystemRepresentation, 1);
@@ -110,7 +112,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
  // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -129,9 +202,10 @@
+@@ -129,9 +204,10 @@
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
@@ -123,7 +125,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -153,7 +227,16 @@
+@@ -153,7 +229,16 @@
      NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
      for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
  #endif
@@ -141,7 +143,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
          for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
              NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
-@@ -174,10 +257,27 @@
+@@ -174,10 +259,27 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -169,7 +171,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
-@@ -185,6 +285,12 @@
+@@ -185,6 +287,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -182,7 +184,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -197,6 +303,11 @@
+@@ -197,6 +305,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -194,7 +196,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -232,11 +343,19 @@
+@@ -232,11 +345,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
