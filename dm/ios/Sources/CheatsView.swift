@@ -20,6 +20,10 @@ import Foundation
 private func cheatKeySuffix() -> String { gameSettingsPrefix() }
 
 struct CheatsSection: View {
+    /// Where this game's cheat files live. nil: the environment's DM_CHEATS, else Documents/cheats (the one-game app). The library's
+    /// game page passes ns2ios/cheats/<title ID> itself, because DM_CHEATS is only set once that game is started.
+    var cheatsDir: URL? = nil
+
     @AppStorage("cheats.text" + cheatKeySuffix()) private var text: String = ""
     @AppStorage("cheats.on" + cheatKeySuffix()) private var onNames: String = ""
     @AppStorage("cheats.allowCode" + cheatKeySuffix()) private var allowCode = false   // off: entries that patch instructions are not switchable
@@ -197,7 +201,7 @@ struct CheatsSection: View {
     /// that runs in this one: it turns them off and says so, instead of leaving the panel showing switches the game will not
     /// honour until the launch after next.
     private func loadArmed() {
-        guard let items = try? FileManager.default.contentsOfDirectory(at: Self.dir, includingPropertiesForKeys: nil) else { return }
+        guard let items = try? FileManager.default.contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil) else { return }
         for f in items where f.lastPathComponent.hasPrefix(".cheats-armed-") {
             guard let s = try? String(contentsOf: f, encoding: .utf8) else { continue }
             var names: [String] = []
@@ -221,7 +225,7 @@ struct CheatsSection: View {
 
     /// What the host made of every entry last time: "# build <bid> <version>", then "state<TAB>name<TAB>reason".
     private func loadLastRun() {
-        let f = Self.dir.appendingPathComponent("last-run.txt")
+        let f = dirURL.appendingPathComponent("last-run.txt")
         guard let s = try? String(contentsOf: f, encoding: .utf8) else { return }
         var states: [String: RunState] = [:]
         var build = ""
@@ -252,6 +256,7 @@ struct CheatsSection: View {
         }
     }
 
+    private var dirURL: URL { cheatsDir ?? Self.dir }
     private static var dir: URL {
         // DM_CHEATS is where the host reads cheats from: Documents/cheats for a one-game package, ns2ios/cheats/<title ID> for an app that
         // holds several games (main.m). Writing to the fixed path would have made the panel and the host disagree.

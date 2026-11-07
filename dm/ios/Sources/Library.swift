@@ -226,478 +226,427 @@ private final class LibraryModel: ObservableObject {
 }
 
 // MARK: - View
+//
+// 横屏沉浸式游戏库：中央焦点封面 + 随游戏切换的动态背景 + 底部固定 PLAY。只在这一层做视觉，数据来自 GameLibrary.scan()，
+// 启动仍然只走 LibraryModel.start() -> dm_shell_start_game(tid)，不碰任何加载/启动逻辑。
+// Landscape only: the app's Info.plist allows landscape on iPhone already, so no portrait layout is drawn.
 
 private struct LibraryView: View {
     @ObservedObject var model: LibraryModel
+    @State private var selected: String?          // the game in the middle of the flow
+    @State private var shown: String?             // its title ID, one beat behind: the background crossfades on this
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var current: LibraryGame? {
+        model.games.first { $0.tid == selected } ?? model.games.first
+    }
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geo in
-                let columns = gridColumns(geo.size)
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    ScrollView {
-                        if model.games.isEmpty {
-                            emptyState.padding(.top, 32)
-                        } else if let columns {
-                            LazyVGrid(columns: columns, spacing: 14) {
-                                cards(vertical: true)
-                            }
-                            .padding(EdgeInsets(top: 10, leading: 20, bottom: 28, trailing: 20))
-                        } else {
-                            LazyVStack(spacing: 12) {
-                                cards(vertical: false)
-                            }
-                            .padding(EdgeInsets(top: 10, leading: 20, bottom: 28, trailing: 20))
-                        }
-                    }
+            ZStack {
+                Backdrop(game: model.games.first { $0.tid == shown } ?? current, animated: !reduceMotion)
+                VStack(spacing: 0) {
+                    topBar
+                    Spacer(minLength: 0)
+                    flow
+                    caption
+                    playButton
+                    Spacer(minLength: 0)
+                    footer
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: LibraryGame.self) { game in GameDetail(model: model, game: game) }
+            .task(id: current?.tid) {
+                // 背景比选中晚一拍：先换封面，再淡入新背景，避免两层同时跳
+                let target = current?.tid
+                if shown != target {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    withAnimation(.easeInOut(duration: 0.45)) { shown = target }
                 }
             }
-            .background { heroBackground }
-            .navigationDestination(for: LibraryGame.self) { game in
-                GameDetail(model: model, game: game)
-            }
+            .onAppear { if selected == nil { selected = model.games.first?.tid; shown = selected } }
         }
-        .preferredColorScheme(.dark)   // 库页固定深色：模糊图标底 + 深色卡片，两种系统外观下都成立
+        .preferredColorScheme(.dark)
     }
 
-    // 背景：用第一个（或正在启动的那个）游戏的图标铺满、模糊、压暗；没有游戏时只有一层渐变。
-    @ViewBuilder private var heroBackground: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-            let hero = model.starting.flatMap { tid in model.games.first { $0.tid == tid } } ?? model.games.first
-            if let art = hero?.cover ?? hero?.icon {
-                Image(uiImage: art)
-                    .resizable().scaledToFill()
-                    .blur(radius: 45, opaque: true)
-                    .opacity(0.9)
-                    .overlay(Color.black.opacity(0.45))
-                    .ignoresSafeArea()
-            }
-            LinearGradient(colors: [Color.black.opacity(0.05), Color.black.opacity(0.55)],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-        }
-    }
+    // MARK: top bar — weak on purpose, the covers own the screen
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text(LibText.t("游戏库", "Library"))
-                .font(.largeTitle.weight(.bold))
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            Text("ns2ios").font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+            Text(LibText.t("游戏库", "GAME LIBRARY"))
+                .font(.caption2.weight(.medium)).tracking(2)
+                .foregroundStyle(.white.opacity(0.45))
             Spacer(minLength: 0)
-            Button {
-                model.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 34, height: 34)
+            Text(LibText.t("\(model.games.count) 款游戏", "\(model.games.count) games"))
+                .font(.caption).foregroundStyle(.white.opacity(0.45))
+            Button { model.refresh() } label: {
+                Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
+                    .frame(width: 28, height: 28)
             }
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.circle)
+            .buttonStyle(.plain)
+            .foregroundStyle(.white.opacity(0.7))
             .accessibilityLabel(LibText.t("刷新", "Refresh"))
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
     }
 
-    /// 横屏或 iPad 用自适应网格，竖屏一行一个。
-    private func gridColumns(_ size: CGSize) -> [GridItem]? {
-        let wide = size.width > size.height || min(size.width, size.height) >= 600
-        guard wide else { return nil }
-        return [GridItem(.adaptive(minimum: 220), spacing: 12, alignment: .top)]
-    }
+    // MARK: the flow
 
-    @ViewBuilder
-    private func cards(vertical: Bool) -> some View {
-        ForEach(model.games) { game in
-            card(game, vertical: vertical)
+    private var flow: some View {
+        GeometryReader { geo in
+            let h = min(geo.size.height, 250)
+            let w = h * 16 / 9
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 22) {
+                    ForEach(model.games) { game in
+                        NavigationLink(value: game) {
+                            CoverCell(game: game, width: w, height: h, focused: game.tid == selected)
+                        }
+                        .buttonStyle(.plain)
+                        .id(game.tid)
+                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                            content
+                                .scaleEffect(phase.isIdentity ? 1 : 0.78)
+                                .opacity(phase.isIdentity ? 1 : 0.62)
+                        }
+                        .disabled(model.starting != nil && model.starting != game.tid)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.horizontal, max(0, (geo.size.width - w) / 2))
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $selected, anchor: .center)
+            .scrollIndicators(.hidden)
+            .frame(height: h + 18)
+        }
+        .frame(maxHeight: 268)
+        .overlay(alignment: .center) {
+            if model.games.isEmpty { emptyHint }
         }
     }
 
-    private func card(_ game: LibraryGame, vertical: Bool) -> some View {
-        NavigationLink(value: game) {
-            if vertical {
-                verticalCard(game)
-            } else {
-                horizontalCard(game)
+    // MARK: the caption under the covers
+
+    private var caption: some View {
+        VStack(spacing: 6) {
+            Text(current?.name ?? LibText.t("还没有游戏", "No games yet"))
+                .font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
+                .lineLimit(1).minimumScaleFactor(0.6)
+                .id(current?.tid ?? "none")
+                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                        removal: .move(edge: .top).combined(with: .opacity)))
+            if let v = current?.version, !v.isEmpty {
+                Text("VERSION " + v)
+                    .font(.caption.weight(.medium)).tracking(1.5)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .id("v" + (current?.tid ?? "none") + v)
+            }
+            if let c = current, !c.chainOK {
+                Text(LibText.t("用旧版壳打包，建议重新打包", "Packed for an older shell — repack recommended"))
+                    .font(.caption2).foregroundStyle(.orange.opacity(0.9))
+            }
+            if let tid = current?.tid, let e = model.errors[tid] {
+                Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).lineLimit(2)
             }
         }
-        .buttonStyle(LibraryCardStyle())
-        .disabled(model.starting != nil && model.starting != game.tid)
-        .opacity(model.starting == nil || model.starting == game.tid ? 1 : 0.4)
+        .animation(.easeInOut(duration: 0.25), value: current?.tid)
+        .padding(.top, 10)
+        .frame(height: 96)
     }
 
-    private func horizontalCard(_ game: LibraryGame) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            banner(game, width: 144)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(game.name).font(.headline).lineLimit(1)
-                    .minimumScaleFactor(0.72).truncationMode(.tail)
-                meta(game)
-                status(game)
-                errorLine(game)
+    private var playButton: some View {
+        Button {
+            guard let game = current else { return }
+            setenv("DM_LAUNCHER", "0", 1)   // 库页就是选择页：不再弹第二个设置页
+            model.start(game)
+        } label: {
+            HStack(spacing: 8) {
+                if let tid = current?.tid, model.starting == tid {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else {
+                    Image(systemName: "play.fill")
+                }
+                Text(LibText.t("开始游戏", "PLAY")).font(.headline)
+            }
+            .frame(width: 260, height: 50)
+            .background(
+                LinearGradient(colors: [Color(red: 0.29, green: 0.42, blue: 1.0), Color(red: 0.55, green: 0.30, blue: 0.95)],
+                               startPoint: .leading, endPoint: .trailing),
+                in: Capsule()
+            )
+            .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
+        }
+        .buttonStyle(PressScaleStyle())
+        .disabled(model.games.isEmpty || model.starting != nil || current?.dataOK == false)
+        .opacity(current?.dataOK == false ? 0.45 : 1)
+    }
+
+    private var footer: some View {
+        HStack {
+            if let c = current {
+                Label(c.dataOK ? LibText.t("可以玩", "Ready") : LibText.t("缺少游戏数据", "Game data missing"),
+                      systemImage: c.dataOK ? "checkmark.circle.fill" : "tray.and.arrow.down.fill")
+                    .font(.caption2).foregroundStyle(c.dataOK ? .green.opacity(0.85) : .yellow.opacity(0.9))
             }
             Spacer(minLength: 0)
-            if model.starting == game.tid {
-                ProgressView().controlSize(.small)
-            }
-            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.35))
-        }
-        .frame(maxWidth: .infinity, minHeight: 92, maxHeight: 92, alignment: .leading)
-    }
-
-    private func verticalCard(_ game: LibraryGame) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            banner(game, width: nil)
-            Text(game.name).font(.headline).lineLimit(1)
-                .minimumScaleFactor(0.72).truncationMode(.tail)
-            meta(game)
-            status(game)
-            if model.starting == game.tid { ProgressView().controlSize(.small) }
-        }
-        .frame(maxWidth: .infinity, minHeight: 196, maxHeight: 196, alignment: .topLeading)
-    }
-
-    /// 16:9 的横版缩略图：有 cover 就用 cover，没有就把图标放在同尺寸的底上，保证两张卡片一样大。
-    private func banner(_ game: LibraryGame, width: CGFloat?) -> some View {
-        Group {
-            if let art = game.cover {
-                Image(uiImage: art).resizable().scaledToFill()
-            } else if let art = game.icon {
-                ZStack {
-                    LinearGradient(colors: [Color.black.opacity(0.55), Color.white.opacity(0.08)],
-                                   startPoint: .topLeading, endPoint: .bottomTrailing)
-                    Image(uiImage: art).resizable().scaledToFit().padding(6)
-                }
-            } else {
-                ZStack {
-                    Color.white.opacity(0.08)
-                    Image(systemName: "gamecontroller.fill").font(.system(size: 26)).foregroundStyle(.white.opacity(0.5))
-                }
+            if model.games.count > 1 {
+                Text(LibText.t("左右滑动切换", "Swipe to switch")).font(.caption2).foregroundStyle(.white.opacity(0.35))
             }
         }
-        .frame(width: width, height: width.map { $0 * 9 / 16 })
-        .frame(maxWidth: width == nil ? .infinity : nil)
-        .aspectRatio(width == nil ? 16.0 / 9.0 : nil, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
-        .accessibilityHidden(true)
+        .frame(height: 20)
     }
 
-    private func icon(_ game: LibraryGame) -> some View {
-        Group {
-            if let image = game.icon {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                ZStack {
-                    Color(uiColor: .tertiarySystemFill)
-                    Image(systemName: "gamecontroller.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(.secondary)
-                }
-            }
+    private var emptyHint: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "square.stack.3d.up.slash").font(.system(size: 30)).foregroundStyle(.white.opacity(0.35))
+            Text(LibText.t("这个 App 里还没有游戏", "No games in this app yet"))
+                .font(.headline).foregroundStyle(.white.opacity(0.8))
+            Text(LibText.t("用打包器把一个游戏打进这个 App，它会出现在这里。",
+                           "Pack a game into this app and it shows up here."))
+                .font(.caption).foregroundStyle(.white.opacity(0.5)).multilineTextAlignment(.center)
+            if let m = model.bootMessage { Text(m).font(.caption2).foregroundStyle(.white.opacity(0.4)) }
         }
-        .frame(width: 72, height: 72)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-        )
-        .accessibilityHidden(true)
-    }
-
-    /// 版本 + 最后 4 位 tid：黑底上要看得清，所以不用 .secondary（深色下几乎不可见）。
-    private func meta(_ game: LibraryGame) -> some View {
-        HStack(spacing: 6) {
-            if let version = game.version, !version.isEmpty {
-                Text("v" + version).monospacedDigit()
-            }
-            Text(String(game.tid.suffix(4))).monospacedDigit()
-            if game.cover == nil { Text(LibText.t("无封面", "no cover")) }
-        }
-        .font(.caption)
-        .foregroundStyle(.white.opacity(0.65))
-    }
-
-    @ViewBuilder
-    private func versionLine(_ game: LibraryGame) -> some View {
-        if let version = game.version, !version.isEmpty {
-            Text("v\(version)")
-                .font(.subheadline)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func status(_ game: LibraryGame) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if game.dataOK {
-                statusLine("checkmark.circle.fill", .green, LibText.t("可以玩", "Ready to play"))
-            } else {
-                statusLine("exclamationmark.triangle.fill", .yellow,
-                           LibText.t("缺少游戏数据，把 romfs.img 放到 Files 里的 ns2ios/games/\(game.tid)/",
-                                     "Game data missing — put romfs.img in Files/ns2ios/games/\(game.tid)/"))
-            }
-            if !game.chainOK {
-                statusLine("clock.arrow.circlepath", .white.opacity(0.6),
-                           LibText.t("这个游戏是用旧版打的，建议重新打包",
-                                     "Packed with an older shell — repacking is recommended"))
-            }
-        }
-    }
-
-    private func statusLine(_ symbol: String, _ tint: Color, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Image(systemName: symbol)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.leading)
-        }
-    }
-
-    @ViewBuilder
-    private func errorLine(_ game: LibraryGame) -> some View {
-        if let error = model.errors[game.tid], !error.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.caption.weight(.semibold))
-                Text(error)
-                    .font(.caption)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(.red)
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "gamecontroller")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(LibText.t("没有找到游戏", "No games found"))
-                .font(.title3.weight(.semibold))
-            Text("这个 App 里还没有游戏。请把游戏的 framework 放到 Frameworks/DmGame<tid>.framework，把数据放到 Files 里的 ns2ios/games/<tid>/romfs.img。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Text("No games in this app yet. Put each game's framework in Frameworks/DmGame<tid>.framework and its data in Files/ns2ios/games/<tid>/romfs.img.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            if let message = model.bootMessage, !message.isEmpty {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(uiColor: .secondarySystemBackground))
-                    )
-            }
-            Button(LibText.t("关闭", "Close")) { model.cancel() }
-                .buttonStyle(.bordered)
-                .padding(.top, 4)
-        }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 24)
-        .frame(maxWidth: 520)
-        .frame(maxWidth: .infinity)
+        .padding(24)
     }
 }
 
-// 二级页面：一个游戏的大图、名字、版本、状态和 Play。设置页仍由 Launcher.swift 在 Play 之后弹出（它读这个游戏的 launcher.json），
-// 所以这里只负责"选它"和"说明它现在能不能玩"。
+// MARK: - One cover in the flow
+
+private struct CoverCell: View {
+    let game: LibraryGame
+    let width: CGFloat
+    let height: CGFloat
+    let focused: Bool
+
+    var body: some View {
+        ZStack {
+            if let cover = game.cover {
+                Image(uiImage: cover).resizable().scaledToFill()
+            } else if let icon = game.icon {
+                LinearGradient(colors: [Color(white: 0.16), Color(white: 0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Image(uiImage: icon).resizable().scaledToFit().padding(height * 0.12)
+            } else {
+                LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
+                Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.2)).foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(.white.opacity(focused ? 0.35 : 0.10), lineWidth: focused ? 1.2 : 0.5)
+        )
+        .shadow(color: .black.opacity(focused ? 0.55 : 0.3), radius: focused ? 22 : 8, y: focused ? 12 : 4)
+        .accessibilityLabel(game.name)
+    }
+}
+
+// MARK: - Backdrop: the current game's art, blurred, under everything
+
+private struct Backdrop: View {
+    let game: LibraryGame?
+    let animated: Bool
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.12), .black],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            if let art = game?.cover ?? game?.icon {
+                GeometryReader { geo in
+                    Image(uiImage: art)
+                        .resizable().scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .blur(radius: 30, opaque: true)
+                        .opacity(0.55)
+                }
+                .overlay(Color.black.opacity(0.55))
+                .transition(.opacity)
+                .id(game?.tid ?? "none")
+            }
+        }
+        .ignoresSafeArea()
+        .animation(animated ? .easeInOut(duration: 0.45) : nil, value: game?.tid)
+    }
+}
+
+private struct PressScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+// MARK: - One game: art and Play on the left, everything else scrolling on the right
+
 private struct GameDetail: View {
     @ObservedObject var model: LibraryModel
     let game: LibraryGame
-    @State private var settings: LauncherModel?   // this game's dm/launcher.json, loaded once the page appears
+    @State private var settings: LauncherModel?
+    @State private var open: Set<String> = []      // which settings groups are expanded: one at a time by default
 
     private var busy: Bool { model.starting != nil }
-    private var canPlay: Bool { game.dataOK && game.chainOK }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                artwork
-                    .clipShape(RoundedRectangle(cornerRadius: game.cover == nil ? 36 : 18, style: .continuous))
-                    .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
-                VStack(spacing: 6) {
-                    Text(game.name)
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.7)
-                    if let v = game.version, !v.isEmpty {
-                        Text("v\(v)").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    Text(game.tid).font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                }
-                statusPill
-                if let e = model.errors[game.tid] {
-                    Text(e)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                }
-                playButton
-                settingsSection
-            }
-            .padding(.horizontal, 28)
-            .padding(.top, 24)
-            .padding(.bottom, 40)
-            .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 26) {
+            left.frame(width: 330)
+            right
         }
-        .background { background }
+        .padding(.horizontal, 28)
+        .padding(.top, 8)
+        .padding(.bottom, 20)
+        .background(Backdrop(game: game, animated: false))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(game.name).font(.headline).lineLimit(1).foregroundStyle(.white)
+            }
+        }
         .task {
             guard settings == nil else { return }
             let url = game.dmDir.appendingPathComponent("launcher.json")
             guard let data = try? Data(contentsOf: url),
                   let file = try? JSONDecoder().decode(SettingsFile.self, from: data) else { return }
-            settings = LauncherModel(file.settings, prefix: "game." + game.tid)
-        }
-        .navigationTitle(LibText.t("游戏", "Game"))
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    @ViewBuilder private var artwork: some View {
-        if let image = game.cover {
-            Image(uiImage: image).resizable().scaledToFill()
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-        } else if let image = game.icon {
-            Image(uiImage: image).resizable().scaledToFill()
-                .frame(width: 168, height: 168)
-        } else {
-            ZStack {
-                Color.white.opacity(0.08)
-                Image(systemName: "gamecontroller.fill").font(.system(size: 54)).foregroundStyle(.white.opacity(0.5))
-            }
-            .frame(width: 168, height: 168)
+            let m = LauncherModel(file.settings, prefix: "game." + game.tid)
+            settings = m
+            if let first = m.sections.first(where: { !m.rows(in: $0).isEmpty }) { open = [first] }
         }
     }
 
-    @ViewBuilder private var background: some View {
-        ZStack {
-            Color(uiColor: .systemBackground)
-            if let image = game.cover ?? game.icon {
-                Image(uiImage: image).resizable().scaledToFill()
-                    .blur(radius: 50, opaque: true).opacity(0.85)
-                    .overlay(Color.black.opacity(0.45))
-                    .ignoresSafeArea()
-            }
-            LinearGradient(colors: [Color.black.opacity(0.1), Color.black.opacity(0.6)],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-        }
-    }
+    // MARK: left: the art, its state, and Play
 
-    private var statusPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: game.dataOK ? (game.chainOK ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                          : "tray.and.arrow.down.fill")
-            Text(game.dataOK ? (game.chainOK ? LibText.t("可以玩", "Ready")
-                                             : LibText.t("用旧版打过，建议重新打包", "Packed for another shell"))
-                             : LibText.t("缺少游戏数据", "Game data missing"))
-        }
-        .font(.footnote.weight(.medium))
-        .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
-    }
-
-    /// 这个游戏的启动选项（它自己的 dm/launcher.json）。
-    @ViewBuilder private var settingsSection: some View {
-        if let m = settings, !m.settings.isEmpty {
-            LibrarySettingsSection(m: m)
-        }
-    }
-
-    private var playButton: some View {
-        Button {
-            settings?.save()                        // saved under this game's keys; the environment is set by dm_show_launcher
-            // No second settings screen: this page is it. Only when this game has options -- without them, leaving the old screen in
-            // place is what applies the saved choices.
-            if settings != nil { setenv("DM_LAUNCHER", "0", 1) }
-            model.start(game)
-        } label: {
-            HStack(spacing: 8) {
-                if model.starting == game.tid {
-                    ProgressView().controlSize(.small)
+    private var left: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Group {
+                if let cover = game.cover {
+                    Image(uiImage: cover).resizable().scaledToFill()
+                } else if let icon = game.icon {
+                    LinearGradient(colors: [Color(white: 0.16), Color(white: 0.07)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .overlay(Image(uiImage: icon).resizable().scaledToFit().padding(24))
                 } else {
-                    Image(systemName: "play.fill")
+                    Color(white: 0.1).overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 44)).foregroundStyle(.white.opacity(0.3)))
                 }
-                Text(LibText.t("开始游戏", "Play")).font(.headline)
             }
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .frame(width: 330, height: 186)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.15)))
+            .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(game.name).font(.title3.weight(.bold)).foregroundStyle(.white).lineLimit(2)
+                Text((game.version.map { "VERSION " + $0 } ?? "") + "  ·  " + String(game.tid.suffix(8)))
+                    .font(.caption).foregroundStyle(.white.opacity(0.5)).monospacedDigit()
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: game.dataOK ? "checkmark.circle.fill" : "tray.and.arrow.down.fill")
+                Text(game.dataOK ? (game.chainOK ? LibText.t("可以玩", "Ready") : LibText.t("旧壳打包，建议重打", "Packed for an older shell"))
+                                 : LibText.t("缺少游戏数据", "Game data missing"))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(game.dataOK ? (game.chainOK ? .green : .orange) : .yellow)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(.white.opacity(0.08), in: Capsule())
+
+            if let e = model.errors[game.tid] {
+                Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                settings?.save()                                  // 存到这个游戏的键下；环境变量由 dm_show_launcher 的 applySaved 设
+                if settings != nil { setenv("DM_LAUNCHER", "0", 1) }   // 库页就是设置页，不再弹第二个
+                model.start(game)
+            } label: {
+                HStack(spacing: 8) {
+                    if model.starting == game.tid { ProgressView().controlSize(.small).tint(.white) }
+                    else { Image(systemName: "play.fill") }
+                    Text(LibText.t("开始游戏", "PLAY")).font(.headline)
+                }
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(LinearGradient(colors: [Color(red: 0.29, green: 0.42, blue: 1.0), Color(red: 0.55, green: 0.30, blue: 0.95)],
+                                           startPoint: .leading, endPoint: .trailing), in: Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+            }
+            .buttonStyle(PressScaleStyle())
+            .disabled(busy || !game.dataOK)
+
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.capsule)
-        .disabled(busy || !canPlay)
-        .padding(.top, 6)
     }
-}
 
-// The launch options of one game. Its own view, so a change in the model redraws it: Reset's enabled state and the rows a switch gates
-// (LauncherModel.rows) follow the model, which a @State in GameDetail would not do.
-private struct LibrarySettingsSection: View {
-    @ObservedObject var m: LauncherModel
+    // MARK: right: the game's own options, the cheats panel, and a reset
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(LibText.t("启动选项", "Launch options"))
-                .font(.headline).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 6)
-            ForEach(m.sections, id: \.self) { section in
-                let rows = m.rows(in: section)
-                if !rows.isEmpty {
-                    Text(section).font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 8).padding(.bottom, 2)
-                    ForEach(rows) { row in
-                        SettingRow(s: row, m: m)
-                            .padding(.vertical, 2)
-                        Divider().overlay(Color.white.opacity(0.08))
+    private var right: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                if let m = settings, !m.settings.isEmpty {
+                    ForEach(m.sections, id: \.self) { section in
+                        let rows = m.rows(in: section)
+                        if !rows.isEmpty {
+                            DisclosureGroup(isExpanded: binding(section)) {
+                                VStack(spacing: 2) {
+                                    ForEach(rows) { row in
+                                        SettingRow(s: row, m: m).padding(.vertical, 2)
+                                        Divider().overlay(Color.white.opacity(0.08))
+                                    }
+                                }
+                                .padding(.top, 4)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(section).font(.subheadline.weight(.semibold)).foregroundStyle(.white.opacity(0.85))
+                                    Spacer(minLength: 0)
+                                    Text("\(rows.count)").font(.caption2).foregroundStyle(.white.opacity(0.4))
+                                }
+                            }
+                            .padding(14)
+                            .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                        }
                     }
+                    HStack {
+                        Button(LibText.t("恢复测试默认值", "Reset to tested defaults")) {
+                            withAnimation { m.reset() }
+                        }
+                        .font(.footnote.weight(.medium)).disabled(!m.changed)
+                        Spacer(minLength: 0)
+                        Text(LibText.t("改动在点 PLAY 时保存", "Saved when you press PLAY"))
+                            .font(.caption2).foregroundStyle(.white.opacity(0.4))
+                    }
+                    .padding(.top, 4)
+                } else {
+                    Text(LibText.t("这个游戏没有启动选项。", "This game has no launch options."))
+                        .font(.footnote).foregroundStyle(.white.opacity(0.45))
                 }
+
+                // 金手指：库阶段 DM_CHEATS 还没设，所以把本游戏的目录直接交给面板
+                CheatsSection(cheatsDir: cheatsDir)
+                    .padding(.top, 6)
             }
-            Button(LibText.t("恢复测试默认值", "Reset to tested defaults")) { m.reset() }
-                .font(.footnote.weight(.medium)).padding(.top, 8)
-                .disabled(!m.changed)
+            .padding(.bottom, 24)
         }
-        .padding(16)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.white.opacity(0.1)))
+    }
+
+    private func binding(_ section: String) -> Binding<Bool> {
+        Binding(get: { open.contains(section) },
+                set: { v in if v { open.insert(section) } else { open.remove(section) } })
+    }
+
+    /// ns2ios/cheats/<title ID>：与 main.m 给这个游戏设的 DM_CHEATS 是同一个目录。
+    private var cheatsDir: URL {
+        let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let d = doc.appendingPathComponent("ns2ios/cheats/\(game.tid)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
     }
 }
 
-private struct LibraryCardStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.primary.opacity(configuration.isPressed ? 0.07 : 0))
-            )
-            .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-// MARK: - Entry point (main.m: dm_show_library)
-
-// Shows the library over the root view controller: picked(tid) once a game is entered, cancelled() when the empty page is closed.
-// 是否显示库由调用方决定（main.m 用 dm_shell_library_needed）；这个出口只负责呈现，多退出一个库页面并不合适。
 @_cdecl("dm_show_library")
 public func dmShowLibrary(_ viewController: UnsafeMutableRawPointer,
                           _ picked: @convention(c) (UnsafePointer<CChar>?) -> Void,
