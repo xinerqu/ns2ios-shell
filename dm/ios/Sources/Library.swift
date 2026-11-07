@@ -58,7 +58,7 @@ func localizedName(_ names: [String: String], fallback: String) -> String {
 }
 
 /// 一个卡片要显示的全部东西：清单里读到的 + 扫描时算出来的。
-private struct LibraryGame: Identifiable {
+private struct LibraryGame: Identifiable, Hashable {
     let tid: String
     let name: String
     let version: String?
@@ -66,6 +66,8 @@ private struct LibraryGame: Identifiable {
     let chainOK: Bool         // chain 为空、DMChain 缺失、或两者相等
     let icon: UIImage?
     var id: String { tid }
+    static func == (a: LibraryGame, b: LibraryGame) -> Bool { a.tid == b.tid }
+    func hash(into h: inout Hasher) { h.combine(tid) }
 }
 
 // MARK: - Scanning
@@ -214,28 +216,51 @@ private struct LibraryView: View {
     @ObservedObject var model: LibraryModel
 
     var body: some View {
-        GeometryReader { geo in
-            let columns = gridColumns(geo.size)
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                ScrollView {
-                    if model.games.isEmpty {
-                        emptyState.padding(.top, 32)
-                    } else if let columns {
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            cards(vertical: true)
+        NavigationStack {
+            GeometryReader { geo in
+                let columns = gridColumns(geo.size)
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    ScrollView {
+                        if model.games.isEmpty {
+                            emptyState.padding(.top, 32)
+                        } else if let columns {
+                            LazyVGrid(columns: columns, spacing: 14) {
+                                cards(vertical: true)
+                            }
+                            .padding(EdgeInsets(top: 10, leading: 20, bottom: 28, trailing: 20))
+                        } else {
+                            LazyVStack(spacing: 12) {
+                                cards(vertical: false)
+                            }
+                            .padding(EdgeInsets(top: 10, leading: 20, bottom: 28, trailing: 20))
                         }
-                        .padding(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
-                    } else {
-                        LazyVStack(spacing: 10) {
-                            cards(vertical: false)
-                        }
-                        .padding(EdgeInsets(top: 8, leading: 20, bottom: 24, trailing: 20))
                     }
                 }
             }
+            .background { heroBackground }
+            .navigationDestination(for: LibraryGame.self) { game in
+                GameDetail(model: model, game: game)
+            }
         }
-        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .preferredColorScheme(.dark)   // 库页固定深色：模糊图标底 + 深色卡片，两种系统外观下都成立
+    }
+
+    // 背景：用第一个（或正在启动的那个）游戏的图标铺满、模糊、压暗；没有游戏时只有一层渐变。
+    @ViewBuilder private var heroBackground: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+            if let art = (model.starting.flatMap { tid in model.games.first { $0.tid == tid } } ?? model.games.first)?.icon {
+                Image(uiImage: art)
+                    .resizable().scaledToFill()
+                    .blur(radius: 60, opaque: true)
+                    .opacity(0.55)
+                    .overlay(Color.black.opacity(0.25))
+                    .ignoresSafeArea()
+            }
+            LinearGradient(colors: [Color.black.opacity(0.05), Color.black.opacity(0.55)],
+                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+        }
     }
 
     private var header: some View {
@@ -274,9 +299,7 @@ private struct LibraryView: View {
     }
 
     private func card(_ game: LibraryGame, vertical: Bool) -> some View {
-        Button {
-            model.start(game)
-        } label: {
+        NavigationLink(value: game) {
             if vertical {
                 verticalCard(game)
             } else {
@@ -284,15 +307,16 @@ private struct LibraryView: View {
             }
         }
         .buttonStyle(LibraryCardStyle())
-        .disabled(model.starting != nil)
-        .opacity(model.starting == nil || model.starting == game.tid ? 1 : 0.45)
+        .disabled(model.starting != nil && model.starting != game.tid)
+        .opacity(model.starting == nil || model.starting == game.tid ? 1 : 0.4)
     }
 
     private func horizontalCard(_ game: LibraryGame) -> some View {
         HStack(alignment: .top, spacing: 12) {
             icon(game)
             VStack(alignment: .leading, spacing: 3) {
-                Text(game.name).font(.headline).lineLimit(2)
+                Text(game.name).font(.headline).lineLimit(1)
+                .minimumScaleFactor(0.72).truncationMode(.tail)
                 versionLine(game)
                 status(game)
                 errorLine(game)
@@ -314,7 +338,8 @@ private struct LibraryView: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            Text(game.name).font(.headline).lineLimit(2)
+            Text(game.name).font(.headline).lineLimit(1)
+                .minimumScaleFactor(0.72).truncationMode(.tail)
             versionLine(game)
             status(game)
             errorLine(game)
@@ -434,6 +459,117 @@ private struct LibraryView: View {
         .padding(.vertical, 24)
         .frame(maxWidth: 520)
         .frame(maxWidth: .infinity)
+    }
+}
+
+// 二级页面：一个游戏的大图、名字、版本、状态和 Play。设置页仍由 Launcher.swift 在 Play 之后弹出（它读这个游戏的 launcher.json），
+// 所以这里只负责"选它"和"说明它现在能不能玩"。
+private struct GameDetail: View {
+    @ObservedObject var model: LibraryModel
+    let game: LibraryGame
+
+    private var busy: Bool { model.starting != nil }
+    private var canPlay: Bool { game.dataOK && game.chainOK }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                artwork
+                    .frame(width: 168, height: 168)
+                    .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
+                VStack(spacing: 6) {
+                    Text(game.name)
+                        .font(.title2.weight(.bold))
+                        .multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.7)
+                    if let v = game.version, !v.isEmpty {
+                        Text("v\(v)").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Text(game.tid).font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                }
+                statusPill
+                if let e = model.errors[game.tid] {
+                    Text(e)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                }
+                playButton
+                Text(LibText.t("点 Play 后先出现这个游戏的设置页，确认后再进入游戏。",
+                               "Play opens this game's settings first; the game starts from there."))
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 24)
+            .padding(.bottom, 40)
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
+        }
+        .background { background }
+        .navigationTitle(LibText.t("游戏", "Game"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    @ViewBuilder private var artwork: some View {
+        if let image = game.icon {
+            Image(uiImage: image).resizable().scaledToFill()
+        } else {
+            ZStack {
+                Color(uiColor: .tertiarySystemFill)
+                Image(systemName: "gamecontroller.fill").font(.system(size: 54)).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var background: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+            if let image = game.icon {
+                Image(uiImage: image).resizable().scaledToFill()
+                    .blur(radius: 70, opaque: true).opacity(0.5)
+                    .overlay(Color.black.opacity(0.3))
+                    .ignoresSafeArea()
+            }
+            LinearGradient(colors: [Color.black.opacity(0.1), Color.black.opacity(0.6)],
+                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+        }
+    }
+
+    private var statusPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: game.dataOK ? (game.chainOK ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                          : "tray.and.arrow.down.fill")
+            Text(game.dataOK ? (game.chainOK ? LibText.t("可以玩", "Ready")
+                                             : LibText.t("用旧版打过，建议重新打包", "Packed for another shell"))
+                             : LibText.t("缺少游戏数据", "Game data missing"))
+        }
+        .font(.footnote.weight(.medium))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+    }
+
+    private var playButton: some View {
+        Button {
+            model.start(game)
+        } label: {
+            HStack(spacing: 8) {
+                if model.starting == game.tid {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "play.fill")
+                }
+                Text(LibText.t("开始游戏", "Play")).font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .disabled(busy || !canPlay)
+        .padding(.top, 6)
     }
 }
 

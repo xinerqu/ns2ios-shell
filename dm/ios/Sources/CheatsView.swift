@@ -249,8 +249,10 @@ struct CheatsSection: View {
     }
 
     private static var dir: URL {
-        let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("cheats", isDirectory: true)
+        // DM_CHEATS is where the host reads cheats from: Documents/cheats for a one-game package, ns2ios/cheats/<title ID> for an app that
+        // holds several games (main.m). Writing to the fixed path would have made the panel and the host disagree.
+        let d = ProcessInfo.processInfo.environment["DM_CHEATS"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("cheats", isDirectory: true)
         if !FileManager.default.fileExists(atPath: d.path) {
             try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         }

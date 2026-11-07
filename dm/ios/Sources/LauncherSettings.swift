@@ -42,9 +42,12 @@ final class LauncherModel: ObservableObject {
     @Published var values: [String: String] = [:]
 
     private let defaults: UserDefaults
+    private let prefix: String   // "game.<title ID>." for an app that holds several games: one game's choices never reach another's
 
-    init(_ settings: [Setting], defaults: UserDefaults = .standard) {
+    init(_ settings: [Setting], defaults: UserDefaults = .standard, prefix: String = "") {
         self.defaults = defaults
+        self.prefix = prefix.isEmpty ? "" : prefix + "."
+
         self.settings = settings
         let env = ProcessInfo.processInfo.environment
         fromLaunch = Set((env["DM_ENV_LAUNCH_KEYS"] ?? "").split(separator: " ").map(String.init))
@@ -53,7 +56,7 @@ final class LauncherModel: ObservableObject {
         if ignoreSaved { fputs("launcher: saved choices ignored (DM_SAVED_CHOICES=0)\n", stderr) }
         for s in settings {
             if fixed.contains(s.env), let v = env[s.env] { values[s.env] = v; continue }
-            let saved = ignoreSaved ? nil : defaults.object(forKey: "launcher." + s.env) as? String   // a string, as launcher.c reads it: not string(forKey:), which turns a number into one
+            let saved = ignoreSaved ? nil : defaults.object(forKey: key(s.env)) as? String   // a string, as launcher.c reads it: not string(forKey:), which turns a number into one
             values[s.env] = saved.flatMap { s.accepts($0) ? $0 : nil } ?? s.def   // a saved choice the game no longer offers: its default
         }
     }
@@ -103,8 +106,10 @@ final class LauncherModel: ObservableObject {
             setenv(s.env, v, 1); fputs("launcher: \(s.env)=\(v)\(s.isDefault(v) ? "" : " (changed)")\n", stderr)
         }
     }
+    // The key a choice is saved under: "<prefix>launcher.<env>". Empty prefix = the one-game app, the key it always used.
+    func key(_ env: String) -> String { prefix + "launcher." + env }
     private func store(_ s: Setting, _ v: String) {
-        if !ignoreSaved { if s.isDefault(v) { defaults.removeObject(forKey: "launcher." + s.env) } else { defaults.set(v, forKey: "launcher." + s.env) } }
+        if !ignoreSaved { if s.isDefault(v) { defaults.removeObject(forKey: key(s.env)) } else { defaults.set(v, forKey: key(s.env)) } }
     }
 
     // A choice made while the game runs (the iOS in-game menu, GameMenu.swift): saved as Play saves it, so the settings screen shows it at the next start, and put in the environment.

@@ -160,7 +160,8 @@ static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err,
         NSString *saves = [[home stringByAppendingPathComponent:@"saves"] stringByAppendingPathComponent:tid];
         NSString *cheats = [[home stringByAppendingPathComponent:@"cheats"] stringByAppendingPathComponent:tid];
         NSString *romfs = [game stringByAppendingPathComponent:@"romfs.img"], *aoc = [game stringByAppendingPathComponent:@"aoc"];
-        for (NSString *d in @[[home stringByAppendingPathComponent:@"games"], saves, cheats, [game stringByAppendingPathComponent:@"msl"]])
+        for (NSString *d in @[[home stringByAppendingPathComponent:@"games"], saves, cheats, [game stringByAppendingPathComponent:@"msl"],
+                              [game stringByAppendingPathComponent:@"temp"]])
             [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
         // Not an error the app can work around: the data is copied in from the Files app, so it says where (front_ios_boot_message).
         if (!romfs_image_complete(romfs)) {
@@ -182,6 +183,8 @@ static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err,
         if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 1);
         // Overwrite: the shared Documents/save and Documents/cheats below are for the one-game app; with several games each keeps its own,
         // so deleting one game's data never touches another's saves.
+        // Its own temp: the temp: mount and the cache/sysdata storage a game writes (hle_fs.c) would otherwise be shared by every game
+        setenv("DM_TEMP", [game stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 1);
         setenv("DM_SAVE", saves.fileSystemRepresentation, 1);
         setenv("DM_CHEATS", cheats.fileSystemRepresentation, 1);
         fprintf(stderr, "boot: game framework %s\n", exe.fileSystemRepresentation);

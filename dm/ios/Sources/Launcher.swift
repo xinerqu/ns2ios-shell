@@ -166,6 +166,16 @@ private struct LauncherView: View {
     }
 }
 
+// The prefix this game's saved choices live under: an app that holds several games keeps one set per title ID (main.m sets DM_APP_DM to
+// <framework>/dm), and a one-game package keeps the keys it always used (empty prefix).
+func gameSettingsPrefix() -> String {
+    guard let dm = getenv("DM_APP_DM").map({ String(cString: $0) }) else { return "" }
+    let name = ((dm as NSString).deletingLastPathComponent as NSString).lastPathComponent   // DmGame<title ID>.framework
+    guard name.hasPrefix("DmGame"), name.hasSuffix(".framework") else { return "" }
+    let tid = String(name.dropFirst(6).dropLast(10))
+    return tid.count == 16 ? "game." + tid : ""
+}
+
 // Shows the launcher over the root view controller and calls done once the settings are in the environment; false (done is not called) when there is no launcher
 @_cdecl("dm_show_launcher")
 public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @convention(c) () -> Void) -> Bool {
@@ -173,7 +183,7 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
     let dir = getenv("DM_APP_DM").map { URL(fileURLWithPath: String(cString: $0)) } ?? Bundle.main.resourceURL?.appendingPathComponent("dm")
     guard let url = dir?.appendingPathComponent("launcher.json"), let data = try? Data(contentsOf: url) else { return false }
     guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
-    let model = LauncherModel(file.settings)
+    let model = LauncherModel(file.settings, prefix: gameSettingsPrefix())
     gameMenuModel = model   // the in-game menu shows and saves the same choices (GameMenu.swift)
     if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); model.applySaved(); return false }
     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
