@@ -66,12 +66,17 @@ def nacp_names(path):
 
 
 def chain_of(app):
+    """The NVN shader library's translation chain, or '' when this game has none (GL/Vulkan games carry gl/ or vk/ tables and no
+    b-<chain>.img): an all-zero chain from a placeholder header must not read as "packed for another shell" in the library."""
     for c in (app / 'msl').glob('b-*'):
-        return c.name[2:-4] if c.name.endswith('.img') else c.name[2:]
+        v = c.name[2:-4] if c.name.endswith('.img') else c.name[2:]
+        return '' if set(v) <= {'0'} else v
     for d in (app / 'dm').glob('c1_full.tsv'):
         head = d.open(encoding='utf-8', errors='replace').readline()
         i = head.find('b-')
-        if i >= 0: return head[i + 2:].split()[0]
+        if i >= 0:
+            v = head[i + 2:].split()[0]
+            return '' if set(v) <= {'0'} else v
     return ''
 
 
@@ -79,9 +84,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('work', help='the pack work folder (…/<title ID>_pack), or one of its stage/Payload/<App>.app folders')
     ap.add_argument('out', help='where the framework and the ns2ios folder are written')
-    ap.add_argument('--ipa', help='also write this .ipa: the shell + the framework')
+    ap.add_argument('--ipa', help='also write this .ipa: the shell plus every DmGame*.framework in the output folder')
     ap.add_argument('--shell', help='the shell zip (…/shell-<…>.zip); default: the one beside pack.cmd')
     ap.add_argument('--icon', help='the library icon (60x60@3x from the package is used otherwise)')
+    ap.add_argument('--cover', help='a 16:9 banner for the library (cover.jpg/png beside the game files is used otherwise)')
     a = ap.parse_args()
 
     work, out = Path(a.work).resolve(), Path(a.out).resolve()
@@ -120,6 +126,18 @@ def main():
 
     icon = Path(a.icon) if a.icon else app / 'AppIcon60x60@3x.png'
     if icon.is_file(): shutil.copyfile(icon, fwdir / 'icon.png')
+    # A 16:9 banner for the library, when one is there: cover.jpg/png beside the game files (or --cover). Without one the library draws
+    # the icon on a tile, so a game never looks broken -- the library checks for this file by name.
+    if a.cover:
+        cover = Path(a.cover)
+        if not cover.is_file(): die('no such cover: %s' % cover)
+    else:
+        # beside the game's files first (that is where the icon and the RomFS image are), then the work folder
+        cover = next((q for q in (app / 'cover.jpg', app / 'cover.png', work / 'cover.jpg', work / 'cover.png') if q.is_file()), None)
+    if cover:
+        # the library looks for exactly cover.jpg or cover.png
+        shutil.copyfile(cover, fwdir / ('cover.png' if cover.suffix.lower() == '.png' else 'cover.jpg'))
+        say('cover: %s' % cover.name)
 
     nacps = sorted(work.glob('extract/*/control.nacp')) or sorted(work.glob('extract/**/control.nacp'))
     names = nacp_names(nacps[-1]) if nacps else {}
@@ -141,12 +159,22 @@ def main():
         how.append('romfs/ copied')
     else: die('the package holds neither romfs.img nor romfs/')
     if (app / 'msl').is_dir():
-        (data / 'msl').mkdir(exist_ok=True)
-        for src in sorted((app / 'msl').iterdir()):
-            if src.is_file(): how.append('msl/%s %s' % (src.name, link_or_copy(src, data / 'msl' / src.name)))
+        # recursively: a GL or Vulkan game keeps gl/ and vk/ subfolders here, and hle_gl.m/hle_vk.m read their tables from there
+        for src in sorted((app / 'msl').rglob('*')):
+            if src.is_file():
+                dst = data / 'msl' / src.relative_to(app / 'msl')
+                how.append('msl/%s %s' % (src.relative_to(app / 'msl'), link_or_copy(src, dst)))
     if (app / 'aoc').is_dir():
         (data / 'aoc').mkdir(exist_ok=True)
         for src in sorted((app / 'aoc').iterdir()): how.append('aoc/%s %s' % (src.name, link_or_copy(src, data / 'aoc' / src.name)))
+    # pso/ (the offline pipeline archive), html/ (offline pages) and jit/ (an nn::jit game's image): the host reads all three beside the
+    # RomFS or from the bundle, so they belong to the game and travel with its data. jit/ is not optional: loader.c dies without it.
+    for extra in ('pso', 'html', 'jit'):
+        if not (app / extra).is_dir(): continue
+        (data / extra).mkdir(exist_ok=True)
+        how.append(extra + '/ %d entries' % len([s for s in (app / extra).rglob('*') if s.is_file()]))
+        for src in sorted((app / extra).rglob('*')):
+            if src.is_file(): link_or_copy(src, data / extra / src.relative_to(app / extra))
     say('data folder %s: %s' % (data, '; '.join(how) or 'nothing'))
 
     # ---- the test package: the shell with this one framework inside ----
@@ -161,10 +189,14 @@ def main():
             with zipfile.ZipFile(a.ipa, 'w', zipfile.ZIP_DEFLATED) as o:
                 for it in z.infolist():
                     o.writestr(it, z.read(it.filename))
-                for src in sorted(fwdir.rglob('*')):
-                    if src.is_file():
-                        o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, stem, src.relative_to(fwdir).as_posix()))
-        say('package %s (%s + %s)' % (a.ipa, Path(shell).name, stem))
+                # every framework in the output folder, not only this run's: one .ipa that holds all the games packed so far (add a
+                # game = pack it into the same folder, then this step again; the phone reinstalls the app, its data and saves stay)
+                have = sorted(p for p in out.glob('DmGame*.framework') if p.is_dir())
+                for fw2 in have:
+                    for src in sorted(fw2.rglob('*')):
+                        if src.is_file():
+                            o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw2.name, src.relative_to(fw2).as_posix()))
+        say('package %s (%s + %d game(s): %s)' % (a.ipa, Path(shell).name, len(have), ', '.join(p.name for p in have)))
 
     say('done: copy %s/ns2ios to the app\'s Documents (Files app), then install the package' % out)
 

@@ -98,6 +98,12 @@ final class LauncherModel: ObservableObject {
 
     // Before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default). Only a choice that
     // differs from the game's default is stored: a setting the player left at its default follows the defaults of a later build (the settings it was tested with)
+    // Saves what this screen shows, without putting it in the environment: the library's own settings page uses it, and the environment is
+    // set by applySaved() when the game starts -- after main.m has read the game's dm/env.txt, whose values must win.
+    func save() {
+        for s in settings where !fixed.contains(s.env) { store(s, values[s.env] ?? s.def) }
+    }
+
     func apply() {
         for s in settings {
             let v = values[s.env] ?? s.def
