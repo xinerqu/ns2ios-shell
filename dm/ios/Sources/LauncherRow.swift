@@ -39,6 +39,7 @@ struct SettingRow: View {
                     settingLabel
                 }
                 .pickerStyle(.menu)
+                .tint(.white)                         // 选中的值默认是系统蓝，压在白字里格外扎眼
             case "range":
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {

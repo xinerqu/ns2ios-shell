@@ -675,6 +675,10 @@ private struct CheatsPage: View {
         }
         .navigationTitle(LibText.t("金手指", "Cheats"))
         .navigationBarTitleDisplayMode(.inline)
+        // 导航栏那层半透明底在照片上会露成一块「很高的框体」（坤哥 2026-11-08 第二次点名）；
+        // 标题默认是浅灰，这里强制深色方案让它变白。
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 
@@ -692,7 +696,6 @@ private struct GameDetail: View {
     @ObservedObject var model: LibraryModel
     let game: LibraryGame
     @State private var settings: LauncherModel?
-    @State private var open: Set<String> = []      // which settings groups are expanded: one at a time by default
 
     private var busy: Bool { model.starting != nil }
 
@@ -723,7 +726,6 @@ private struct GameDetail: View {
                   let file = try? JSONDecoder().decode(SettingsFile.self, from: data) else { return }
             let m = LauncherModel(file.settings, prefix: "game." + game.tid)
             settings = m
-            if let first = m.sections.first(where: { !m.rows(in: $0).isEmpty }) { open = [first] }
         }
     }
 
@@ -793,25 +795,23 @@ private struct GameDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if let m = settings, !m.settings.isEmpty {
+                    // 全部平铺：原来每组是一个折叠的二级目录，Performance 只有 HUD 一项也要点开一次，
+                    // 而且折叠起来的东西用户看不见（坤哥 2026-11-08：没必要放二级目录，直接显示）
                     ForEach(m.sections, id: \.self) { section in
                         let rows = m.rows(in: section)
                         if !rows.isEmpty {
-                            DisclosureGroup(isExpanded: binding(section)) {
-                                VStack(spacing: 2) {
-                                    ForEach(rows) { row in
-                                        SettingRow(s: row, m: m).padding(.vertical, 2)
-                                        Divider().overlay(Color.white.opacity(0.12))
-                                    }
-                                }
-                                .padding(.top, 4)
-                            } label: {
+                            VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text(section).font(.subheadline.weight(.bold)).foregroundStyle(.white)
                                     Spacer(minLength: 0)
                                     Text("\(rows.count)").font(.caption2.weight(.semibold)).foregroundStyle(.white.opacity(0.75))
                                 }
+                                .padding(.top, 10).padding(.bottom, 2)
+                                ForEach(rows) { row in
+                                    SettingRow(s: row, m: m).padding(.vertical, 2)
+                                    Divider().overlay(Color.white.opacity(0.12))
+                                }
                             }
-                            .padding(.vertical, 6)
                         }
                     }
                     HStack {
@@ -833,11 +833,6 @@ private struct GameDetail: View {
             .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
-    }
-
-    private func binding(_ section: String) -> Binding<Bool> {
-        Binding(get: { open.contains(section) },
-                set: { v in if v { open.insert(section) } else { open.remove(section) } })
     }
 
 }
