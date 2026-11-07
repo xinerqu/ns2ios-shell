@@ -2231,9 +2231,12 @@ def main():
             if tid:
                 apps = {tid: {'base': xcis[0], 'updates': {}, 'dlc': [], 'all': [('base', 'v0', xcis[0])]}}
     if not apps:
+        # 上面那行 warn 才是真因（文件坏了 / 密钥不对 / 读不出来）。这句只是收尾，别把损坏说成缺密钥。
         die('no game could be identified in %s.\n'
             '    An .nsp is read from the package itself; an .xci is read by extracting it, which needs prod.keys that match '
-            'that cartridge.' % folder)
+            'that cartridge.\n'
+            '    The real reason is the line above: a package that fails its hash check is a damaged copy, not a key problem.'
+            % folder)
     if len(apps) != 1:
         die('the folder holds %d different games (%s); keep one game per folder' % (len(apps), ', '.join(sorted(apps))))
     tid = next(iter(apps)); fam = apps[tid]
