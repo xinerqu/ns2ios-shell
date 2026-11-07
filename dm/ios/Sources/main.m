@@ -146,7 +146,13 @@ int dm_shell_game_count(void) {
         if ([name hasPrefix:@"DmGame"] && [name hasSuffix:@".framework"] && name.length > 6 + 10 + 1) n++;
     return n;
 }
-int dm_shell_library_needed(void) { return dm_shell_game_count() != 1; }
+// 有游戏就先给库页 —— 哪怕只有一个（坤哥 2026-11-08：一个游戏时直接进了旧设置页，那页还没按新样式做）。
+// 只有「没有任何 DmGame 框架、但有 Guest.framework」的老单游戏包才走直接启动那条老路。
+int dm_shell_library_needed(void) {
+    if (dm_shell_game_count() > 0) return 1;
+    NSString *guest = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"Guest.framework"];
+    return ![NSFileManager.defaultManager fileExistsAtPath:guest];
+}
 static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err, size_t errn) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSString *tid = nil, *fw = shell_game_framework(want_tid, &tid);
@@ -174,11 +180,9 @@ static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err,
         }
         setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
         setenv("DM_APP_DM", fwdm.fileSystemRepresentation, 1);      // Launcher.swift reads this game's dm/launcher.json from here
-        // Several games share one app: the saved choices and the cheat text must be per game (Launcher.swift, CheatsView.swift). A
-        // one-game package keeps the keys it always used, so nothing is lost when this shell replaces an older package.
-        // Several games share one app: the saved choices and the cheat text must be per game (Launcher.swift, CheatsView.swift). A
-        // one-game package keeps the keys it always used, so nothing is lost when this shell replaces an older package.
-        if (dm_shell_game_count() != 1) setenv("DM_GAME_KEY", "1", 1);
+        // 从这里进游戏的都走过库页，而库页的设置页一律把值存在 game.<tid> 下，所以这里必须跟着用 per-game 键
+        // （原来只有一个游戏时不设，界面写 game.<tid>、宿主读不带前缀的键，两边对不上）。
+        setenv("DM_GAME_KEY", "1", 1);
         setenv("DM_MSL_DIR", [game stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 1);
         NSString *shmap = [fwdm stringByAppendingPathComponent:@"shader_map.tsv"];
         if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
@@ -306,7 +310,7 @@ static int boot_env(void) {
     NSString *dm_env = nil;
 #ifdef DM_SHELL
     {   // With several games no game is known yet: dm_shell_start_game reads the picked one's. Exactly one, the old path, reads it here.
-      NSString *fw = dm_shell_game_count() == 1 ? shell_game_framework(nil, NULL) : nil;
+      NSString *fw = dm_shell_library_needed() ? nil : shell_game_framework(nil, NULL);
       if (fw) dm_env = [[fw stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]; }
 #endif
     if (!dm_env) dm_env = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"];

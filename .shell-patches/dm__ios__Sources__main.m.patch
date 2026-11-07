@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,124 @@
+@@ -102,6 +114,128 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -78,7 +78,13 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        if ([name hasPrefix:@"DmGame"] && [name hasSuffix:@".framework"] && name.length > 6 + 10 + 1) n++;
 +    return n;
 +}
-+int dm_shell_library_needed(void) { return dm_shell_game_count() != 1; }
++// 有游戏就先给库页 —— 哪怕只有一个（坤哥 2026-11-08：一个游戏时直接进了旧设置页，那页还没按新样式做）。
++// 只有「没有任何 DmGame 框架、但有 Guest.framework」的老单游戏包才走直接启动那条老路。
++int dm_shell_library_needed(void) {
++    if (dm_shell_game_count() > 0) return 1;
++    NSString *guest = [NSBundle.mainBundle.privateFrameworksPath stringByAppendingPathComponent:@"Guest.framework"];
++    return ![NSFileManager.defaultManager fileExistsAtPath:guest];
++}
 +static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err, size_t errn) {
 +    NSFileManager *fm = NSFileManager.defaultManager;
 +    NSString *tid = nil, *fw = shell_game_framework(want_tid, &tid);
@@ -106,11 +112,9 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +        }
 +        setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
 +        setenv("DM_APP_DM", fwdm.fileSystemRepresentation, 1);      // Launcher.swift reads this game's dm/launcher.json from here
-+        // Several games share one app: the saved choices and the cheat text must be per game (Launcher.swift, CheatsView.swift). A
-+        // one-game package keeps the keys it always used, so nothing is lost when this shell replaces an older package.
-+        // Several games share one app: the saved choices and the cheat text must be per game (Launcher.swift, CheatsView.swift). A
-+        // one-game package keeps the keys it always used, so nothing is lost when this shell replaces an older package.
-+        if (dm_shell_game_count() != 1) setenv("DM_GAME_KEY", "1", 1);
++        // 从这里进游戏的都走过库页，而库页的设置页一律把值存在 game.<tid> 下，所以这里必须跟着用 per-game 键
++        // （原来只有一个游戏时不设，界面写 game.<tid>、宿主读不带前缀的键，两边对不上）。
++        setenv("DM_GAME_KEY", "1", 1);
 +        setenv("DM_MSL_DIR", [game stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 1);
 +        NSString *shmap = [fwdm stringByAppendingPathComponent:@"shader_map.tsv"];
 +        if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
@@ -167,7 +171,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
  // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -124,14 +254,31 @@
+@@ -124,14 +258,31 @@
      fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
  }
  
@@ -201,7 +205,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -153,19 +300,17 @@
+@@ -153,19 +304,17 @@
      NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
      for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
  #endif
@@ -224,7 +228,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    NSString *dm_env = nil;
 +#ifdef DM_SHELL
 +    {   // With several games no game is known yet: dm_shell_start_game reads the picked one's. Exactly one, the old path, reads it here.
-+      NSString *fw = dm_shell_game_count() == 1 ? shell_game_framework(nil, NULL) : nil;
++      NSString *fw = dm_shell_library_needed() ? nil : shell_game_framework(nil, NULL);
 +      if (fw) dm_env = [[fw stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]; }
 +#endif
 +    if (!dm_env) dm_env = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"];
@@ -232,7 +236,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
      setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
      front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
-@@ -174,10 +319,43 @@
+@@ -174,10 +323,43 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -276,7 +280,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
-@@ -185,6 +363,12 @@
+@@ -185,6 +367,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -289,7 +293,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -197,6 +381,11 @@
+@@ -197,6 +385,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -301,7 +305,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -232,11 +421,19 @@
+@@ -232,11 +425,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }
