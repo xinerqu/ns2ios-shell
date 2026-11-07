@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,109 @@
+@@ -102,6 +114,110 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -52,6 +52,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +// Returns the framework's dm/ (the host's module folder, argv[1]) with the environment set for that game; nil when this app is the
 +// one-game kind (Frameworks/Guest.framework, the packer writes the whole game into the bundle) -- then program_env below runs as before.
 +#ifdef DM_SHELL
++static void env_file_read(NSString *path, NSMutableArray *from_file);   // defined below, used by dm_shell_start_game
 +// The game this app starts: the first Frameworks/DmGame<title ID>.framework, nil for the one-game package. tidp takes its title ID.
 +// The library that lets the player choose among several (and the card's icon and name) reads the same name.
 +static NSString *shell_game_framework(NSString *want_tid, NSString **tidp) {
@@ -152,7 +153,29 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
  // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -129,9 +244,10 @@
+@@ -124,14 +240,32 @@
+     fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
+ }
+ 
++// One KEY=VALUE per line, '#' starts a comment; a name already in the environment is left alone, so Documents/env.txt wins over a
++// game's own dm/env.txt. from_file collects the names this set, for DM_ENV_FILE_KEYS (the launcher keeps them).
++static void env_file_read(NSString *path, NSMutableArray *from_file) {
++    NSString *txt = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
++    for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
++        NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
++        if (!ln.length || [ln hasPrefix:@"#"] || eq.location == NSNotFound || !eq.location) continue;
++        NSString *k = [ln substringToIndex:eq.location], *v = [ln substringFromIndex:eq.location + 1];
++#if DM_PLAYER_BUILD
++        if (dm_player_diagnostic_key(k.UTF8String)) continue;
++#endif
++        if (!getenv(k.UTF8String)) { setenv(k.UTF8String, v.UTF8String, 0); [from_file addObject:k];
++                                     fprintf(stderr, "boot: env %s=%s (%s)
++", k.UTF8String, v.UTF8String, path.lastPathComponent.UTF8String); }
++    }
++}
++
+ static NSString *program_env(void);
+ static int boot_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
      NSString *res = NSBundle.mainBundle.resourcePath;
@@ -165,25 +188,38 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -153,7 +269,16 @@
+@@ -153,19 +287,17 @@
      NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
      for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
  #endif
 -    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]]) {
+-        NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
+-        for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+-            NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
+-            if (!ln.length || [ln hasPrefix:@"#"] || eq.location == NSNotFound || !eq.location) continue;
+-            NSString *k = [ln substringToIndex:eq.location], *v = [ln substringFromIndex:eq.location + 1];
+-#if DM_PLAYER_BUILD
+-            if (dm_player_diagnostic_key(k.UTF8String) || [launcher_keys containsObject:k] ||
+-                ([launcher_keys containsObject:@"DM_METAL_HUD"] && [k isEqualToString:@"MTL_HUD_ENABLED"])) continue;
+-#endif
+-            if (!getenv(k.UTF8String)) { setenv(k.UTF8String, v.UTF8String, 0); [from_file addObject:k]; fprintf(stderr, "boot: env %s=%s (%s)\n", k.UTF8String, v.UTF8String, ef.lastPathComponent.UTF8String); }
+-        }
+-    }
 +    // Several games in one app: the game's own dm/env.txt, inside its framework, stands where the bundle's dm/env.txt does -- the packer
 +    // writes the profile's values (memory layout, upscaler keys, render_cond, pad layout) there, so without this the game would start on
 +    // the shell's placeholder profile and stop on its first allocation.
 +    NSString *dm_env = nil;
 +#ifdef DM_SHELL
-+    { NSString *fw = shell_game_framework(NULL);
++    {   // With several games no game is known yet: dm_shell_start_game reads the picked one's. Exactly one, the old path, reads it here.
++      NSString *fw = dm_shell_game_count() == 1 ? shell_game_framework(nil, NULL) : nil;
 +      if (fw) dm_env = [[fw stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"]; }
 +#endif
 +    if (!dm_env) dm_env = [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"env.txt"];
-+    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) {
-         NSString *txt = [NSString stringWithContentsOfFile:ef encoding:NSUTF8StringEncoding error:nil];
-         for (NSString *raw in [txt componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
-             NSString *ln = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]; NSRange eq = [ln rangeOfString:@"="];
-@@ -174,10 +299,43 @@
++    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) env_file_read(ef, from_file);
+     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
+     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
+     front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
+@@ -174,10 +306,43 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -227,7 +263,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
      aoc_locate();   // add-on content: Documents/aoc, else <App>/aoc; an empty Documents/aoc explicitly selects no DLC
-@@ -185,6 +343,12 @@
+@@ -185,6 +350,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -240,7 +276,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -197,6 +361,11 @@
+@@ -197,6 +368,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -252,7 +288,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -232,11 +401,19 @@
+@@ -232,11 +408,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

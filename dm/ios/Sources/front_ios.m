@@ -108,7 +108,8 @@ static void library_picked(const char *tid) {
     void (^go)(void) = ^{ if (!dm_show_launcher((__bridge void *)g_root, launcher_done)) [g_root startGame]; };
     if (g_root.presentedViewController) [g_root dismissViewControllerAnimated:YES completion:go]; else go();
 }
-static void library_cancelled(void) { }   // stays on the library: there is nothing to run yet
+// Library.swift dismisses the page before calling this, so it is shown again: with no game in the app the library is all there is.
+static void library_cancelled(void) { if (g_root) dm_show_library((__bridge void *)g_root, library_picked, library_cancelled); }
 @implementation DmRootVC
 - (void)loadView { self.view = [DmRootView new]; }
 - (void)showHint:(NSString *)text {   // why the game cannot start, centered over the black screen

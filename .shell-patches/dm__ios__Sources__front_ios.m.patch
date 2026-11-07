@@ -11,7 +11,7 @@ diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
  
  static CAMetalLayer *g_layer;
  static void front_ios_notify_setup(void);
-@@ -97,6 +100,15 @@
+@@ -97,6 +100,16 @@
  static DmRootVC *g_root;
  static CGFloat g_picture_aspect = DM_PICTURE_16_9;   // the presented picture's width / height (front_picture_shape); main thread
  static void launcher_done(void) { [g_root startGame]; }
@@ -23,11 +23,12 @@ diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
 +    void (^go)(void) = ^{ if (!dm_show_launcher((__bridge void *)g_root, launcher_done)) [g_root startGame]; };
 +    if (g_root.presentedViewController) [g_root dismissViewControllerAnimated:YES completion:go]; else go();
 +}
-+static void library_cancelled(void) { }   // stays on the library: there is nothing to run yet
++// Library.swift dismisses the page before calling this, so it is shown again: with no game in the app the library is all there is.
++static void library_cancelled(void) { if (g_root) dm_show_library((__bridge void *)g_root, library_picked, library_cancelled); }
  @implementation DmRootVC
  - (void)loadView { self.view = [DmRootView new]; }
  - (void)showHint:(NSString *)text {   // why the game cannot start, centered over the black screen
-@@ -167,6 +179,9 @@
+@@ -167,6 +180,9 @@
      [self.view setNeedsLayout]; [self.view layoutIfNeeded];
      UIApplication.sharedApplication.idleTimerDisabled = YES;
      tv_attach();   // a TV connected while the launcher showed
@@ -37,7 +38,7 @@ diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
      front_ios_boot();
  }
  - (void)viewDidLayoutSubviews {
-@@ -213,6 +228,11 @@
+@@ -213,6 +229,11 @@
      }
      if (self.launched || !front_ios_boot_ok()) return;
      self.launched = YES; g_root = self;
