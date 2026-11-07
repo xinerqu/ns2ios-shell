@@ -83,7 +83,11 @@ private func loadImage(_ url: URL, maxSide: CGFloat) -> UIImage? {
     guard long > maxSide else { return image }
     let k = maxSide / long
     let size = CGSize(width: image.size.width * k, height: image.size.height * k)
-    return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+    // scale = 1：位图的像素尺寸就等于这里的 size。不写它默认取屏幕的 3 倍，一张 1600 宽的背景会变成
+    // 4800×2700 ≈ 52 MB（手机原图走 maxSide 之后约 69 MB），而这个页面同时挂着好几个游戏的图。
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
 }
 
 // 玩家在设备上为某个游戏挑的 16:9 背景图；App 自带的默认背景（没挑过就用它）。
@@ -100,10 +104,21 @@ enum LibraryArt {
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }
-    static var defaultBackground: UIImage? {
-        guard let url = Bundle.main.url(forResource: "default-background", withExtension: "jpg", subdirectory: "dm") else { return nil }
-        return UIImage(contentsOfFile: url.path)
-    }
+    /// App 自带的默认背景（没挑过就用它）。**必须是 static let**：原来写成计算属性，而它现在被排在了
+    /// 「玩家没挑过图」的通用分支上，每次刷新界面都会重新读盘并解码这张 6 MB 的图。
+    static let defaultBackground: UIImage? = {
+        guard let url = Bundle.main.url(forResource: "default-background", withExtension: "jpg",
+                                        subdirectory: "dm") else {
+            fputs("library: no default background in the bundle (dm/default-background.jpg)\n", stderr)
+            return nil
+        }
+        guard let image = UIImage(contentsOfFile: url.path) else {
+            fputs("library: the default background cannot be decoded\n", stderr)
+            return nil
+        }
+        fputs("library: default background \(Int(image.size.width))x\(Int(image.size.height))\n", stderr)
+        return image
+    }()
 }
 
 private enum GameLibrary {
@@ -136,7 +151,9 @@ private enum GameLibrary {
                                      background: loadImage(LibraryArt.backgroundURL(tid), maxSide: 1600),
                                      dmDir: item.appendingPathComponent("dm")))
         }
-        return games.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        games.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        fputs("library: \(games.count) game(s), \(games.filter { $0.background != nil }.count) with a picture of their own\n", stderr)
+        return games
     }
 
     private static func hasGameData(_ tid: String) -> Bool {
@@ -261,9 +278,8 @@ private struct LibraryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var picking = false
     @State private var picked: PhotosPickerItem?
-    @State private var showArtHint = false
-    @AppStorage("artHintShown") private var artHintShown = false
     @State private var artGame: LibraryGame?      // whose background the picker is for
+    @State private var artError: String?          // 选图/写盘失败时显示在标题下面一行
 
     private var current: LibraryGame? {
         model.games.first { $0.tid == selected } ?? model.games.first
@@ -297,26 +313,10 @@ private struct LibraryView: View {
                 }
             }
             .onAppear { if selected == nil { selected = model.games.first?.tid; shown = selected } }
-            .alert(LibText.t("为这个游戏设置 16:9 背景图", "Set a 16:9 background for this game"), isPresented: $showArtHint) {
-                Button(LibText.t("去选图", "Choose a picture")) { artHintShown = true; picking = true }
-                Button(LibText.t("取消", "Cancel"), role: .cancel) { }
-            } message: {
-                Text(LibText.t("选中的图会作为这个游戏的背景（按 16:9 裁切），不影响游戏图标。",
-                               "The picture becomes this game's background, cropped to 16:9. The game's icon is not changed."))
-            }
             .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
             .onChange(of: picked) { _, item in
                 guard let item, let game = artGame else { return }
-                Task {
-                    if let data = try? await item.loadTransferable(type: Data.self), UIImage(data: data) != nil {
-                        try? data.write(to: LibraryArt.backgroundURL(game.tid))
-                        model.refresh()
-                        shown = nil
-                        try? await Task.sleep(nanoseconds: 50_000_000)
-                        shown = game.tid
-                    }
-                    picked = nil
-                }
+                Task { await applyArt(item, to: game) }
             }
         }
         .preferredColorScheme(.dark)
@@ -403,6 +403,9 @@ private struct LibraryView: View {
             if let tid = current?.tid, let e = model.errors[tid] {
                 Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).lineLimit(2)
             }
+            if let artError {
+                Text(artError).font(.caption2).foregroundStyle(.orange.opacity(0.95)).lineLimit(2)
+            }
         }
         .animation(.easeInOut(duration: 0.25), value: current?.tid)
         .padding(.top, 6)
@@ -478,7 +481,11 @@ private struct LibraryView: View {
                     .font(.caption2).foregroundStyle(c.dataOK ? .green.opacity(0.85) : .yellow.opacity(0.9))
             }
             Spacer(minLength: 0)
-            if model.games.count > 1 {
+            // 这个功能原来只有「点封面」一个入口，没有任何提示，用户会以为它不存在
+            if current?.background == nil {
+                Text(LibText.t("点封面可设置背景图", "Tap a cover to set its background"))
+                    .font(.caption2).foregroundStyle(.white.opacity(0.35))
+            } else if model.games.count > 1 {
                 Text(LibText.t("左右滑动切换", "Swipe to switch")).font(.caption2).foregroundStyle(.white.opacity(0.35))
             }
         }
@@ -490,10 +497,48 @@ private struct LibraryView: View {
         game.cover == nil ? height : height * 16 / 9
     }
 
-    /// 点大封面：第一次解释这是设背景，之后直接开相册。
+    /// 点大封面：给这个游戏设 16:9 背景，直接开相册。
+    /// **不要**在 alert 的按钮里开相册：alert 的 action 是在转场开始前就调用的，那一刻宿主 VC 还 present 着
+    /// UIAlertController，UIKit 会直接丢弃后面这次 present——而且 picking 从此停在 true，之后每次点击都是
+    /// 「true → true」，SwiftUI 认为没变化，就再也不尝试了（2026-11-07 真机症状：点了完全没反应）。
     private func artTapped(_ game: LibraryGame) {
+        if selected != game.tid { selected = game.tid }   // 点到旁边的封面时先把它居中，别把图画进邻居的游戏
         artGame = game
-        if artHintShown { picking = true } else { showArtHint = true }
+        artError = nil
+        fputs("library: art tap \(game.tid)\n", stderr)
+        picking = true
+    }
+
+    /// 把相册里选中的图写进 Documents/ns2ios/art/<tid>.jpg，再让库页重扫一遍。
+    /// 每一步都往 log.txt 落一行：上一版这段全是 `try?`，真机上「点了没反应」时日志里一句都没有，没法定位。
+    private func applyArt(_ item: PhotosPickerItem, to game: LibraryGame) async {
+        picked = nil
+        let types = item.supportedContentTypes.map(\.identifier).joined(separator: ",")
+        fputs("library: pick \(game.tid) types=\(types)\n", stderr)
+        guard let data = try? await item.loadTransferable(type: Data.self) else {
+            artError = LibText.t("读不到这张图，换一张再试", "Could not read that picture")
+            fputs("library: pick failed (loadTransferable nil, try iCloud download or another picture)\n", stderr)
+            return
+        }
+        guard UIImage(data: data) != nil else {
+            artError = LibText.t("这张图无法使用，换一张再试", "That picture cannot be used")
+            fputs("library: pick is not a decodable image, \(data.count) bytes\n", stderr)
+            return
+        }
+        let url = LibraryArt.backgroundURL(game.tid)
+        do {
+            // 原子写：写到一半被打断会留下半个 jpg，下次读出来是 nil，看起来就是「设置没生效」
+            try data.write(to: url, options: .atomic)
+        } catch {
+            artError = LibText.t("保存失败，再试一次", "Could not save the picture")
+            fputs("library: write FAILED \(url.path): \(error)\n", stderr)
+            return
+        }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
+        fputs("library: write ok \(url.lastPathComponent) \(size)/\(data.count) bytes\n", stderr)
+        artError = nil
+        model.refresh()      // 重扫会把新图读进来，Backdrop 取的是 background，画面自己就换了
     }
 
     private var emptyHint: some View {
@@ -543,20 +588,43 @@ private struct Backdrop: View {
     let game: LibraryGame?
     let animated: Bool
 
+    // 背景的取舍顺序：玩家自己挑的 > 包里带的 16:9 封面 > **App 自带的默认背景** > 游戏图标。
+    // 图标放最后：它是一个正方形小图，铺满全屏再模糊只剩一团色块。原来的顺序是 … ?? icon ?? 默认背景，
+    // 而每个 game framework 都带 icon.png，所以默认背景是**死代码**——这就是那张图从来没当过背景的原因。
+    private var art: UIImage? {
+        game?.background ?? game?.cover ?? LibraryArt.defaultBackground ?? game?.icon
+    }
+
+    // 模糊半径（pt）。30 会把 60pt 以下的结构全抹平（人、猫、电视全没了），18 还留得住画面主体。
+    private static let blur: CGFloat = 18
+
+    // 自上而下的暗化，替掉原来那层平铺的 0.55 黑罩（平铺把图压成 25% 亮度，等于看不见）：
+    // 顶部压住顶栏小字，中上段留亮给插画，标题与按钮那两条再压下去。
+    private static let scrim = LinearGradient(stops: [
+        .init(color: .black.opacity(0.80), location: 0.00),
+        .init(color: .black.opacity(0.38), location: 0.30),
+        .init(color: .black.opacity(0.50), location: 0.62),
+        .init(color: .black.opacity(0.86), location: 1.00)
+    ], startPoint: .top, endPoint: .bottom)
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.12), .black],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
-            if let art = game?.background ?? game?.cover ?? game?.icon ?? LibraryArt.defaultBackground {
+            if let art {
                 GeometryReader { geo in
                     Image(uiImage: art)
                         .resizable().scaledToFill()
+                        // 先外扩两个模糊半径再模糊、最后裁回来：直接模糊的话四周取到的是视野外的黑色，
+                        // 屏幕边上会有一圈黑框（opaque: true 下尤其明显）。
+                        .frame(width: geo.size.width + 2 * Backdrop.blur,
+                               height: geo.size.height + 2 * Backdrop.blur)
+                        .blur(radius: Backdrop.blur, opaque: true)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
-                        .blur(radius: 30, opaque: true)
-                        .opacity(0.55)
+                        .opacity(0.88)
                 }
-                .overlay(Color.black.opacity(0.55))
+                .overlay(Backdrop.scrim)
                 .transition(.opacity)
                 .id(game?.tid ?? "none")
             }
