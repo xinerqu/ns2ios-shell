@@ -282,7 +282,6 @@ private struct LibraryView: View {
     @State private var artError: String?          // 选图/写盘失败时显示在标题下面一行
     @State private var artNote: String?           // 「背景已更新」这种一次性提示，2.6 秒后自己消失
     @State private var artNoteSeq = 0
-    @State private var showWhatsNew = false
 
     private var current: LibraryGame? {
         model.games.first { $0.tid == selected } ?? model.games.first
@@ -316,7 +315,6 @@ private struct LibraryView: View {
                 }
             }
             .onAppear { if selected == nil { selected = model.games.first?.tid; shown = selected } }
-            .sheet(isPresented: $showWhatsNew) { WhatsNewPage() }
             .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
             .onChange(of: picked) { _, item in
                 guard let item, let game = artGame else { return }
@@ -337,13 +335,6 @@ private struct LibraryView: View {
             Spacer(minLength: 0)
             Text(LibText.t("\(model.games.count) 款游戏", "\(model.games.count) games"))
                 .font(.footnote.weight(.semibold)).foregroundStyle(.white)
-            Button { showWhatsNew = true } label: {
-                Image(systemName: "arrow.down.circle").font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white)
-            .accessibilityLabel(LibText.t("查看更新内容", "What's new"))
             Button { model.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28)
@@ -585,107 +576,6 @@ private struct LibraryView: View {
             if let m = model.bootMessage { Text(m).font(.caption2).foregroundStyle(.white.opacity(0.4)) }
         }
         .padding(24)
-    }
-}
-
-// MARK: - What's new
-
-// 库页右上角那个按钮打开的一页：从 GitHub 读最新一版 release，把说明直接显示在手机上。
-// 只有一个目的——用户不必回电脑、不必去 release 页面，也能知道这次更新了什么、自己的壳是不是旧的。
-private struct WhatsNewPage: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var phase: Phase = .loading
-    @State private var attempt = 0
-
-    enum Phase {
-        case loading
-        case failed(String)
-        case ready(tag: String, when: String, notes: String, current: Bool)
-    }
-
-    // 这个壳是哪次构建：dm/shell_info.txt 的 SOURCE_SHA（CI 写进去的）
-    private var localBuild: String {
-        guard let url = Bundle.main.url(forResource: "shell_info", withExtension: "txt", subdirectory: "dm"),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
-        for line in text.split(separator: "\n") where line.hasPrefix("SOURCE_SHA=") {
-            return String(line.dropFirst("SOURCE_SHA=".count)).trimmingCharacters(in: .whitespaces)
-        }
-        return ""
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    switch phase {
-                    case .loading:
-                        HStack(spacing: 10) {
-                            ProgressView().tint(.white)
-                            Text(LibText.t("正在读取更新说明…", "Reading the release notes..."))
-                                .font(.callout.weight(.semibold)).foregroundStyle(.white)
-                        }
-                    case .failed(let why):
-                        Text(why).font(.footnote.weight(.semibold)).foregroundStyle(.orange)
-                        Button(LibText.t("再试一次", "Try again")) { attempt += 1 }.font(.callout.weight(.semibold))
-                    case .ready(let tag, let when, let notes, let current):
-                        Text(tag).font(.title2.weight(.bold)).foregroundStyle(.white)
-                        Text(when).font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
-                        Label(current ? LibText.t("这个 App 已经是最新的壳", "This app already has the newest shell")
-                                      : LibText.t("有新版本：去电脑上用打包器更新壳，再覆盖安装", "A newer shell is out: update it in the packer on your PC, then install over this app"),
-                              systemImage: current ? "checkmark.seal.fill" : "arrow.down.circle.fill")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(current ? .green : .yellow)
-                        Text(notes).font(.callout).foregroundStyle(.white.opacity(0.95))
-                            .textSelection(.enabled)
-                        if !localBuild.isEmpty {
-                            Text(LibText.t("本机构建：", "This build: ") + String(localBuild.prefix(7)))
-                                .font(.caption2.weight(.medium)).foregroundStyle(.white.opacity(0.55))
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(22)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(LibText.t("完成", "Done")) { dismiss() }.font(.callout.weight(.semibold))
-                }
-            }
-            .task(id: attempt) { await load() }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private func load() async {
-        let text = LibText.t("读取失败：%@" , "Could not read it: %@")
-        guard let url = URL(string: "https://api.github.com/repos/xinerqu/ns2ios-shell/releases?per_page=1") else {
-            phase = .failed(String(format: text, "bad URL")); return
-        }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 20
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-            guard http.statusCode == 200 else {
-                phase = .failed(String(format: text, "HTTP \(http.statusCode) — GitHub 对未登录的请求每小时只给 60 次"))
-                return
-            }
-            guard let list = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-                  let first = list.first else { throw URLError(.cannotParseResponse) }
-            let tag = (first["tag_name"] as? String) ?? "?"
-            let when = ((first["published_at"] as? String) ?? "").prefix(10)
-            let notes = ((first["body"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let assets = (first["assets"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
-            // 发布资产里的壳文件名带着它自己的 sha：本机 sha 出现在里面，就说明这个 App 用的就是最新那版壳
-            let me = String(localBuild.prefix(7))
-            let current = !me.isEmpty && assets.contains { $0.hasPrefix("ns2ios-") && $0.contains(me) }
-            phase = .ready(tag: tag, when: String(when), notes: notes.isEmpty ? LibText.t("这一版没有写说明。", "This release has no notes.") : notes, current: current)
-        } catch {
-            phase = .failed(String(format: text, error.localizedDescription))
-        }
     }
 }
 
