@@ -93,8 +93,13 @@ def main(argv):
     d = tempfile.mkdtemp()
     src, air, lib = (os.path.join(d, n) for n in ('a.metal', 'a.air', 'a.metallib'))
     open(src, 'wb').write(b'using namespace metal;\r\n')
+    # The iOS chain (dm/ios/tools/ios_metal.py) keeps its own shapes and is NOT the mac one: it still issues
+    # `xcrun -sdk iphoneos metal -c …` and `xcrun -sdk iphoneos metallib <air> -o <lib>`. Both are covered here or the
+    # smoke pack finds them instead -- which is exactly what happened on 2026-11-08.
     shapes = [('compile', names.get('MAC_RUN', []) + [src, '-o', air]),
-              ('link', names.get('MAC_LINK', []) + [air, '-o', lib])]
+              ('link', names.get('MAC_LINK', []) + [air, '-o', lib]),
+              ('ios compile', ['xcrun', '-sdk', 'iphoneos', 'metal', '-c', src, '-o', air]),
+              ('ios link', ['xcrun', '-sdk', 'iphoneos', 'metallib', air, '-o', lib])]
     pch = up / PCH
     if pch.is_file():
         shapes.append(('pch', names.get('MAC_RUN', []) + ['-x', 'metal-header', src, '-o', os.path.join(d, 'a.pch')]))

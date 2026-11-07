@@ -129,9 +129,15 @@ def run(args, *a, **k):
         # intermediate file), no `-c` means a link (the intermediate file is copied out as the library).
         if c[0] == 'xcrun' and '-o' in c:
             o = c.index('-o')
-            skip = {0, o + 1}          # 0 = 程序名本身
-            if '-isysroot' in c: skip.add(c.index('-isysroot') + 1)
-            src = [x for i, x in enumerate(c) if i not in skip and not x.startswith('-')]
+            # 哪些参数是「选项的值」：-o 的输出、-sdk 的名字、-isysroot 的路径、-x 的方言；程序名本身也要跳。
+            # iOS 那条仍是老形状 `xcrun -sdk iphoneos metallib <air> -o <lib>`，`iphoneos` 和 `metallib` 都不是输入文件。
+            # Options whose next token is a value, plus the program name: the iOS chain still issues the old
+            # `xcrun -sdk iphoneos metallib <air> -o <lib>`, where iphoneos and metallib are not input files either.
+            skip = {0}
+            for i, t in enumerate(c):
+                if t in ('-o', '-sdk', '-isysroot', '-x'): skip.add(i + 1)
+            src = [x for i, x in enumerate(c)
+                   if i not in skip and not x.startswith('-') and x not in ('metal', 'metallib')]
             if len(src) != 1: raise RuntimeError('nometal_run：认不出这次调用的输入文件 %r' % c)
             if '-c' in c:
                 with open(src[0], 'rb') as f: b = f.read()
