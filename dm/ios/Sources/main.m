@@ -146,6 +146,7 @@ static NSString *shell_game_dm(NSString *doc) {
             return nil;
         }
         setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
+        setenv("DM_APP_DM", fwdm.fileSystemRepresentation, 1);      // Launcher.swift reads this game's dm/launcher.json from here
         setenv("DM_MSL_DIR", [game stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 1);
         NSString *shmap = [fwdm stringByAppendingPathComponent:@"shader_map.tsv"];
         if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
