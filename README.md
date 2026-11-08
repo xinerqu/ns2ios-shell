@@ -42,12 +42,15 @@ the Files app, named after the app. The games themselves (RomFS, shader librarie
 
 ### Adding the next game
 
-Library mode (the default) is one app holding several games, and adding one is the same two moves:
+Library mode (the default) is one app holding several games, so adding one is two things:
 
 1. **Pack it**: point the packer at the new game and press *Start packing* again.
-2. **Put it on the phone**: copy the generated `ns2ios` folder into the **root of the Files app** — the folder of that
-   name the app created on its first launch — and let it overwrite what is there. Then **install the new
-   `ns2ios.ipa` over the old one**: that install is how the app learns about the new game, so **do not skip it**.
+2. **Put it on the phone**: copy only the new **`ns2ios/games/<title ID>`** folder into `ns2ios/games/` on the phone,
+   then **install the new `ns2ios.ipa` over the old one** — that install is how the app learns about the new game.
+
+⚠️ **Do not copy the whole `ns2ios` folder again.** For a folder of the same name the Files app offers only *Replace*
+or *Keep Both*, and **Replace swaps the whole folder instead of merging into it**: `save/` (saves and cheats) and the
+other games would go with it. Adding a game touches `games/<title ID>` and nothing else.
 
 Only want the new shell, no new game? The packer's **Repack package only** button writes a fresh `ns2ios.ipa` in
 seconds.
