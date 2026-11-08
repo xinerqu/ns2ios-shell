@@ -195,12 +195,12 @@ int dm_shader_prep_begin(void (^done)(void)) {
     why.text = L3(@"这些着色器本来要在游戏用到时才编：第一次进一个新场景会顿一下（约 0.8 秒）。\n现在一次编完，进游戏后就不会因为着色器卡顿了。",
                   @"These shaders would otherwise be compiled the first time the game uses them, which costs a stutter of about 0.8 s\non entering a scene you have not seen. Compiled now, the game does not stutter over them at all.",
                   @"Sin esto, los shaders se compilan la primera vez que el juego los usa, y eso cuesta un tirón de unos 0.8 s\nal entrar en una escena nueva. Compilados ahora, el juego no vuelve a tartamudear por ellos.");
-    modes.text = L3(@"也可以边玩边编：立刻进游戏，遇到新场景再顿一下。\n随时可以在「设置 → 着色器」里改。",
-                    @"Or compile while playing: the game starts at once and a new scene stutters instead.\nYou can change this any time under Settings → Shaders.",
-                    @"O compilar mientras juegas: el juego arranca enseguida y una escena nueva da un tirón.\nPuedes cambiarlo cuando quieras en Ajustes → Shaders.");
-    hint.text = L3(@"留在这个页面就是继续编完，编完自动进游戏；你不玩的时候留在这里也一样。\n编好的会记住，只有系统更新或重装之后才需要再来一次。可以切到后台，回来接着做。",
-                   @"Staying on this page keeps compiling, and the game starts when it is done -- leaving it here while you do something\nelse works the same. What is compiled is remembered; only a system update or a reinstall asks for it again. You can\nswitch away and it carries on when you come back.",
-                   @"Si te quedas en esta página sigue compilando y el juego arranca al terminar; dejarla aquí mientras haces otra cosa\nes lo mismo. Lo compilado se recuerda; solo una actualización del sistema o una reinstalación lo pide otra vez.\nPuedes salir de la app y continúa al volver.");
+    modes.text = L3(@"也可以立刻进游戏边玩边编，不玩的时候再回到这里继续编。",
+                    @"Or start playing right now and compile as you go, and come back here when you are not playing to finish.",
+                    @"O empieza a jugar ahora y compila mientras juegas; vuelve aquí cuando no estés jugando para terminarlo.");
+    hint.text = L3(@"无论现在编还是边玩边编，编好的都会记住，可以随时游玩或离开游戏。",
+                   @"Either way, what is compiled is remembered: play or leave whenever you like.",
+                   @"En cualquier caso, lo compilado se recuerda: puedes jugar o salir cuando quieras.");
     [play setTitle:L3(@"现在进游戏（边玩边编）", @"Play now (compile while playing)", @"Jugar ahora (compilar al jugar)") forState:UIControlStateNormal];
     __block _Atomic int stop = 0;
     [play addAction:[UIAction actionWithHandler:^(UIAction *a) {
