@@ -1749,7 +1749,14 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     if fpy: say('translating with the free-threaded interpreter (%s): the GIL is off, so the pool runs on %d threads at once'
                 % (Path(fpy).parent.name, XLATE_JOBS))
     run([fpy or PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
-        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(XLATE_JOBS), 'DM_GAME': tid, 'PYTHON_GIL': '0'},
+        # DMSH_TARGETS=ios：只编 iPhone 那份。上游默认在设了 IOSOUT 时同时编 mac + ios，而 mac 那份落在缓存目录、
+        # 从不进包（我们只出 iPhone 壳）；上游自己的注释写着「iOS-only 的构建只跳过 macOS 编译，约占 Metal 工作的一半」。
+        # 2026-11-09 实测王泪的缓存里 ios 17 034 / mac 17 049 条，几乎一对一——**一半的编译是白干的**。
+        # DMSH_TARGETS=ios: the iPhone libraries only. Upstream defaults to building mac + ios whenever IOSOUT is set;
+        # the mac ones land in the cache folder and never reach a package (we ship an iPhone shell only), and upstream's own
+        # comment calls that about half of the Metal work. Measured on Tears of the Kingdom: 17 034 ios vs 17 049 mac entries.
+        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(XLATE_JOBS), 'DMSH_TARGETS': 'ios',
+             'DM_GAME': tid, 'PYTHON_GIL': '0'},
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
