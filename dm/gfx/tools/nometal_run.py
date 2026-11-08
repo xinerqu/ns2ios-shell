@@ -398,10 +398,12 @@ if __name__ == '__main__':
                                                 if t else 'NOT used, so the libraries hold source and the phone compiles them'))
         sys.exit(0)
     subprocess.run = run
-    # 先探一次真工具：装了 Apple 的 Metal Developer Tools for Windows 就走上游那条「编成 metallib + 切侧库」的路，
-    # 不再打 compile_split 的补丁（那补丁是给没有编译器的情况准备的）。
-    # Probe the real tools first: with Apple's Metal Developer Tools for Windows installed the chain runs upstream's own
-    # "compile to a library, then cut the side library" path, so compile_split keeps its own implementation.
+    # 补丁与工具**互不影响**，两条路都打（2026-11-08 修；此前是有工具就跳过，上游的 cut 于是拿到一个没编出来的库，
+    # 248 个侧库全失败）。区别只在主库那个文件里放什么：编得过放 metallib，编不过放源码，没工具一律源码。
+    # The patch and the tools are independent -- it is applied on either route (2026-11-08: skipping it when the tools were
+    # found left upstream's cut reading a library that had never been compiled, and all 248 side libraries failed). What
+    # differs is only what lands in the one library: a metallib when the unit compiles, the source when it does not, and
+    # the source always without the tools.
     have = tools()
     patched = patch_side_libraries()
     if have:
