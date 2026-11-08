@@ -70,8 +70,13 @@ int main(void) {
       EXPECT("native 60 cap: period ns",16666666,present_period(&w));
       EXPECT("native 60 cap: display-link target",60,nvn_game_fps());
       setenv("DM_FPS_TARGET","0",1);g_present_cap=-1;w.interval=2;
-      EXPECT("no cap preserves display pacing",1,present_itv(&w));nvn_present_config(60,0);
+      EXPECT("no cap preserves display pacing",1,present_itv(&w));
+      EXPECT("display mode: the game reads back the interval the window presents at",1,window_interval(&w));
+      setenv("DM_FPS_TARGET","30",1);g_present_cap=-1;
+      EXPECT("display mode under a 30 cap: the game reads back 2",2,window_interval(&w));
+      setenv("DM_FPS_TARGET","0",1);g_present_cap=-1;nvn_present_config(60,0);
       EXPECT("no cap preserves game pacing",2,present_itv(&w));
+      EXPECT("game mode: the game reads back the interval it set",2,window_interval(&w));
       // the 30 Hz link only for even intervals: interval 3 (20 fps) has no whole number of 30 Hz ticks and stays on the 60 Hz link
       w.interval=1;present_period(&w);w.interval=2;present_period(&w);g_itv2_since=(now_ns()-2000000000ull)|1;
       EXPECT("interval 2 held a second: 30 Hz link",30,nvn_game_fps());
@@ -892,7 +897,7 @@ int main(void) {
         P(nvnMemoryPoolFinalize)(&mp);
     }
 
-    // 6d. Lifecycle: in-flight GPU work is 0 when suspend returns; submits are blocked during suspend and let through after resume
+    // 6d. Lifecycle: in-flight GPU work is 0 when suspend returns; queued replay waits for resume.
     {
         size_t big = 64u << 20; uint8_t *heap; posix_memalign((void **)&heap, 16384, 2 * big); memset(heap, 0, 2 * big);
         NVNmemoryPoolBuilder hb; NVNmemoryPool hp; P(nvnMemoryPoolBuilderSetDefaults)(&hb); P(nvnMemoryPoolBuilderSetStorage)(&hb, heap, 2 * big);
@@ -901,20 +906,32 @@ int main(void) {
         for (int i = 0; i < 24; i++) P(nvnCommandBufferCopyBufferToBuffer)(&cb, (NVNbufferAddress)heap, (NVNbufferAddress)(heap + big), big, 0);
         NVNcommandHandle hbusy = P(nvnCommandBufferEndRecording)(&cb);
         P(nvnQueueSubmitCommands)(&q, 1, &hbusy);
-        uint64_t f = mtl_last_fence();
+        NVNsync busy_sync; P(nvnSyncInitialize)(&busy_sync, &dev);
+        P(nvnQueueFenceSync)(&q, &busy_sync, NVN_SYNC_CONDITION_ALL_GPU_COMMANDS_COMPLETE, 0);
+        // Submit may return before the worker encodes anything. Observe this
+        // queue's receipt before checking its physical GPU completion.
+        uint64_t f = 0; int encoded = 0; struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline); deadline.tv_sec += 5;
+        pthread_mutex_lock(&nq_mu);
+        while (!(encoded = nq_sync_encoded((const sync_t *)&busy_sync, &f)))
+            if (pthread_cond_timedwait(&nq_cv, &nq_mu, &deadline)) break;
+        pthread_mutex_unlock(&nq_mu);
+        EXPECT("busy submission receives its own physical fence", 1, encoded);
         int busy_before = !mtl_wait(f, 0);
         dm_gfx_suspend(1);
         EXPECT("GPU really busy before suspend (zero-timeout wait not complete)", 1, busy_before);
         EXPECT("in-flight work complete when suspend returns", 1, mtl_wait(f, 0));
         P(nvnCommandBufferBeginRecording)(&cb); P(nvnCommandBufferBarrier)(&cb, 0); NVNcommandHandle hsmall = P(nvnCommandBufferEndRecording)(&cb);
+        uint64_t suspended_fence = mtl_last_fence();
         g_sq = &q; g_sh = hsmall; g_sub = P(nvnQueueSubmitCommands); atomic_store(&g_sstarted, 0); atomic_store(&g_sdone, 0);
         pthread_t th; pthread_create(&th, NULL, susp_thr, NULL);
         int started = wait_started();
-        EXPECT("during suspend another thread entered submit and has not returned", 1, started && !atomic_load(&g_sdone));
+        EXPECT("during suspend another thread enters submit", 1, started);
+        EXPECT("background submission has not reached the GPU", suspended_fence, mtl_last_fence());
         dm_gfx_suspend(0);
         pthread_join(th, NULL);
         EXPECT("that submit is let through and returns after resume", 1, atomic_load(&g_sdone));
-        P(nvnQueueFinish)(&q); P(nvnMemoryPoolFinalize)(&hp); free(heap);
+        P(nvnQueueFinish)(&q); P(nvnSyncFinalize)(&busy_sync); P(nvnMemoryPoolFinalize)(&hp); free(heap);
     }
 
     // 6e. Present pacing (real-device semantics): present returns immediately; blocking happens at acquire - swapchain of 3, interval 1, 60 Hz, the 4th acquire waits until texture 0 has been displayed for a full period

@@ -33,8 +33,6 @@ EXPLAINED = {
     '--app': 'a package holding several games, and the program of a multi-program application: multi-program games are '
              'not supported (TODO 10), so every call names one package',
     '--program': 'the program inside a multi-program application: same as --app',
-    '--title': 'reads a package\'s title ID. This route takes it from the file name and the ticket, like upstream\'s '
-               'own folder scan, and reads the profile from the extracted build IDs',
     '--contents': 'the content metas of a merged package (base + update + DLC in one file). Not supported here: such a '
                   'package is packed one part at a time by the user, or not at all',
 }

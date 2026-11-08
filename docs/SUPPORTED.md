@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**149 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**151 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -83,13 +83,13 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
 | Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 |  |
 | Mario Kart 8 Deluxe | `0100152000022000` | 4.0.1（也可 4.0.0） |  |
-| Mario Kart World | `0400C3F00006E000` | v0 |  |
+| Mario Kart World | `0400C3F00006E000` | v0 | 60 fps |
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
 | Mario Tennis Fever | `0400D4201C6EA000` | v327680 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
-| Minecraft Dungeons II | `0100A7C01B792000` | 1.1.3.0 |  |
+| Minecraft Dungeons II | `0100A7C01B792000` | 1.1.3.0 | 60 fps |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
 | Monster Train 2 | `010051701FB46000` | 1.1.1 |  |
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
@@ -119,6 +119,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Return of the Obra Dinn | `010032E00E6E2000` | 1.0.1 |  |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 1.0.0 | handheld |
 | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 |  |
+| ROMANCE OF THE THREE KINGDOMS XIV: Diplomacy and Strategy Expansion Pack | `0100ED7012DB2000` | 1.0.10 |  |
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
@@ -151,9 +152,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 | 60 fps |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 |  |
-| The Legend of Zelda: Ocarina of Time | `0400486024DEC000` | v131072 |  |
+| The Legend of Zelda: Ocarina of Time | `0400486024DEC000` | v131072 | 60 fps |
 | The Legend of Zelda: Skyward Sword HD | `01002DA013484000` | 1.0.1 |  |
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
+| The Rogue Prince of Persia | `01008D9022462000` | 1.1.0 | 60 fps |
 | TRIANGLE STRATEGY | `0100CC80140F8000` | 1.1.1 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |

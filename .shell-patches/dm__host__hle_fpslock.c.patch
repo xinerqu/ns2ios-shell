@@ -1,7 +1,7 @@
 diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
 --- a/dm/host/hle_fpslock.c
 +++ b/dm/host/hle_fpslock.c
-@@ -184,6 +184,15 @@
+@@ -185,6 +185,15 @@
      }
  }
  
@@ -17,7 +17,7 @@ diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
  // The row of a target frame rate the game steps by, at the place the rewriter found (dm/tools/fps_target.py; main's fixups FPS_TARGET_PTR, FPS_TARGET_FIELD): an int32 frame rate in the
  // object a global points to, which the game's readers divide 60.0 by to step it, and which the game sets to 30 or 60 itself. Fire Emblem Fortune's Weave's gxc graphics object holds it
  // (+0x1dc; its present asks for interval 60 / target), so at 60 the game asks for interval 1 and steps by 1.0 a frame. 0 rows: not found in this main
-@@ -199,7 +208,7 @@
+@@ -200,7 +209,7 @@
      static char what[4][48]; int n = 0, have = 0;
      if (m->ue_fixed_ptr && m->ue_fixed_flag) out[n++] = (lock_t){ "", "Unreal fixed frame rate (GEngine->FixedFrameRate)", m->ue_fixed_ptr, m->ue_fixed_field, FPS_F32, 1, 0, m->ue_fixed_flag };
      for (int k = 0; k < m->n_ue_cvar && n < 4; k++) {
@@ -26,12 +26,12 @@ diff --git a/dm/host/hle_fpslock.c b/dm/host/hle_fpslock.c
          if (!fps && strcmp(name, "rhi.SyncInterval") && strcmp(name, "nvn.SyncInterval")) continue;
          have |= fps; snprintf(what[n], sizeof what[n], "Unreal %s", name);
          out[n] = (lock_t){ "", what[n], m->ue_cvar[k].off + 0x10, 0, fps ? FPS_F32 : VSYNCS_I32, 2, 0 }; n++;
-@@ -238,7 +247,7 @@
+@@ -264,7 +273,7 @@
          if (t != 0 && t != 30 && t != 60 && t != 120) { LOG("[RED] DM_FPS_TARGET=%s: must be 0, 30, 60 or 120; leaving the game's frame limit", e); t = 0; }
          if (t == 120 && DM_GAME_FPS_MAX < 120) { LOG("[RED] DM_FPS_TARGET=120: this game's speed at 120 fps is not checked (profile fps_max); running at 60"); t = 60; }
          high = t == 120;
 -        if (t && ue_missing) LOG("[RED] main: Unreal %s not found by the rewriter (ue_cvar.py NAMES; game profile ue_fps_cvar): the game's own frame limit stays", DM_GAME_UE_FPS_CVAR);
 +        if (t && ue_missing) LOG("[RED] main: Unreal %s not found by the rewriter (ue_cvar.py NAMES; game profile ue_fps_cvar): the game's own frame limit stays", ue_fps_cvar());
-         if (!nrow && !nier && !fb.n) return;
+         if (!nrow && !nier && !fb.n && !uq.base) return;
          if (!t) { for (int r = 0; r < nrow; r++) LOG("main: %s left as the game sets it (%s)", rows[r]->what, src); if (nier) LOG("main: NieR frame interval left as the game sets it (%s)", src);
-                   if (fb.n) LOG("main: Frostbite simulation rate left as the game sets it (%s)", src); return; }
+                   if (fb.n) LOG("main: Frostbite simulation rate left as the game sets it (%s)", src); if (uq.base) LOG("main: Unity vSyncCount left as the game sets it (%s)", src); return; }
