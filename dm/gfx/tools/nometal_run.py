@@ -266,6 +266,7 @@ def _pch(t):
     Built once per process; measured at 330 ms -> 257 ms per shader (22%). It is what upstream's dmsh_pch does on macOS, but
     this replacement route never goes through upstream's compile entry, so it has to do it here. None means "carry on
     without it", which is also what happens on a machine without the tools."""
+    if os.environ.get('NXN_PCH') == '0': return None      # 排障用：关掉预编译头，其余一切照旧
     key = tuple(PROBE_FLAGS)
     with _PCH_LOCK:
         if key in _PCH: return _PCH[key]
@@ -398,6 +399,26 @@ def _done(args, out=''):
 
 
 def run(args, *a, **k):
+    """交给出库链的每一个结果，类型都与 subprocess.run 本会给出的那个一致：**没有被要求文本时就是 bytes**。
+
+    dmsh_pch.compile 会把 r.stderr 直接写进 sys.stderr.buffer（要 bytes）。本文件里有几条分支会返回 str（预编译头那条
+    拿的是 text=True，正常；但 mac 目标那条 `xcrun -isysroot … -include-pch … -x metal -` 会走到源码分支的 `_done(enc(''))`），
+    于是线程池里抛 TypeError: a bytes-like object is required, not 'str'，整包在 1 万个着色器之后崩掉（2026-11-09 实测）。
+    在这里统一兜住，比逐个分支去改可靠。
+    Every answer to the build chain has the type subprocess.run would have returned: bytes unless text was asked for.
+    dmsh_pch writes r.stderr into sys.stderr.buffer, so a str there raises TypeError deep in the thread pool and kills the
+    whole pack (2026-11-09, ten thousand shaders in). Normalising here beats patching each branch."""
+    r = _shim(args, *a, **k)
+    if not (k.get('text') or k.get('universal_newlines')):
+        out, err = r.stdout, r.stderr
+        if isinstance(out, str) or isinstance(err, str):
+            r = subprocess.CompletedProcess(r.args, r.returncode,
+                                            out.encode('utf-8') if isinstance(out, str) else out,
+                                            err.encode('utf-8') if isinstance(err, str) else err)
+    return r
+
+
+def _shim(args, *a, **k):
     text = k.get('text') or k.get('universal_newlines')
     enc = (lambda s: s) if text else (lambda s: s.encode())
     if isinstance(args, (list, tuple)) and args:
