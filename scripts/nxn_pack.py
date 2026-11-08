@@ -57,6 +57,16 @@ TOOLS = DM / 'tools'
 # The 16 cap keeps a 64-core machine from opening 64 processes over one game. J in the environment overrides, both ways.
 JOBS = int(os.environ.get('J', str(min(os.cpu_count() or 8, 16))))
 
+# 编译着色器那一步比翻译活更能吃线程：装了苹果工具时每个单元要起 metal + metallib 两个进程，一半时间在等进程启动与
+# 文件，属"进程/IPC 混合型"，线程开过物理核数仍然更快。本机 8 核 16 线程实测（Brain，冷缓存、同一负载）：
+# 16 线程 60.8 s，32 线程 51.6 s，快 15%；microbenchmark 里 64 个真实着色器 16 → 32 线程吞吐 17.9 → 23.8 个/秒。
+# 只给这一步加倍，拆着色器那一步仍用 JOBS（那是纯 CPU 活）。JT 覆盖。
+# The shader compile step eats threads better than the translating does: with Apple's tools each unit is a metal process
+# plus a metallib process, half of it waiting on process start-up and files, so going past the physical cores still helps
+# (measured 2026-11-09, Brain, cold cache, same load: 16 threads 60.8 s, 32 threads 51.6 s; in a microbenchmark 64 real
+# shaders went from 17.9 to 23.8 compiles a second). Doubled for this step only; the split step keeps JOBS. JT overrides.
+XLATE_JOBS = int(os.environ.get('JT', str(min((os.cpu_count() or 8) * 2, 32))))
+
 # What an update is called when its version cannot be read: its file name has no [v<N>] tag and the package keeps only an
 # encrypted cnmt.nca (no plaintext cnmt.xml to take <Version> from). The string is a path component -- extract/<ver> and
 # extract_<ver>.log -- so it has to be legal on every platform; "v?" was not (Windows rejects '?' in a name with
@@ -1705,9 +1715,9 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         log=work / 'logs' / 'chain_header.log', what='dmsh_chain --header')
     fpy = translate_python(Path(xlate).parent)
     if fpy: say('translating with the free-threaded interpreter (%s): the GIL is off, so the pool runs on %d threads at once'
-                % (Path(fpy).parent.name, JOBS))
+                % (Path(fpy).parent.name, XLATE_JOBS))
     run([fpy or PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
-        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(JOBS), 'DM_GAME': tid, 'PYTHON_GIL': '0'},
+        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(XLATE_JOBS), 'DM_GAME': tid, 'PYTHON_GIL': '0'},
         log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
