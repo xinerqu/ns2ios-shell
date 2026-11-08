@@ -707,6 +707,9 @@ private struct GameDetail: View {
     @ObservedObject var model: LibraryModel
     let game: LibraryGame
     @State private var settings: LauncherModel?
+    // 着色器：首启一次编完（默认）还是边玩边编。按游戏存，和启动选项同一个前缀（main.m 起游戏时读它设 DM_SHADER_PREP）。
+    @State private var prepAll = true
+    private var prepKey: String { "game." + game.tid + ".shaderprep" }
 
     private var busy: Bool { model.starting != nil }
 
@@ -730,6 +733,9 @@ private struct GameDetail: View {
         // 这一页不显示游戏名（页脚左边已经有大标题）——顶部那条导航栏的半透明底在照片上会露出一块
         // 「很高的框体」，很难看（坤哥 2026-11-08 点名）。背景去掉，只留返回箭头。
         .toolbarBackground(.hidden, for: .navigationBar)
+        .onAppear {
+            if let v = UserDefaults.standard.string(forKey: prepKey) { prepAll = (v != "0") }
+        }
         .task {
             guard settings == nil else { return }
             let url = game.dmDir.appendingPathComponent("launcher.json")
@@ -800,11 +806,41 @@ private struct GameDetail: View {
         }
     }
 
+    // MARK: the shader switch
+
+    /// 壳自己的一行（不是游戏 profile 里的选项）：包里以源码形式带的着色器，首启一次编完，还是边玩边编。
+    /// 存在 game.<tid>.shaderprep，"0" = 边玩边编，没有这个键 = 一次编完（默认）。main.m 起游戏时读它设 DM_SHADER_PREP。
+    private var shaderPrep: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(LibText.t("着色器", "Shaders")).font(.subheadline.weight(.bold)).foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 10).padding(.bottom, 2)
+            Toggle(isOn: $prepAll) {
+                Text(LibText.t("首次启动编译全部着色器", "Compile all shaders on first launch"))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+            }
+            .tint(.white)
+            .onChange(of: prepAll) { _, on in
+                UserDefaults.standard.set(on ? "1" : "0", forKey: prepKey)
+            }
+            Text(prepAll
+                 ? LibText.t("开：首启多花几分钟，之后游戏里不会因为着色器卡顿。下次启动生效。",
+                             "On: a few minutes on the first launch, then no shader stutter in the game. Takes effect at the next launch.")
+                 : LibText.t("关：立刻进游戏，第一次进一个新场景会顿一下（约 0.8 秒，每个场景一次）。",
+                             "Off: the game starts at once, and a scene you have not seen stutters (~0.8 s, once per scene)."))
+                .font(.caption2).foregroundStyle(.white.opacity(0.75)).fixedSize(horizontal: false, vertical: true)
+            Divider().overlay(Color.white.opacity(0.12)).padding(.top, 6)
+        }
+    }
+
     // MARK: right: the game's own options, the cheats panel, and a reset
 
     private var right: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
+                shaderPrep
                 if let m = settings, !m.settings.isEmpty {
                     // 全部平铺：原来每组是一个折叠的二级目录，Performance 只有 HUD 一项也要点开一次，
                     // 而且折叠起来的东西用户看不见（坤哥 2026-11-08：没必要放二级目录，直接显示）

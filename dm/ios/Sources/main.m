@@ -184,6 +184,12 @@ static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err,
         // （原来只有一个游戏时不设，界面写 game.<tid>、宿主读不带前缀的键，两边对不上）。
         setenv("DM_GAME_KEY", "1", 1);
         setenv("DM_MSL_DIR", [game stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 1);
+        // The Shaders switch on the settings page (Library.swift writes game.<tid>.shaderprep; "0" = compile while playing): the
+        // prepare page reads it just before the host starts. No key means the default, compile everything once.
+        // 设置页的「着色器」开关：dm_shader_prep.m 在宿主启动前读它，没有这个键就按「一次编完」。
+        { NSString *k = [NSString stringWithFormat:@"game.%@.shaderprep", tid];
+          NSString *pv = [[NSUserDefaults standardUserDefaults] stringForKey:k];
+          setenv("DM_SHADER_PREP", (pv && [pv isEqualToString:@"0"]) ? "0" : "1", 1); }
         NSString *shmap = [fwdm stringByAppendingPathComponent:@"shader_map.tsv"];
         if ([fm fileExistsAtPath:shmap]) setenv("DM_NVN_SHMAP", shmap.fileSystemRepresentation, 1);
         setenv("DM_ROMFS", romfs.fileSystemRepresentation, 1);
