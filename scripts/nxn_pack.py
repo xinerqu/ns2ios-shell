@@ -1741,6 +1741,12 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
                     if f.read(4) != b'MTLB':
                         source.append(k)
             if lib_files:
+                # A machine-readable line for the window: it prints "496 shaders, all compiled" when it finishes, and
+                # without it the two sides would each have to parse the other's prose.
+                base = [k for k in lib_files if k.endswith('_b.metallib')]
+                base_src = [k for k in source if k.endswith('_b.metallib')]
+                if base:
+                    say('[summary] shaders=%d compiled=%d source=%d' % (len(base), len(base) - len(base_src), len(base_src)))
                 if source:
                     say('shader libraries: %d of %d compiled here (MTLB); %d hold MSL source, the phone compiles those once '
                         '(this machine has no Apple compiler)' % (len(lib_files) - len(source), len(lib_files), len(source)))
