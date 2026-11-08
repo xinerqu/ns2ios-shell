@@ -107,6 +107,19 @@ def library_names(path):
         return None
 
 
+# 编译器也会拒掉的着色器（实测：`dmsh_side.unit` 生成的 alpha test / logic operation 入口把颜色声明成片元函数的
+# **输入**，Apple 的编译器报 `invalid 'color' attribute for input declaration in a fragment function`；`dmsh_fetch` 的
+# 可读 tile 变体同理）。这类只能照今天这条路办——库里放源码，设备端现编（设备的编译器接受它）。所以：编不过的那一份
+# 记下来，链接那一步把源码写成库。
+# Shaders the compiler itself refuses (measured: the alpha test / logic operation entry points of dmsh_side.unit declare the
+# colours as fragment **inputs**, which Apple's compiler rejects with `invalid 'color' attribute for input declaration in a
+# fragment function`; dmsh_fetch's readable-tile variants likewise). Those keep this route's own answer -- the library holds
+# source and the device compiles it, which that compiler accepts. So a compile that fails is remembered, and the link step
+# writes the source out as the library.
+SOURCE_FALLBACK = {}   # absolute air path -> absolute source path
+_FALLBACK_LOCK = threading.Lock()
+
+
 def tools():
     """{'metal': path, 'metallib': path} when both are installed **and** a shader compiles and links through them, else False.
     The probe runs once per process with this chain's own flags, so a tool this build cannot drive counts as absent."""
@@ -145,20 +158,13 @@ def tools():
 
 
 def _last(c):
-    """The last line of what a failed tool said, for the one-line note above."""
-    t = ((c.stderr or '') + (c.stdout or '')).strip().splitlines()
+    """The last line of what a failed tool said, for the one-line note above. `subprocess.run` hands back bytes when the
+    caller did not ask for text (dmsh_pch compiles from standard input without it) and str when it did, so both are read."""
+    err, out = c.stderr, c.stdout
+    if isinstance(err, bytes) or isinstance(out, bytes): text = ((err or b'') + (out or b'')).decode('utf-8', 'replace')
+    else: text = (err or '') + (out or '')
+    t = text.strip().splitlines()
     return t[-1][:200] if t else 'no output'
-
-
-_FELL_BACK = set()   # programs already reported: one line each, not one per shader
-
-
-def _fallback(prog, r=None):
-    """Says once that this process is using the source route from here on, and why."""
-    if prog in _FELL_BACK: return
-    _FELL_BACK.add(prog)
-    why = _last(r) if r is not None else 'the library it wrote cannot be read back'
-    print('nometal_run: %s failed (%s); that shader and the rest stay source, the phone compiles them' % (prog, why), flush=True)
 
 
 def _without_sdk(a):
@@ -184,16 +190,46 @@ def as_tool(c):
     if '-o' in a: return 'metallib', a
     return None, None
 
+def _compile_with(t, src, out, keep_as_is=False):
+    """Compiles `src` into the library `out` with the tools in `t`. False when the compiler refuses the source (or the link
+    fails), in which case `out` is left alone. The intermediate file never outlives the call."""
+    air = out + '.air'
+    try:
+        r = subprocess.run([*t['metal'], '-c', *PROBE_FLAGS, src, '-o', air], capture_output=True, text=True)
+        if r.returncode != 0:
+            print('nometal_run: metal refused %s (%s); that library stays source, the phone compiles it'
+                  % (os.path.basename(src), _last(r)), flush=True)
+            return False
+        r = subprocess.run([*t['metallib'], air, '-o', out], capture_output=True, text=True)
+        if r.returncode != 0:
+            print('nometal_run: metallib refused %s (%s); that library stays source, the phone compiles it'
+                  % (os.path.basename(src), _last(r)), flush=True)
+            return False
+        return True
+    finally:
+        try: os.unlink(air)
+        except OSError: pass
+
+
 def split_into_one_library(self, target, msl, libs, split):
     # upstream renamed the two paths to one list (`compile_split(self, target, msl, libs, split)`): libs[0] is the
     # library this route fills with the source, the rest are the side libraries it deliberately does not write.
     a = libs[0]; b = libs[1] if len(libs) > 1 else None
-    """dmsh_mtlcache.Cache.compile_split on a machine without Apple's compiler: the unit's source (msl) is the library, and
-    the side library is not written (it would be the same text twice). Raises nothing, so dmsh_build.ps_libraries counts the
-    shader as built and names its entry points in the reflection, which is what the host reads (has_alpha / has_logic)."""
-    with open(msl, 'rb') as f: src = f.read().replace(b'\r\n', b'\n')   # 与 `metal -c` 那条一样归一 LF：同样的输入各系统才会出同样的包 | normalized to LF as the `metal -c` branch above, or a Windows pack differs from a Mac's
+    """dmsh_mtlcache.Cache.compile_split on this route: the unit's source (msl) becomes one library that also carries the
+    alpha test / logic operation entry points, and no side library is cut. With Apple's tools installed the unit is compiled
+    when it compiles; when it does not -- the side entry points declare colours as fragment **inputs**, which Apple's compiler
+    rejects -- the source is what goes in, as it always has on this route: the device's compiler accepts it. Either way nothing
+    is cut, so `dmsh_side.cut` never sees a file it cannot read. Raises nothing, so dmsh_build.ps_libraries counts the shader
+    as built and names its entry points in the reflection, which is what the host reads (has_alpha / has_logic)."""
     SIDE_KEYS.add(os.path.basename(a))
     SIDE_DIRS.add(os.path.dirname(os.path.abspath(a)))
+    t = tools()
+    if t and _compile_with(t, msl, a, keep_as_is=True):
+        if b:
+            try: os.unlink(b)
+            except OSError: pass
+        return
+    with open(msl, 'rb') as f: src = f.read().replace(b'\r\n', b'\n')   # 与 `metal -c` 那条一样归一 LF：同样的输入各系统才会出同样的包 | normalized to LF as the `metal -c` branch above, or a Windows pack differs from a Mac's
     try:
         with open(a, 'rb') as f:
             if f.read() == src:   # 上一轮已经写过同一份：第二次打包不必重写两万份（这里没有 CAS，判据就是这个比较）
@@ -270,9 +306,22 @@ def run(args, *a, **k):
             o = c.index('-o'); f = k.get('stdin'); b = f.read() if f is not None else b''
             t = tools(); prog, rest = as_tool(c)
             if t and prog == 'metal':
-                r = _real([*t['metal'], *rest], input=b, capture_output=True)
-                if r.returncode == 0: return _done(args, enc(''))
-                _fallback('metal', r)
+                # 有编译器就照 Mac 的行为编：编得过就是真库。编不过的那一份（上面 SOURCE_FALLBACK 那段说的那类）仍旧走
+                # 这条路的老办法——把源码写进中间件、记下它，等链接那一步把源码当库写出去。这样「能编的都编了，
+                # 编不了的也照旧能用」，不会出现 metallib 拿到源码报 Invalid bitcode file 的连锁失败。
+                # With a compiler this is a real compile; one it refuses keeps this route's old answer -- the source is written
+                # into the intermediate file and remembered, and the link step writes it out as the library. Everything that
+                # compiles is compiled, what cannot still works, and metallib never sees source.
+                kw = {x: y for x, y in k.items() if x != 'stdin'}
+                r = _real([*t['metal'], *rest], input=b, **kw)
+                if r.returncode == 0: return r
+                air = c[c.index('-o') + 1]
+                print('nometal_run: metal refused a shader (%s); its library stays source, the phone compiles it'
+                      % _last(r), flush=True)
+                with _FALLBACK_LOCK:
+                    SOURCE_FALLBACK[os.path.abspath(air)] = b.replace(bytes((13, 10)), bytes((10,)))
+                with open(air, 'wb') as g: g.write(b.replace(b'\r\n', b'\n'))
+                return _done(args, enc(''))
             with open(c[o + 1], 'wb') as g: g.write(b.replace(b'\r\n', b'\n'))
             return _done(args, enc(''))
         # 编译与链接：上游现在用 `xcrun -isysroot <sdk> -c -O1 … <源码> -o <air>`、`xcrun <air> -o <库>`，
@@ -284,17 +333,35 @@ def run(args, *a, **k):
         # intermediate file), no `-c` means a link (the intermediate file is copied out as the library).
         if c[0] == 'xcrun' and '-o' in c:
             o = c.index('-o')
-            # 真工具在的时候，先照原参数交它做：这一次产出的就是真 air / 真库。任何一步失败（工具退出码、写出的库读不了）
-            # 就落回下面这条「源码进包」的路，并留一行说明——绝不留下一个既不是库也不是源码的文件。
-            # With the real tools this call is handed to them as it is: the output is a real air file or library. Any failure
-            # (exit code, or a file this route cannot read as a library) falls back to the source route below, with one line
-            # saying so -- a file that is neither a library nor source never reaches the package.
+            # 有真工具就照原参数交它做，成功与否原样返回：这就是 Mac 上的行为，一个 shader 编不过由上层按 shader 记下来，
+            # 不会连累别的。没有工具才走下面这条「源码进包」的路（那里根本没有编译）。
+            # With the real tools the call is handed over as it is and the result returned as it is: this is the Mac behaviour,
+            # where a shader that does not compile is counted per shader by the caller. Only without them does the source route
+            # below run, where nothing is compiled at all.
             t = tools(); prog, rest = as_tool(c)
             if t and prog:
+                if prog == 'metallib' and rest:
+                    with _FALLBACK_LOCK: src = SOURCE_FALLBACK.pop(os.path.abspath(rest[0]), None)
+                    if src is not None:   # 编不过的那一份：库里放源码，设备端照旧现编（今天这条路的行为）
+                        with open(c[o + 1], 'wb') as g: g.write(src)
+                        return _done(args, enc(''))
                 r = _real([*t[prog], *rest], *a, **k)
-                if r.returncode == 0 and (prog != 'metallib' or library_names(c[o + 1]) is not None):
-                    return r
-                _fallback(prog, r if r.returncode else None)
+                if r.returncode == 0 or prog != 'metal': return r
+                # 编译器拒了这份源码（实测见 SOURCE_FALLBACK 那段）：把源码写进中间件、记下来，等链接那一步当库写出去。
+                # The compiler refused this source (see SOURCE_FALLBACK above): the source goes into the intermediate file and is
+                # remembered, and the link step writes it out as the library.
+                skip = {i for i, x in enumerate(rest) if x in ('-o', '-x', '-isysroot', '-sdk')}
+                skip |= {i + 1 for i in skip}
+                inp = [x for i, x in enumerate(rest) if i not in skip and not x.startswith('-')]
+                print('nometal_run: metal refused a shader (%s); its library stays source, the phone compiles it'
+                      % _last(r), flush=True)
+                if inp and os.path.isfile(inp[0]):
+                    with open(inp[0], 'rb') as f: srcb = f.read()
+                    with _FALLBACK_LOCK:
+                        SOURCE_FALLBACK[os.path.abspath(c[o + 1])] = srcb.replace(bytes((13, 10)), bytes((10,)))
+                    with open(c[o + 1], 'wb') as g: g.write(srcb.replace(bytes((13, 10)), bytes((10,))))
+                    return _done(args, enc(''))
+                return r
             # 哪些参数是「选项的值」：-o 的输出、-sdk 的名字、-isysroot 的路径、-x 的方言；程序名本身也要跳。
             # iOS 那条仍是老形状 `xcrun -sdk iphoneos metallib <air> -o <lib>`，`iphoneos` 和 `metallib` 都不是输入文件。
             # Options whose next token is a value, plus the program name: the iOS chain still issues the old
@@ -325,9 +392,9 @@ if __name__ == '__main__':
     # Probe the real tools first: with Apple's Metal Developer Tools for Windows installed the chain runs upstream's own
     # "compile to a library, then cut the side library" path, so compile_split keeps its own implementation.
     have = tools()
-    patched = False if have else patch_side_libraries()
+    patched = patch_side_libraries()
     if have:
-        print('nometal_run: Apple 的 Metal 工具在位：库在这里编成 metallib，手机不再编（侧库按上游方式切）', flush=True)
+        print("nometal_run: Apple 的 Metal 工具在位：能编的着色器在这里编成 metallib（编不了的仍以源码进包，设备端编）", flush=True)
     elif not patched: print('nometal_run: dmsh_mtlcache is not importable here, so the libraries keep no alpha test / logic operation entry points', flush=True)
     else: print('nometal_run: no Apple compiler, so no <key>_bx is cut: one library per pixel shader carries its alpha test and logic operation entry points (the device takes them from it)', flush=True)
     def _report():   # 判据（铁律 15）：没这行就当没接线 | the line that proves this took effect (rule 15: no line, not wired)
