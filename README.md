@@ -52,7 +52,7 @@ Library mode (the default) is one app holding several games, so adding one is tw
 or *Keep Both*, and **Replace swaps the whole folder instead of merging into it**: `save/` (saves and cheats) and the
 other games would go with it. Adding a game touches `games/<title ID>` and nothing else.
 
-Only want the new shell, no new game? The packer's **Repack package only** button writes a fresh `ns2ios.ipa` in
+Only want the new shell, no new game? The packer's **Repack IPA only** button writes a fresh `ns2ios.ipa` in
 seconds.
 
 **Where does it put things?** Everything downloaded lives beside the exe in `ns2ios-packer-data\`, one folder per release.
