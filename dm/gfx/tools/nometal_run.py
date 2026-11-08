@@ -385,7 +385,10 @@ def run(args, *a, **k):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2: sys.exit(__doc__ or '用法：nometal_run.py <脚本.py> [参数…]')
+    # ASCII only, like every line below that this process prints: nxn_pack.step_translate captures this output with
+    # text=True, which decodes with the console's code page (GBK on a Chinese Windows), and one undecodable line turns
+    # the captured stdout into None -- the packer then died with AttributeError right after tool_lock (2026-11-08).
+    if len(sys.argv) < 2: sys.exit(__doc__ or 'usage: nometal_run.py <script.py> [args...]')
     subprocess.run = run
     # 先探一次真工具：装了 Apple 的 Metal Developer Tools for Windows 就走上游那条「编成 metallib + 切侧库」的路，
     # 不再打 compile_split 的补丁（那补丁是给没有编译器的情况准备的）。
@@ -394,7 +397,10 @@ if __name__ == '__main__':
     have = tools()
     patched = patch_side_libraries()
     if have:
-        print("nometal_run: Apple 的 Metal 工具在位：能编的着色器在这里编成 metallib（编不了的仍以源码进包，设备端编）", flush=True)
+        # ASCII only (see __main__ below): the packer decodes this with the console's code page. Line 151 above already
+        # said the tools were found; this one says what that means for the side library.
+        print('nometal_run: so no <key>_bx is cut: a unit that compiles becomes one library, and one that does not stays source',
+              flush=True)
     elif not patched: print('nometal_run: dmsh_mtlcache is not importable here, so the libraries keep no alpha test / logic operation entry points', flush=True)
     else: print('nometal_run: no Apple compiler, so no <key>_bx is cut: one library per pixel shader carries its alpha test and logic operation entry points (the device takes them from it)', flush=True)
     def _report():   # 判据（铁律 15）：没这行就当没接线 | the line that proves this took effect (rule 15: no line, not wired)

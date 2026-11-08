@@ -300,7 +300,7 @@ def check_env(keys_path, prebuilt=None, dump=False):
         bad.append('.NET 10 SDK: https://dotnet.microsoft.com/download (or pass --tools with the prebuilt executables)')
     else:
         # having dotnet.exe proves nothing: a runtime-only install has no compiler and `dotnet build` fails later
-        r = subprocess.run([dotnet, '--list-sdks'], capture_output=True, text=True)
+        r = subprocess.run([dotnet, '--list-sdks'], capture_output=True, text=True, encoding='utf-8', errors='replace')
         if not re.search(r'^10\.', (r.stdout or ''), re.M):
             bad.append('.NET 10 SDK (this dotnet has no 10.x SDK; found: %s)' % ((r.stdout or '').strip() or 'none'))
     if not dump and not Path(keys_path).is_file(): bad.append('prod.keys not found: %s' % keys_path)
@@ -1231,7 +1231,9 @@ CAPTURE_SECS = 120          # the longest run-time capture upstream measured is 
 
 
 def apple_silicon():
-    return subprocess.run(['sysctl', '-n', 'hw.optional.arm64'], capture_output=True, text=True).stdout.strip() == '1'
+    # encoding named: a capture decoded with the console's code page can come back None and kill the run (see step_translate)
+    return subprocess.run(['sysctl', '-n', 'hw.optional.arm64'], capture_output=True, text=True,
+                          encoding='utf-8', errors='replace').stdout.strip() == '1'
 
 
 def capture_wanted(gdir):
@@ -1269,7 +1271,8 @@ def build_mac_host(work, gid):
     link.symlink_to(prof.resolve())
     run(['make', '-s', 'GAME=%s' % gid, 'gen/%s/game_profile.h' % gid, 'gen/vpx/libvpx.a'],
         log=work / 'logs' / 'mac_host_make.log', what='building the Mac host (headers, libvpx)', cwd=host)
-    dry = subprocess.run(['make', '-n', '-B', 'GAME=%s' % gid, 'dmhost'], cwd=host, capture_output=True, text=True)
+    dry = subprocess.run(['make', '-n', '-B', 'GAME=%s' % gid, 'dmhost'], cwd=host, capture_output=True, text=True,
+                         encoding='utf-8', errors='replace')
     line = next((l for l in dry.stdout.splitlines() if ' -o dmhost ' in l), None)
     if not line: die('make -n gave no compile line for the Mac host: %s' % dry.stderr.strip()[-400:])
     cmd = shlex.split(line)
@@ -1656,16 +1659,20 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     # names a version this run will not use (2026-11-03: it printed f4e3ba9fef0f, the registration moved the version, and
     # the package carried f552588aa0f7 -- the log line that was meant to prove the run was current proved nothing).
     genv = {'XLATE': str(xlate), 'DM_GAME': tid}
+    # encoding='utf-8' on both captures, not text=True alone: the child runs with PYTHONUTF8=1 and prints UTF-8, while
+    # text=True decodes with the console's code page. Under GBK one Chinese line the shim prints made the captured stdout
+    # None, and `r.stdout.strip()` below raised AttributeError right after tool_lock -- the run died with no log line at
+    # all (2026-11-08). errors='replace' so that no future child output can ever stop a pack.
     chk = subprocess.run([PY, nometal, GFX / 'tool_lock.py', '--check-tools'], capture_output=True, text=True,
-                         env=dict(os.environ, PYTHONUTF8='1', **genv))
+                         encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONUTF8='1', **genv))
     if chk.returncode:
         say('the toolchain differs from dmsh_chain.lock: registering this machine')
         run([PY, nometal, GFX / 'tool_lock.py', '--update-lock'], env=genv,
             log=work / 'logs' / 'chain_lock.log', what='tool_lock --update-lock')
         warn('dmsh_chain.lock now describes this machine (do not commit it)')
     r = subprocess.run([PY, nometal, GFX / 'dmsh_chain.py'], capture_output=True, text=True,
-                       env=dict(os.environ, PYTHONUTF8='1', **genv))
-    cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else None
+                       encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONUTF8='1', **genv))
+    cur = (r.stdout or '').strip().splitlines()[-1].strip() if r.returncode == 0 and (r.stdout or '').strip() else None
     if not cur: warn('could not read the translation chain version; a library of another version may be reused')
     def done():
         if cur and image_of(cache / ('b-' + cur)).is_file():
@@ -2102,7 +2109,8 @@ def step_launcher(tid, patched, game, A, work):
     nacp = game / 'control.nacp'                   # may be absent: a dump has no control data
     out = A / 'dm' / 'launcher.json'
     r = subprocess.run([str(PY), str(s), tid, str(patched), str(nacp), str(out)],
-                       capture_output=True, text=True, env=dict(os.environ, PYTHONUTF8='1'))
+                       capture_output=True, text=True, encoding='utf-8', errors='replace',
+                       env=dict(os.environ, PYTHONUTF8='1'))
     log = work / 'logs' / 'launcher.log'
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text((r.stdout or '') + (r.stderr or ''), encoding='utf-8', errors='replace')
