@@ -11,12 +11,12 @@
 It failed on the user's machine and not on mine only because this shell exports LANG, which makes Python prefer UTF-8. So
 both halves are pinned here: every line the shim prints is ASCII, and every capture in the packer names its encoding.
 
-Run: cd nxnative && python -m pytest dm/tools/tests/test_packer_output_encoding.py -q
+Run: cd nxnative && python -m pytest scripts/tests/test_packer_output_encoding.py -q
 """
 import ast, pathlib, subprocess, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]                       # nxnative/
+ROOT = HERE.parents[1]                       # nxnative/
 NM = ROOT / 'dm' / 'gfx' / 'tools' / 'nometal_run.py'
 PACKER = ROOT / 'scripts' / 'nxn_pack.py'
 
