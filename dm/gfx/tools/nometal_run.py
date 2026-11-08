@@ -389,6 +389,14 @@ if __name__ == '__main__':
     # text=True, which decodes with the console's code page (GBK on a Chinese Windows), and one undecodable line turns
     # the captured stdout into None -- the packer then died with AttributeError right after tool_lock (2026-11-08).
     if len(sys.argv) < 2: sys.exit(__doc__ or 'usage: nometal_run.py <script.py> [args...]')
+    # `nometal_run.py --describe-tools`: which route this machine takes and, when it refuses the tools, why. The packer
+    # asks only after a package came out with source in it, so a good run pays nothing (2026-11-08: a probe that refused
+    # once left the log saying nothing but a different chain number and a smaller image).
+    if sys.argv[1:2] == ['--describe-tools']:
+        t = tools()
+        print('nometal_run: metal tools: %s' % (os.path.dirname(t['metal'][0]) + ' (compiling here)'
+                                                if t else 'NOT used, so the libraries hold source and the phone compiles them'))
+        sys.exit(0)
     subprocess.run = run
     # 先探一次真工具：装了 Apple 的 Metal Developer Tools for Windows 就走上游那条「编成 metallib + 切侧库」的路，
     # 不再打 compile_split 的补丁（那补丁是给没有编译器的情况准备的）。

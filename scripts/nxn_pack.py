@@ -1729,12 +1729,28 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         try:
             sys.path.insert(0, str(TOOLS))
             import romfs_image
-            lib_files = [k for k in romfs_image.read_index(img) if k.endswith('.metallib')]
-            source = [b for b in romfs_image.format_mismatches(img) if b[0].endswith('.metallib')]
+            idx = romfs_image.read_index(img)
+            # Read the four bytes yourself: romfs_image.format_mismatches only knows .zs (FORMAT_HEADS), so asking it about
+            # metallib files returns "no mismatches" for a library that is nothing but MSL text -- it answered that way for
+            # a source package on 2026-11-08, and the answer was believed.
+            lib_files = [k for k, (d, off, sz) in idx.items() if not d and sz >= 4 and k.endswith('.metallib')]
+            source = []
+            with open(img, 'rb') as f:
+                for k in lib_files:
+                    f.seek(idx[k][1])
+                    if f.read(4) != b'MTLB':
+                        source.append(k)
             if lib_files:
                 if source:
                     say('shader libraries: %d of %d compiled here (MTLB); %d hold MSL source, the phone compiles those once '
                         '(this machine has no Apple compiler)' % (len(lib_files) - len(source), len(lib_files), len(source)))
+                    # Why the source route, on this machine, in this run: the shim's probe names the reason (not found, a
+                    # compiler that refuses the probe, a link that fails). Only asked when it matters, so a good run pays
+                    # nothing for it.
+                    r = subprocess.run([PY, nometal, '--describe-tools'], capture_output=True, text=True,
+                                       encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONUTF8='1', **genv))
+                    for line in (r.stdout or '').splitlines():
+                        if line.strip(): say('    ' + line.strip())
                 else:
                     say('shader libraries: all %d compiled here (MTLB), the phone compiles nothing' % len(lib_files))
         except Exception as e:
