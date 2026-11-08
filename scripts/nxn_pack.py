@@ -40,7 +40,7 @@ nxnative-windows-tools.zip holds all five, so nothing has to be installed by han
 
 Only your own game files go in, and the IPA it produces contains them: it is for your own use, do not distribute it.
 """
-import argparse, concurrent.futures as cf, json, os, plistlib, re, shlex, shutil, struct, subprocess, sys, tempfile, time, zipfile
+import argparse, concurrent.futures as cf, hashlib, json, os, plistlib, re, shlex, shutil, struct, subprocess, sys, tempfile, time, zipfile
 from pathlib import Path
 
 PY = sys.executable
@@ -126,6 +126,38 @@ def folder_size(p):
             try: n += os.lstat(os.path.join(root, f)).st_size
             except OSError: pass
     return n
+
+
+def ascii_view(work):
+    """第二个名字：把工作目录再挂一个**纯 ASCII 路径**的 junction，让苹果的 Metal 工具看得见。None = 用不着或建不出来。
+
+    metallib 把拿到的路径按 UTF-8 交给 ANSI 接口，游戏目录名带中文就一次链接都做不成（2026-11-09：王泪 27 202 次失败）。
+    要么把每个库搬到 ASCII 目录再搬回来（每个单元两次拷贝），要么给它一个别名——junction 是同一批文件、只多一个名字，
+    工具看到的是 ASCII，**一个字节都不搬**。收尾用 os.rmdir 摘掉这个名字（不会动里面的文件）。
+    A second name: the work folder is also reachable under a plain-ASCII junction, which is all Apple's metallib needs.
+    A junction is the same files under another name, so nothing is copied; os.rmdir removes the name, not the contents."""
+    if os.name != 'nt' or str(work).isascii(): return None
+    base = Path(tempfile.gettempdir())
+    if not str(base).isascii(): base = Path(os.environ.get('SystemDrive', 'C:') + '\\')
+    link = base / ('nxnwork-' + hashlib.sha1(str(work).lower().encode('utf-8')).hexdigest()[:12])
+    try:
+        if link.is_symlink() or link.exists(): os.rmdir(link)      # 只剩名字的旧链接：摘掉重建 | a stale name from an earlier run
+    except OSError: pass
+    r = subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(work)],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode != 0:
+        warn('cannot give %s an ASCII name (%s): the Metal tools will see the non-ASCII path'
+             % (work, (r.stdout or r.stderr or '').strip()[:200]))
+        return None
+    say('work folder also reachable as %s (junction: same files, an ASCII path for the Metal tools)' % link)
+    return link
+
+
+def drop_ascii_view(link):
+    """摘掉 junction 这个名字；里面一个文件都不删。| Remove the junction name; none of the files go with it."""
+    if not link: return
+    try: os.rmdir(link)
+    except OSError: pass
 
 
 def tidy(work, keep_logs=True):
@@ -2651,7 +2683,13 @@ def main():
                 [GFX / 'dmsh_xlate_bin' / n for n in ('dmsh_xlate.exe', 'dmsh_xlate')]
         xlate = next((c for c in cands if c.is_file()), None)
         if not xlate: die('no shader translator: pass --tools <folder> with dmsh_xlate, or build it with dotnet publish')
-        step_translate(pkg_dir, work, xlate, iosout, tid, a.force)
+        view = ascii_view(work)   # 游戏目录名带中文时给工作目录挂一个 ASCII 别名，Metal 工具才看得见（一个字节都不搬）
+        try:
+            w = view or work
+            pkg_for_tools = pkg_dir if not view else (view / Path(pkg_dir).relative_to(work))
+            step_translate(pkg_for_tools, w, xlate, w / 'build' / 'ios' / 'dmsh_b', tid, a.force)
+        finally:
+            drop_ascii_view(view)
         lap('translate shaders')
         libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) \
             if iosout.is_dir() else []
