@@ -62,7 +62,12 @@ class OneLibraryHoldsBoth(unittest.TestCase):
             with open(b, 'wb') as f:                      # what a build on a Mac leaves in the same folder
                 f.write(b'MTLB not really a library')
             nr.SIDE_KEYS.clear()
-            nr.split_into_one_library(None, 'mac', u, a, b, None)
+            was, nr._TOOLS = nr._TOOLS, {}                # the source route: this machine has no Apple compiler
+            try:
+                # upstream's signature: (target, msl, libs, split) -- libs[0] is the base library, libs[1] the side one
+                nr.split_into_one_library(None, 'mac', u, [a, b], None)
+            finally:
+                nr._TOOLS = was
             with open(a, 'rb') as f:
                 self.assertEqual(f.read(), unit.encode())
             self.assertFalse(os.path.exists(b), 'a stale side library would be loaded instead of the base one')

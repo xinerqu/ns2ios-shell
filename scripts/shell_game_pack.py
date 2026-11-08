@@ -200,6 +200,17 @@ def main():
         how.append('romfs/ copied')
     else: die('the package holds neither romfs.img nor romfs/')
     if (app / 'msl').is_dir():
+        # One library per folder: the shell takes its translation chain from whichever b-* it lists first (nvn_mtl.m
+        # shell_chain), so a library of an older chain left beside this one makes the package a coin toss -- and when the
+        # older one is the source form every shader is compiled on the phone again (2026-11-08: a 14.5 MB source image
+        # beside the 20.2 MB compiled one, both named b-<chain>.img).
+        keep = {p.name for p in (app / 'msl').glob('b-*')}
+        if (data / 'msl').is_dir():
+            for old in sorted((data / 'msl').glob('b-*')):
+                if old.name in keep: continue
+                if old.is_dir(): shutil.rmtree(old)
+                else: old.unlink()
+                say('dropped the superseded %s' % old.name)
         # recursively: a GL or Vulkan game keeps gl/ and vk/ subfolders here, and hle_gl.m/hle_vk.m read their tables from there
         n = 0
         for src in sorted((app / 'msl').rglob('*')):

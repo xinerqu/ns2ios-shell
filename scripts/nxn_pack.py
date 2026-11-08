@@ -1720,7 +1720,25 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
     libs = sorted((p for p in iosout.glob('b-*') if p.is_dir()), key=lambda d: (d.stat().st_mtime, d.name)) if iosout.is_dir() else []
     imgs = sorted((p for p in iosout.glob('b-*.img') if p.is_file()), key=lambda d: (d.stat().st_mtime, d.name)) if iosout.is_dir() else []
     if not libs and imgs:
-        say('shader library image %s (%d bytes)' % (imgs[-1].name, imgs[-1].stat().st_size))
+        img = imgs[-1]
+        say('shader library image %s (%d bytes)' % (img.name, img.stat().st_size))
+        # Which route it took, read off the bytes rather than promised: every *_b.metallib starts with MTLB when Apple's
+        # compiler wrote it here, and holds MSL source when this machine had none and the phone compiles it once. The chain
+        # number does not answer it on its own (2026-11-08: two runs of the same game, one of each route, and the log had
+        # nothing but two different chain numbers and image sizes to compare by hand).
+        try:
+            sys.path.insert(0, str(TOOLS))
+            import romfs_image
+            lib_files = [k for k in romfs_image.read_index(img) if k.endswith('.metallib')]
+            source = [b for b in romfs_image.format_mismatches(img) if b[0].endswith('.metallib')]
+            if lib_files:
+                if source:
+                    say('shader libraries: %d of %d compiled here (MTLB); %d hold MSL source, the phone compiles those once '
+                        '(this machine has no Apple compiler)' % (len(lib_files) - len(source), len(lib_files), len(source)))
+                else:
+                    say('shader libraries: all %d compiled here (MTLB), the phone compiles nothing' % len(lib_files))
+        except Exception as e:
+            warn('could not read the library image back (%s): whether the phone compiles is unknown' % e)
         return
     counts = [(d.name, len(list(d.glob('*_b.metallib')))) for d in libs]
     n = sum(c for _, c in counts)
