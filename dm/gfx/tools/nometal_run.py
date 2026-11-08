@@ -27,6 +27,69 @@ import glob, os, runpy, shutil, struct, subprocess, sys, tempfile, threading, ti
 
 _real = subprocess.run
 
+
+def _scratch():
+    """一个路径是 ASCII 的临时工作目录。
+
+    apple 的 metallib 把拿到的路径按 UTF-8 转成 ANSI 代码页再打开文件，所以**游戏目录名里有中文**时每一次链接都失败：
+    `LLVM ERROR: Error opening …: 没有将此 Unicode 字符映射到字符的目标代码页`（2026-11-09 实测：系统代码页 936、
+    王国之泪 一次打包 27 202 次失败，1 万多份 metal **编成功**的结果全丢掉、库退回源码，还比不走工具更慢）。
+    metal 本身认这种路径（同一目录下 `metal -c` 正常出 .air），所以只把链接那一步搬进来：.air 拷进来、库在这里生成、
+    再由 Python 把结果搬回调用方要的路径 —— Python 没有这个限制。
+    A scratch folder whose path is ASCII. Apple's metallib converts the paths it is given from UTF-8 to the ANSI code page, so
+    a game folder with Chinese in its name fails every single link (measured 2026-11-09: 27 202 of them in one Tears of the
+    Kingdom pack, thousands of successful metal compiles thrown away, and slower than without the tools). metal itself takes
+    such paths, so only the link is staged and Python moves the result back."""
+    base = tempfile.gettempdir()
+    if any(ord(ch) > 127 for ch in base):
+        base = os.path.join(os.environ.get('SystemDrive', 'C:') + os.sep, 'nometal-scratch')
+        os.makedirs(base, exist_ok=True)
+    return tempfile.mkdtemp(prefix='link-', dir=base)
+
+
+def _metallib(tool, rest, *a, **k):
+    """`metallib <air> -o <lib>`，路径里有非 ASCII 就在 ASCII 目录里做（见 _scratch）。ASCII 游戏目录不拷贝，照原样调。"""
+    if '-o' not in rest:
+        return _real([*tool, *rest], *a, **k)
+    o = rest.index('-o')
+    out = rest[o + 1]
+    files = [x for x in rest if not x.startswith('-')]
+    if all(x.isascii() for x in files + [out]):
+        return _real([*tool, *rest], *a, **k)
+    d = _scratch()
+    try:
+        staged_out = os.path.join(d, 'out.metallib')
+        args, skip = [], False
+        for x in rest:
+            if skip:
+                skip = False
+                continue
+            if x == '-o':
+                args += ['-o', staged_out]
+                skip = True
+                continue
+            if not x.startswith('-') and os.path.isfile(x):
+                dst = os.path.join(d, 'in%d%s' % (len(args), os.path.splitext(x)[1]))
+                shutil.copy2(x, dst)
+                args.append(dst)
+                continue
+            args.append(x)
+        r = _real([*tool, *args], *a, **k)
+        if r.returncode == 0 and os.path.exists(staged_out):
+            shutil.move(staged_out, out)
+        return r
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _real_text(args, *a, **k):
+    """工具在 Windows 上的报错是系统代码页（中文 = GBK）写的，按 UTF-8 严解会抛 UnicodeDecodeError（日志里一串 traceback）。
+    调用方要文本时统一给它 utf-8 + errors=replace。"""
+    if (k.get('text') or k.get('universal_newlines')) and not k.get('errors'):
+        k.setdefault('encoding', 'utf-8')
+        k['errors'] = 'replace'
+    return _real(args, *a, **k)
+
 # 侧库（<key>_bx）在这条路上没有：上游把它从编好的库里切出来（dmsh_side.cut 在 MTLB 二进制里挑函数），这里没有编译器。
 # 所以不去假造那个二进制的活，改成让**编译单元**（<key>_bu.metal，dmsh_side.unit 的产物，本来就已经同时含 plain 入口和
 # <entry>_a / <entry>_l）整份当 <key>_b 的库交出去，并且不写 <key>_bx。设备端先找侧库，找不到就用基础库里的这些入口
@@ -269,6 +332,10 @@ def run(args, *a, **k):
     enc = (lambda s: s) if text else (lambda s: s.encode())
     if isinstance(args, (list, tuple)) and args:
         c = [str(x) for x in args]
+        # 直接调 metallib.exe 的那条（本文件的 _compile_with 就是这么调的，不经过 xcrun）：同样要避开非 ASCII 路径。
+        # The direct metallib.exe call (this file's own _compile_with does that, no xcrun in sight): same ASCII staging.
+        if os.path.basename(c[0]).lower() in ('metallib', 'metallib.exe'):
+            return _metallib([c[0]], c[1:], *a, **k)
         if c[0] == 'xcrun' and '--version' in c:
             # 装了真工具就报它自己的版本：链号因此与「没有编译器」那支不同，两边的缓存不会混。
             # With the real tools installed their own version is reported: the chain version then differs from the no-compiler
@@ -345,7 +412,7 @@ def run(args, *a, **k):
                     if src is not None:   # 编不过的那一份：库里放源码，设备端照旧现编（今天这条路的行为）
                         with open(c[o + 1], 'wb') as g: g.write(src)
                         return _done(args, enc(''))
-                r = _real([*t[prog], *rest], *a, **k)
+                r = _metallib(t[prog], rest, *a, **k) if prog == 'metallib' else _real_text([*t[prog], *rest], *a, **k)
                 if r.returncode == 0 or prog != 'metal': return r
                 # 编译器拒了这份源码（实测见 SOURCE_FALLBACK 那段）：把源码写进中间件、记下来，等链接那一步当库写出去。
                 # The compiler refused this source (see SOURCE_FALLBACK above): the source goes into the intermediate file and is
