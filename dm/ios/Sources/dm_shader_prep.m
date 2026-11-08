@@ -161,8 +161,15 @@ int dm_shader_prep_begin(void (^done)(void)) {
           return 0;
       } }
     NSMutableArray<DmSrc *> *src = [shader_sources() mutableCopy];
-    if (!src.count) return 0;
-    NSString *mk = marker(src); if ([NSFileManager.defaultManager fileExistsAtPath:mk]) return 0;
+    // 每一步都要留一行：这个页面以前的三条「跳过」都是静默的，结果整包在边玩边编而没人知道（2026-11-08 查了两轮）
+    // Every skip says why in one line: all three used to be silent, which is how a whole package came to compile on demand
+    // without anyone noticing (2026-11-08, two rounds to find it).
+    pl([NSString stringWithFormat:@"着色器准备：DM_SHADER_PREP=%s，库 %@%@，源码着色器 %d 个",
+        getenv("DM_SHADER_PREP") ?: "(unset)", msldir(),
+        g_imgpath ? [g_imgpath.lastPathComponent stringByAppendingFormat:@"（%llu 条目）", g_img ? g_img->n : 0] : @"（目录形态）", (int)src.count]);
+    if (!src.count) { pl(@"着色器准备：这个包里没有以源码形式放的着色器，跳过（库已是编好的库，或路径不对）"); return 0; }
+    NSString *mk = marker(src);
+    if ([NSFileManager.defaultManager fileExistsAtPath:mk]) { pl([NSString stringWithFormat:@"着色器准备：上次已经编完，跳过（%@）", mk.lastPathComponent]); return 0; }
     UIWindow *win = nil;
     for (UIScene *s in UIApplication.sharedApplication.connectedScenes) if ([s isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)s).windows) if (!win || w.isKeyWindow) win = w;
     UIView *host = win.rootViewController.view ?: win; if (!host) { pl(@"【红】着色器准备：没有窗口可放进度页，跳过（进游戏后会边玩边编，第一次进新场景会顿）"); return 0; }
