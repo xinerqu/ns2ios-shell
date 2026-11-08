@@ -78,7 +78,11 @@ static NSArray<DmSrc *> *shader_sources(void) {
                 const img_ent *x = &g_img->e[k];
                 if (!x->type || !x->nlen || x->nlen < 11) continue;                       // type 1 = file
                 const char *nm = g_img->names + x->name; size_t n = x->nlen;
-                if (memcmp(nm + n - 10, ".metallib", 10) != 0) continue;
+                // ".metallib" 是 9 个字符：写 10 的话 memcmp 从 "b.metallib" 起比，永远不等于，于是整个镜像一个都挑不出来
+                // （2026-11-08 真机日志：49144 条目的镜像「源码着色器 0 个」）。
+                // ".metallib" is nine characters: reading ten compares from "b.metallib" and never matches, which is how an
+                // image of 49,144 entries reported zero source libraries on the device.
+                if (memcmp(nm + n - 9, ".metallib", 9) != 0) continue;
                 char h[4];
                 if (pread(g_img->fd, h, 4, (off_t)x->a) != 4) continue;
                 if (memcmp(h, "MTLB", 4) == 0) continue;                                  // already compiled
@@ -166,7 +170,7 @@ int dm_shader_prep_begin(void (^done)(void)) {
     // without anyone noticing (2026-11-08, two rounds to find it).
     pl([NSString stringWithFormat:@"着色器准备：DM_SHADER_PREP=%s，库 %@%@，源码着色器 %d 个",
         getenv("DM_SHADER_PREP") ?: "(unset)", msldir(),
-        g_imgpath ? [g_imgpath.lastPathComponent stringByAppendingFormat:@"（%llu 条目）", g_img ? g_img->n : 0] : @"（目录形态）", (int)src.count]);
+        g_imgpath ? [@"/" stringByAppendingFormat:@"%@（%llu 条目）", g_imgpath.lastPathComponent, g_img ? g_img->n : 0] : @"（目录形态）", (int)src.count]);
     if (!src.count) { pl(@"着色器准备：这个包里没有以源码形式放的着色器，跳过（库已是编好的库，或路径不对）"); return 0; }
     NSString *mk = marker(src);
     if ([NSFileManager.defaultManager fileExistsAtPath:mk]) { pl([NSString stringWithFormat:@"着色器准备：上次已经编完，跳过（%@）", mk.lastPathComponent]); return 0; }
