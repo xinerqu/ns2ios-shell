@@ -35,6 +35,10 @@ def load_shim(repo):
     spec = importlib.util.spec_from_file_location('nometal_run_under_test', os.path.join(repo, SHIM))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
+    # The no-compiler route, always: this check feeds the shim a synthetic `-isysroot xcrun`, which the real compiler would
+    # be handed verbatim on a machine that has Apple's tools -- two false failures on 2026-11-08 (measured: 2 problems with
+    # the tools installed, 0 with NXN_METAL_TOOLS=off). The route decides nothing about which commands are covered.
+    m._TOOLS = {}
     return m
 
 
