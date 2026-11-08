@@ -163,7 +163,9 @@ jobs:
           # shader_split.py needs a zstd decoder for every game whose files are zstd-compressed (Rhythm Heaven Groove's .zs,
           # Paper Mario's .zst, Tears of the Kingdom's dictionary frames). macOS and Linux have the `zstd` command; Windows
           # does not, and telling a user to go and find one is not what a tools bundle is for. It ships here, fifth.
-          curl -sSfL -o zstd.zip https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip
+          # --retry: GitHub's release download host answers 503/504 often enough that two builds in a row died here
+          # (2026-11-08), and nothing about the URL was wrong.
+          curl -sSfL --retry 6 --retry-delay 3 --retry-all-errors -o zstd.zip https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip
           mkdir -p out/zstd
           unzip -q -j zstd.zip 'zstd-v1.5.7-win64/zstd.exe' -d out/zstd
           ./out/zstd/zstd.exe --version
@@ -183,7 +185,7 @@ jobs:
           py=python-3.15.2t-embeddable-amd64.zip
           url="https://www.python.org/ftp/python/3.15.2/$py"
           want=0e750de866fd1a2b4fcc092b382f765c79364fd02437e5f020a2675c5eb6c313
-          curl -sSfL -o "$py" "$url"
+          curl -sSfL --retry 6 --retry-delay 3 --retry-all-errors -o "$py" "$url"
           got=$(sha256sum "$py" | cut -d' ' -f1)
           [ "$got" = "$want" ] || { echo "::error::$url: sha256 $got, expected $want"; exit 1; }
           mkdir -p stage/pyft
