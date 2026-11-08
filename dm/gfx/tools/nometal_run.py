@@ -23,7 +23,7 @@
 # Result: the "library files" (*_b.metallib / *_bf.metallib) contain shader source. When the graphics layer of the shell (DM_SHELL build) finds that a library is not a compiled one, it compiles it on the device
 # (gfx/nvn/nvn_mtl.m); the system caches the compiled result, and from the second launch on nothing is compiled again.
 # The one check that is lost: in normal mode Apple's compiler also verifies along the way that every source compiles; here that is not verified, and one that fails to compile only reports a failure when it is used on the device.
-import os, runpy, shutil, subprocess, sys, threading, time
+import glob, os, runpy, shutil, struct, subprocess, sys, tempfile, threading, time
 
 _real = subprocess.run
 
@@ -43,6 +43,146 @@ SIDE_KEYS = set()   # pixel shaders whose one library also holds their alpha tes
 SIDE_DIRS = set()   # the library folders that got them (the stamp goes there)
 SIDE_STAMP = '_b_side_one.stamp'   # not a suffix shader_lib.APP_SUFFIXES takes, so it stays out of the package
 
+
+# ---- Apple's own compiler, when the machine has it ---------------------------------------------------------------
+# 装了 Apple 官方 Metal Developer Tools for Windows 的机器上，那两条命令就真的交给它做：包里放的是编好的库，手机首启
+# 不用再编。Apple 的东西一个字节都不随我们分发（许可不允许），所以只在用户自己装了的时候用；任何一步不成立就退回本文件
+# 原来的行为（源码进包、设备端编），绝不会产出半编半源码的包。
+# On a machine with Apple's Metal Developer Tools for Windows the two commands are handed to it for real: the package then holds
+# compiled libraries and the phone compiles nothing on first launch. None of Apple's files ship with us (the licence forbids it),
+# so they are used only when the user installed them, and any doubt falls back to this file's own behaviour -- never half compiled.
+TOOLS_ENV = 'NXN_METAL_TOOLS'   # a folder holding metal.exe/metallib.exe, or 'off' to behave as if they are absent
+PROBE_MSL = ('#include <metal_stdlib>\nusing namespace metal;\n'
+             'fragment float4 dm_probe_frag(float4 p [[position]]) { return p; }\n')
+PROBE_FLAGS = ['-O1', '-mios-version-min=18.0', '-fmetal-math-mode=relaxed', '-fpreserve-invariance']
+_TOOLS = None      # None = not looked yet; False = absent or unusable; dict = usable
+
+
+def _exe(kind):
+    """metal / metallib: the folder in NXN_METAL_TOOLS first, then an installed Metal Developer Tools, then PATH."""
+    e = os.environ.get(TOOLS_ENV, '').strip()
+    if e.lower() in ('off', '0', 'no', 'none'): return None
+    names = (kind + '.exe', kind) if os.name == 'nt' else (kind,)
+    for n in names:
+        p = os.path.join(e, n) if e else None
+        if p and os.path.isfile(p): return [p]
+    # 安装包默认落在 Program Files 下的 "Metal Developer Tools"，用户通常不把它加进 PATH：两层目录里找一遍。
+    # The installer puts them under Program Files ("Metal Developer Tools") and users rarely add that to PATH: look two
+    # levels down, bounded, so this stays cheap.
+    if os.name == 'nt':
+        for root in (os.environ.get('ProgramFiles'), os.environ.get('ProgramW6432'), os.environ.get('ProgramFiles(x86)')):
+            if not root or not os.path.isdir(root): continue
+            for base in sorted(glob.glob(os.path.join(root, 'Metal Developer Tools*'))):
+                for depth in ('', 'bin', os.path.join('usr', 'bin')):
+                    for n in names:
+                        p = os.path.join(base, depth, n)
+                        if os.path.isfile(p): return [p]
+    for n in names:
+        p = shutil.which(n)
+        if p: return [p]
+    return None
+
+
+def library_names(path):
+    """The functions a Metal library lists, or None when the file is not one this route can read. The same header layout
+    pso_offline.functions and dmsh_side.cut use: 'MTLB', the file's size at 0x10, the function list's offset at 0x18."""
+    try:
+        with open(path, 'rb') as f: b = f.read()
+        if b[:4] != b'MTLB' or len(b) < 0x58: return None
+        if struct.unpack_from('<Q', b, 0x10)[0] != len(b): return None
+        p = struct.unpack_from('<Q', b, 0x18)[0]
+        count = struct.unpack_from('<I', b, p)[0]; p += 4; names = []
+        for _ in range(count):
+            size = struct.unpack_from('<I', b, p)[0]; q, end, nm = p + 4, p + size, None
+            while q + 4 <= end:
+                tag = b[q:q + 4]; q += 4
+                if tag == b'ENDT': break
+                n = struct.unpack_from('<H', b, q)[0]; q += 2
+                if tag == b'NAME': nm = b[q:q + n].rstrip(b'\0').decode('utf-8', 'replace')
+                q += n
+            if nm: names.append(nm)
+            p += size
+        return names
+    except (OSError, struct.error, UnicodeDecodeError):
+        return None
+
+
+def tools():
+    """{'metal': path, 'metallib': path} when both are installed **and** a shader compiles and links through them, else False.
+    The probe runs once per process with this chain's own flags, so a tool this build cannot drive counts as absent."""
+    global _TOOLS
+    if _TOOLS is not None: return _TOOLS
+    _TOOLS = False
+    m, l = _exe('metal'), _exe('metallib')
+    if not (m and l):
+        if m or l: print('nometal_run: only one of metal/metallib was found; using the source-in-the-package route', flush=True)
+        return _TOOLS
+    d = tempfile.mkdtemp(prefix='dm-metal-probe-')
+    src, air, lib = (os.path.join(d, n) for n in ('probe.metal', 'probe.air', 'probe.metallib'))
+    try:
+        with open(src, 'w', encoding='utf-8', newline='\n') as f: f.write(PROBE_MSL)
+        c = subprocess.run([*m, '-c', *PROBE_FLAGS, src, '-o', air], capture_output=True, text=True)
+        if c.returncode != 0:
+            print('nometal_run: metal.exe cannot compile a probe shader (%s); using the source route' % _last(c), flush=True)
+            return _TOOLS
+        c = subprocess.run([*l, air, '-o', lib], capture_output=True, text=True)
+        if c.returncode != 0:
+            print('nometal_run: metallib.exe cannot link a probe (%s); using the source route' % _last(c), flush=True)
+            return _TOOLS
+        names = library_names(lib) or []
+        if 'dm_probe_frag' not in names:
+            print('nometal_run: the probe library lists %d functions and not the one compiled for (metallib.exe writes a file '
+                  'this route cannot read?); using the source route' % len(names), flush=True)
+            return _TOOLS
+        _TOOLS = {'metal': m, 'metallib': l}
+        print("nometal_run: Apple's Metal tools found (%s) -- libraries are compiled here, the phone will not compile them"
+              % os.path.dirname(m[0]), flush=True)
+    except OSError as e:
+        print('nometal_run: the Metal tools could not be run (%s); using the source route' % e, flush=True)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    return _TOOLS
+
+
+def _last(c):
+    """The last line of what a failed tool said, for the one-line note above."""
+    t = ((c.stderr or '') + (c.stdout or '')).strip().splitlines()
+    return t[-1][:200] if t else 'no output'
+
+
+_FELL_BACK = set()   # programs already reported: one line each, not one per shader
+
+
+def _fallback(prog, r=None):
+    """Says once that this process is using the source route from here on, and why."""
+    if prog in _FELL_BACK: return
+    _FELL_BACK.add(prog)
+    why = _last(r) if r is not None else 'the library it wrote cannot be read back'
+    print('nometal_run: %s failed (%s); that shader and the rest stay source, the phone compiles them' % (prog, why), flush=True)
+
+
+def _without_sdk(a):
+    """The same arguments minus `-sdk <name>` / `-isysroot <path>`: on Windows the tools carry their own headers and there is no SDK."""
+    out, i = [], 0
+    while i < len(a):
+        t = a[i]
+        if t in ('-sdk', '-isysroot') and i + 1 < len(a): i += 2; continue
+        if t.startswith('-isysroot=') or t.startswith('--sdk='): i += 1; continue
+        out.append(t); i += 1
+    return out
+
+
+def as_tool(c):
+    """('metal'|'metallib', arguments) for one of this route's two calls, or (None, None) for a shape it does not know.
+
+    Upstream builds `xcrun -isysroot <sdk> -c ... <source> -o <air>` (no program word: the path came from `xcrun -f metal`) and
+    the iOS chain the older `xcrun -sdk iphoneos metallib <air> -o <lib>`; both are recognised, and what is left is what the
+    Windows tool takes."""
+    a = _without_sdk(c[1:]) if c and c[0] == 'xcrun' else []
+    if a and a[0] in ('metal', 'metallib'): return a[0], a[1:]
+    if '-c' in a: return 'metal', a
+    if '-o' in a: return 'metallib', a
+    return None, None
 
 def split_into_one_library(self, target, msl, libs, split):
     # upstream renamed the two paths to one list (`compile_split(self, target, msl, libs, split)`): libs[0] is the
@@ -93,7 +233,17 @@ def run(args, *a, **k):
     enc = (lambda s: s) if text else (lambda s: s.encode())
     if isinstance(args, (list, tuple)) and args:
         c = [str(x) for x in args]
-        if c[0] == 'xcrun' and '--version' in c: return _done(args, enc('none\n'))
+        if c[0] == 'xcrun' and '--version' in c:
+            # 装了真工具就报它自己的版本：链号因此与「没有编译器」那支不同，两边的缓存不会混。
+            # With the real tools installed their own version is reported: the chain version then differs from the no-compiler
+            # branch, so the two caches never mix.
+            t = tools()
+            if t:
+                prog = 'metallib' if 'metallib' in c else 'metal'
+                r = _real([*t[prog], '--version'], *a, **k)
+                if r.returncode == 0: return r
+                print('nometal_run: %s --version failed, reporting no compiler' % prog, flush=True)
+            return _done(args, enc('none\n'))
         # dmsh_mtlcache.py fingerprints the toolchain with four probes; without a compiler they answer fixed values, so this
         # branch of the chain version is the same on every machine and its cache never mixes with the compiled one.
         # `xcrun -sdk macosx -f metal` / `-f metallib` and `--show-sdk-path`: upstream's dmsh_build runs them at import
@@ -118,6 +268,11 @@ def run(args, *a, **k):
         # come from stdin. Still normalized to LF for the reason given below.
         if c[0] == 'xcrun' and '-x' in c and '-o' in c and c[c.index('-x') + 1:c.index('-x') + 2] == ['metal'] and '-' in c:
             o = c.index('-o'); f = k.get('stdin'); b = f.read() if f is not None else b''
+            t = tools(); prog, rest = as_tool(c)
+            if t and prog == 'metal':
+                r = _real([*t['metal'], *rest], input=b, capture_output=True)
+                if r.returncode == 0: return _done(args, enc(''))
+                _fallback('metal', r)
             with open(c[o + 1], 'wb') as g: g.write(b.replace(b'\r\n', b'\n'))
             return _done(args, enc(''))
         # 编译与链接：上游现在用 `xcrun -isysroot <sdk> -c -O1 … <源码> -o <air>`、`xcrun <air> -o <库>`，
@@ -129,6 +284,17 @@ def run(args, *a, **k):
         # intermediate file), no `-c` means a link (the intermediate file is copied out as the library).
         if c[0] == 'xcrun' and '-o' in c:
             o = c.index('-o')
+            # 真工具在的时候，先照原参数交它做：这一次产出的就是真 air / 真库。任何一步失败（工具退出码、写出的库读不了）
+            # 就落回下面这条「源码进包」的路，并留一行说明——绝不留下一个既不是库也不是源码的文件。
+            # With the real tools this call is handed to them as it is: the output is a real air file or library. Any failure
+            # (exit code, or a file this route cannot read as a library) falls back to the source route below, with one line
+            # saying so -- a file that is neither a library nor source never reaches the package.
+            t = tools(); prog, rest = as_tool(c)
+            if t and prog:
+                r = _real([*t[prog], *rest], *a, **k)
+                if r.returncode == 0 and (prog != 'metallib' or library_names(c[o + 1]) is not None):
+                    return r
+                _fallback(prog, r if r.returncode else None)
             # 哪些参数是「选项的值」：-o 的输出、-sdk 的名字、-isysroot 的路径、-x 的方言；程序名本身也要跳。
             # iOS 那条仍是老形状 `xcrun -sdk iphoneos metallib <air> -o <lib>`，`iphoneos` 和 `metallib` 都不是输入文件。
             # Options whose next token is a value, plus the program name: the iOS chain still issues the old
@@ -154,8 +320,15 @@ def run(args, *a, **k):
 if __name__ == '__main__':
     if len(sys.argv) < 2: sys.exit(__doc__ or '用法：nometal_run.py <脚本.py> [参数…]')
     subprocess.run = run
-    patched = patch_side_libraries()
-    if not patched: print('nometal_run: dmsh_mtlcache is not importable here, so the libraries keep no alpha test / logic operation entry points', flush=True)
+    # 先探一次真工具：装了 Apple 的 Metal Developer Tools for Windows 就走上游那条「编成 metallib + 切侧库」的路，
+    # 不再打 compile_split 的补丁（那补丁是给没有编译器的情况准备的）。
+    # Probe the real tools first: with Apple's Metal Developer Tools for Windows installed the chain runs upstream's own
+    # "compile to a library, then cut the side library" path, so compile_split keeps its own implementation.
+    have = tools()
+    patched = False if have else patch_side_libraries()
+    if have:
+        print('nometal_run: Apple 的 Metal 工具在位：库在这里编成 metallib，手机不再编（侧库按上游方式切）', flush=True)
+    elif not patched: print('nometal_run: dmsh_mtlcache is not importable here, so the libraries keep no alpha test / logic operation entry points', flush=True)
     else: print('nometal_run: no Apple compiler, so no <key>_bx is cut: one library per pixel shader carries its alpha test and logic operation entry points (the device takes them from it)', flush=True)
     def _report():   # 判据（铁律 15）：没这行就当没接线 | the line that proves this took effect (rule 15: no line, not wired)
         if not SIDE_KEYS: return

@@ -26,6 +26,12 @@ step with each other.
 What the machine still needs: **Python 3.9 or newer** (the packer is Python; the `.exe` is only its window), your own game
 files, and `prod.keys`.
 
+**Optional: if this machine has Apple's [Metal Developer Tools for Windows](https://developer.apple.com/metal/)**, the packer
+compiles the shaders with it and the package needs **no first-launch shader compilation on the phone**. Without it nothing
+changes: the shaders travel as source and are compiled once on the first launch (with a progress page, and the results are
+remembered). That toolchain is not ours to ship (its licence forbids it): only a copy you installed yourself is used, and if it
+cannot do the job the packer says so in one line and falls back to the source route.
+
 | Step | What you do |
 |---|---|
 | **1** | Run `ns2ios-packer.exe`. It looks up the newest release as soon as the window opens. |

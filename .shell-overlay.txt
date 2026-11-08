@@ -122,3 +122,5 @@
 
 # --- dropped: upstream has it, this fork does not carry it ---
 # (none yet; `git rm` the file and add a line here when something is only ever upstream's)
+! dm/tools/tests/fake_metal.py       # a stand-in for Apple's metal/metallib, used only by the test beside it
+! dm/tools/tests/test_metal_tools_hook.py   # the hook in nometal_run.py, tested without Apple's tools

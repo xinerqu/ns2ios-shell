@@ -1681,7 +1681,10 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         # A library built before the one-library route has no alpha test / logic operation entry points inside it, and it looks
         # complete either way: every <key>_b.metallib is there. The stamp nometal_run.py leaves is the only thing that says the
         # entry points are in them (2026-11-07, issue #12: the old check reused such a library and the picture stayed wrong).
-        if not (d / '_b_side_one.stamp').is_file(): return False
+        # 装了 Apple 的 Metal 工具时走的是上游的切库方式：侧库是独立文件（<key>_bx.metallib），没有那枚戳，但同样是新的。
+        # With Apple's tools installed the upstream split runs instead: the side library is its own file (<key>_bx.metallib)
+        # and there is no stamp, but it is just as much the mark of a current build.
+        if not ((d / '_b_side_one.stamp').is_file() or next(d.glob('*_bx.metallib'), None)): return False
         return all(r['key'] + '_b.metallib' in have for r in res)
     if not force and done():
         say('shader libraries already there (chain %s)' % cur); return
