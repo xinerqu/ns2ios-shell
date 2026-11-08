@@ -286,8 +286,35 @@ def split_into_one_library(self, target, msl, libs, split):
     as built and names its entry points in the reflection, which is what the host reads (has_alpha / has_logic)."""
     SIDE_KEYS.add(os.path.basename(a))
     SIDE_DIRS.add(os.path.dirname(os.path.abspath(a)))
+    # 缓存。上游的 compile_split 先查 store、命中就不再编译；这版替换以前没有这一步（原来那句注释直说「这里没有 CAS」），
+    # 于是每次打包都从头再编一遍，**同一份源码被多个单元共用时也各编各的**（上游记过：BotW 的 10560 个像素着色器里
+    # 3936 个共用源码；王泪的 variation pairs 有 20016 对）。Cache.path 的 key 含目标与编译器身份，两条路（有/没有
+    # 苹果工具）不会互相命中。
+    # The cache. Upstream's compile_split looks in the store first and returns what is there; this replacement used to skip
+    # that (the comment it replaces said "no CAS here"), so every pack compiled from scratch and units sharing one source
+    # text each paid for it. Cache.path keys on the target and the compiler's identity, so the two routes never mix.
+    cached = None
+    try:
+        with open(msl, 'rb') as f: key = self.path(target, f.read())
+        if self.store.to_file(key, a):
+            if b:
+                try: os.unlink(b)
+                except OSError: pass
+            self.count((target, 'reused'))
+            return
+        cached = key
+    except (AttributeError, OSError):
+        cached = None
     t = tools()
     if t and _compile_with(t, msl, a, keep_as_is=True):
+        if cached:
+            try:
+                with open(a, 'rb') as f: magic = f.read(4)
+                if magic == b'MTLB':   # 只有真编出来的才进缓存；退回源码的那份不能占住这个 key
+                    self.store.put_file(cached, a)
+                    self.count((target, 'compiled'))
+            except OSError:
+                pass
         if b:
             try: os.unlink(b)
             except OSError: pass
