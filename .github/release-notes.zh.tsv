@@ -201,3 +201,20 @@ shell: the game's own dm/env.txt is read from its framework	游戏自己的 dm/e
 shell: a game's framework also names the game's dm/ for the settings screen	framework 里也指向该游戏自己的 dm/，设置页据此显示
 shell: a game's framework, so one app can hold several games	每个游戏打成独立的 framework：一个 App 可以装多个游戏
 release: the auto-generated smoke line is English only	发布页里自动生成的那行冒烟结果固定英文
+Base to 8d5d4f1b: the guest-file disk policy, the occlusion-query rework, mesh pipeline keys, uniform bounds, and the pipeline archive (69 upstream commits)	基座移到 8d5d4f1b：上游 69 个提交（guest file 的磁盘策略、occlusion query 重做、mesh 管线键、uniform 越界、管线归档）
+Link the RomFS image into the app tree instead of copying it (29 s of assemble on Tears of the Kingdom), and print a reused library's counts from the cache instead of reading 2.6 GB back	装配时把 romfs.img 硬链接进 app 树，不再整份复制（王国之泪那一步 29 秒）
+Keep the shader split as well: it is 153 s on Tears of the Kingdom and writes five .bin files plus four tables, so a copy is all it needs	拆着色器的产物也进缓存：王国之泪那一步 153 秒，命中后不到 1 秒
+Keep the Oodle scan's answer as well: it is the whole of rewrite main on Tears of the Kingdom (44 s) and reads only file headers	Oodle 扫描的答案也进缓存（王国之泪的 rewrite main 44 秒全花在它身上）
+Find the launcher's data folder anywhere above the working directory: the packer runs from inside a version folder, so the cache went into the tree that the next update replaces (2.7 GB)	缓存落点向上找 ns2ios-packer-data，落在 exe 目录而不是版本目录里
+Keep a rebuilt shader library too when it is not smaller: the cold-only rule was there for a bug that is fixed, and it made every rebuild re-publish nothing	重打出来的库只要不比缓存少就照样存（原来只认冷跑那次）
+Pass the reproducible-build flag as -Brepro: in bash the MSYS layer rewrote /Brepro as a POSIX path, so the linker looked for C:\Program.obj	可复现构建的开关写成 -Brepro：bash 里 MSYS 会把 /Brepro 当路径改写
+Run the SPIRV-Cross step in bash: on windows-latest a run block with no shell goes to the default one, which read the heredoc as a redirection and failed the step before anything was compiled	SPIRV-Cross 那步显式用 bash：windows-latest 默认的 shell 把 heredoc 当重定向
+Keep the rewritten modules between packs too: Brain Memory spent 86 s rewriting main again after the work folder went, and the files are 95 MB	改写产物也进缓存：工作目录被清掉后，Brain 那 86 秒不必再花
+Ignore the packer's library and shader cache: both live beside the exe or the folder it runs from, and a run from inside this checkout must not leave them in it	.gitignore 忽略库与缓存目录，仓库里跑打包不会留下它们
+Read a cached shader source as LF: a text-mode write turned it into CRLF, and dmsh_pull's anchored regex then found no vertex inputs, so every pulling library was dropped on a rebuild (Brain Memory: 245 of them)	缓存里的着色器源码按 LF 读回：CRLF 让 pulling 库在重打时被全部丢掉
+Keep the shader cache beside the library, not in %LOCALAPPDATA%: a folder that only grows has to be where the user can see and delete it, and ship the complete library over a rebuild that wrote fewer	缓存放在 exe 目录（和 ns2ios-library 并排），不放 %LOCALAPPDATA%——用户看得见、能删
+Keep a shader library only when the build started from nothing: a rebuild over the same folder writes 502 libraries where the cold run wrote 751, every pulling one gone	只把冷跑打出来的库当基准：暖跑重打会少 245 个 pulling 库
+Keep a game's shader library between packs under a key of its inputs: the work folder is deleted after a pack, so the next one translated all 496 shaders again (19.2 s -> 0.5 s on Brain Memory)	着色器库在两次打包之间保留，按输入指纹取用（Brain 19.2 秒 → 0.5 秒）
+Walk a RomFS image out of its index instead of stat-ing every entry: one scan of a 306,910-entry image took 10.2 s and now takes 0.2 s, and the packer's Oodle check 214 s -> 45 s	遍历 RomFS 镜像直接读索引，不再逐条 stat（一次全镜像 10.2 秒 → 0.2 秒）
+Give the Windows tools a build time they can reproduce: 8 bytes of clock moved the translation chain every release, and every game then re-translated its shaders	让 Windows 工具的构建时间可复现：每次发版漂的只是 8 个字节的时钟
+Read a RomFS file through a buffer its size asks for: an 8 KiB buffer took eight reads for one 26 KiB shader, and Windows has no pread to make them cheap (119 -> 222 MiB/s on the shaders of one game)	读 RomFS 文件按大小给缓冲（119 → 222 MiB/s）
