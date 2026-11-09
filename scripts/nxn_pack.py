@@ -1673,7 +1673,103 @@ def translate_python(tools):
     return FT_PY or None
 
 
-def step_translate(pkg, work, xlate, iosout, tid, force=False):
+# The translate stage's output is one image per game and it is the expensive one: 25 minutes for Tears of the Kingdom, 26
+# for Super Mario Odyssey. Until now the only check was "shader/cache/b-<chain>.img exists", which answers "did a run in
+# THIS folder finish": the folder is deleted by default after a pack, so the next pack of the same game translated
+# everything again, and a folder that survived answered yes whatever game files had replaced the ones it was built from.
+# So the library is kept outside the work folder under a key of its own inputs.
+SHADER_CACHE_KEY_VERSION = 'shader-lib-v1'
+
+
+def shader_cache_root():
+    """Where built libraries live between packs. LOCALAPPDATA on Windows, ~/.cache elsewhere; NXN_SHADER_CACHE moves it."""
+    root = os.environ.get('NXN_SHADER_CACHE')
+    if root: return Path(root)
+    base = os.environ.get('LOCALAPPDATA') or os.environ.get('XDG_CACHE_HOME') or (Path.home() / '.cache')
+    return Path(base) / 'ns2ios' / 'shader-cache'
+
+
+def shader_cache_budget():
+    try: return int(float(os.environ.get('NXN_SHADER_CACHE_GB', '12')) * (1 << 30))
+    except ValueError: return 12 << 30
+
+
+def romfs_index_identity(image):
+    """(index bytes, entries, digest) of a RomFS image: which files it holds, without reading its payload."""
+    import romfs as _romfs
+    with open(image, 'rb') as f:
+        magic, off, size, count = _romfs.HEAD.unpack(f.read(_romfs.HEAD.size))
+        if magic != _romfs.MAGIC: raise ValueError('not a RomFS image: %s' % image)
+        f.seek(off); index = f.read(size)
+    return size, count, hashlib.sha256(index).hexdigest()[:16]
+
+
+def shader_cache_key(tid, chain, identity):
+    """The translate stage's key: the chain plus the one input the chain cannot see.
+
+    The chain hashes the generator sources, the ABI headers, dmsh_chain.lock's tool fingerprints and the profile's tables
+    (dmsh_chain.py INPUT_TABLES), so it already answers "would this build produce the same shaders" for everything but the
+    files the shaders come from. That is the game's RomFS, and `identity` is a digest of each version's index (its file
+    names and sizes) — hashed rather than stat-ed, so the same game copied to another folder hits the same entry.
+    """
+    if not identity: return None
+    h = hashlib.sha256()
+    h.update('\0'.join([SHADER_CACHE_KEY_VERSION, str(tid), str(chain), str(identity)]).encode())
+    return h.hexdigest()[:16]
+
+
+def shader_cache_lookup(tid, key):
+    p = shader_cache_root() / str(tid) / (key + '.img')
+    return p if p.is_file() else None
+
+
+def _place(src, dst):
+    """dst = src, by hard link when both are on one volume (no bytes moved), else a copy. Returns which it did."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if dst.exists(): dst.unlink()
+        os.link(str(src), str(dst)); return 'hard link'
+    except OSError:
+        shutil.copyfile(str(src), str(dst)); return 'copy'
+
+
+def shader_cache_publish(tid, key, img, version):
+    """Keep this build's image for the next pack of the same game. Any failure is a warning: the pack is already good."""
+    entry = shader_cache_root() / str(tid)
+    try:
+        how = _place(img, entry / (key + '.img'))
+        (entry / (key + '.json')).write_text(json.dumps(dict(
+            key=key, tid=str(tid), version=str(version), bytes=img.stat().st_size, created=time.time()), indent=1),
+            encoding='utf-8')
+    except OSError as e:
+        warn('could not store the shader library in the cache (%s): this pack is fine, the next one translates again' % e)
+        return
+    say('shader library kept for the next pack: %s (%s, %.2f GB, key %s)'
+        % (entry / (key + '.img'), how, img.stat().st_size / (1 << 30), key))
+    shader_cache_prune()
+
+
+def shader_cache_prune():
+    """Drop the oldest entries until the cache fits its budget (NXN_SHADER_CACHE_GB, 12 GB by default)."""
+    root = shader_cache_root()
+    if not root.is_dir(): return
+    ents = []
+    for p in root.glob('*/*.img'):
+        try: ents.append((p.stat().st_mtime, p.stat().st_size, p))
+        except OSError: pass
+    total, budget, dropped = sum(s for _, s, _ in ents), shader_cache_budget(), 0
+    if total <= budget: return
+    for _, size, p in sorted(ents):
+        if total <= budget: break
+        try:
+            p.unlink(); p.with_suffix('.json').unlink(missing_ok=True); total -= size; dropped += 1
+        except OSError: pass
+    if dropped:
+        say('shader cache pruned %d entr%s (now %.2f GB, budget %.1f GB)'
+            % (dropped, 'y' if dropped == 1 else 'ies', total / (1 << 30), budget / (1 << 30)))
+
+
+def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None):
     """dmsh_build.py, with no metal compiler: nometal_run.py turns `xcrun metal` into a copy, so the "libraries" hold MSL
     source and the phone compiles them once on first launch. dmsh_build.py creates <iosout>/b-<chain version> itself."""
     # Completeness is decided by the per-shader results dmsh_build.py writes, not by "some file is there": a run that was
@@ -1735,29 +1831,44 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False):
         # and there is no stamp, but it is just as much the mark of a current build.
         if not ((d / '_b_side_one.stamp').is_file() or next(d.glob('*_bx.metallib'), None)): return False
         return all(r['key'] + '_b.metallib' in have for r in res)
-    if not force and done():
+    key = None
+    if cur and identity:
+        key = shader_cache_key(tid, cur, identity)
+    cached = shader_cache_lookup(tid, key) if key and not force else None
+    if cached:
+        # A hit places the image where dmsh_build.py would have written it; the reporting below reads it back and prints
+        # what it holds, so a reused library is checked exactly like a fresh one.
+        dst = iosout / ('b-' + cur + '.img')
+        how = _place(cached, dst)
+        say('shader libraries reused from the cache: %s (%.2f GB, chain %s, %s)'
+            % (cached.name, cached.stat().st_size / (1 << 30), cur, how))
+    elif not force and done():
         say('shader libraries already there (chain %s)' % cur); return
-    if cur: say('translation chain %s: translating the shaders' % cur)
-    need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
-              'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
-    # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
-    # header is per game: packing a second game on the same machine fails with "run --header first" if this only happens
-    # when the toolchain lock changes. It reads the tables, so it costs nothing to do every time.
-    run([PY, nometal, GFX / 'dmsh_chain.py', '--header'], env=genv,
-        log=work / 'logs' / 'chain_header.log', what='dmsh_chain --header')
-    fpy = translate_python(Path(xlate).parent)
-    if fpy: say('translating with the free-threaded interpreter (%s): the GIL is off, so the pool runs on %d threads at once'
-                % (Path(fpy).parent.name, XLATE_JOBS))
-    run([fpy or PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
-        # DMSH_TARGETS=ios：只编 iPhone 那份。上游默认在设了 IOSOUT 时同时编 mac + ios，而 mac 那份落在缓存目录、
-        # 从不进包（我们只出 iPhone 壳）；上游自己的注释写着「iOS-only 的构建只跳过 macOS 编译，约占 Metal 工作的一半」。
-        # 2026-11-09 实测王泪的缓存里 ios 17 034 / mac 17 049 条，几乎一对一——**一半的编译是白干的**。
-        # DMSH_TARGETS=ios: the iPhone libraries only. Upstream defaults to building mac + ios whenever IOSOUT is set;
-        # the mac ones land in the cache folder and never reach a package (we ship an iPhone shell only), and upstream's own
-        # comment calls that about half of the Metal work. Measured on Tears of the Kingdom: 17 034 ios vs 17 049 mac entries.
-        env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(XLATE_JOBS), 'DMSH_TARGETS': 'ios',
-             'DM_GAME': tid, 'PYTHON_GIL': '0'},
-        log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
+    else:
+        if cur: say('translation chain %s: translating the shaders' % cur)
+        need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
+                  'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
+        # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
+        # header is per game: packing a second game on the same machine fails with "run --header first" if this only happens
+        # when the toolchain lock changes. It reads the tables, so it costs nothing to do every time.
+        run([PY, nometal, GFX / 'dmsh_chain.py', '--header'], env=genv,
+            log=work / 'logs' / 'chain_header.log', what='dmsh_chain --header')
+        fpy = translate_python(Path(xlate).parent)
+        if fpy: say('translating with the free-threaded interpreter (%s): the GIL is off, so the pool runs on %d threads at once'
+                    % (Path(fpy).parent.name, XLATE_JOBS))
+        run([fpy or PY, nometal, GFX / 'dmsh_build.py', pkg, work / 'shader' / 'cache'],
+            # DMSH_TARGETS=ios：只编 iPhone 那份。上游默认在设了 IOSOUT 时同时编 mac + ios，而 mac 那份落在缓存目录、
+            # 从不进包（我们只出 iPhone 壳）；上游自己的注释写着「iOS-only 的构建只跳过 macOS 编译，约占 Metal 工作的一半」。
+            # 2026-11-09 实测王泪的缓存里 ios 17 034 / mac 17 049 条，几乎一对一——**一半的编译是白干的**。
+            # DMSH_TARGETS=ios: the iPhone libraries only. Upstream defaults to building mac + ios whenever IOSOUT is set;
+            # the mac ones land in the cache folder and never reach a package (we ship an iPhone shell only), and upstream's own
+            # comment calls that about half of the Metal work. Measured on Tears of the Kingdom: 17 034 ios vs 17 049 mac entries.
+            env={'IOSOUT': iosout, 'XLATE': xlate, 'WORK': work, 'J': str(XLATE_JOBS), 'DMSH_TARGETS': 'ios',
+                 'DM_GAME': tid, 'PYTHON_GIL': '0'},
+            log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
+        built = iosout / ('b-' + cur + '.img') if cur else None
+        if key and built is not None and built.is_file():
+            shader_cache_publish(tid, key, built, Path(str(pkg)).parent.name)
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
     made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
@@ -2694,7 +2805,14 @@ def main():
         try:
             w = view or work
             pkg_for_tools = pkg_dir if not view else (view / Path(pkg_dir).relative_to(work))
-            step_translate(pkg_for_tools, w, xlate, w / 'build' / 'ios' / 'dmsh_b', tid, a.force)
+            # What the translate stage's output depends on that the chain cannot see: the game files themselves, named by
+            # each version's RomFS index (file names and sizes). No identity = no cache entry; the build still runs.
+            ident = None
+            try:
+                ident = ' '.join('%s:%s' % (v, romfs_index_identity(romfs_source(dirs[v]))[2]) for v in versions)
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                warn('cannot name the game files\' identity (%s): the shader library will not be kept for the next pack' % e)
+            step_translate(pkg_for_tools, w, xlate, w / 'build' / 'ios' / 'dmsh_b', tid, a.force, identity=ident)
         finally:
             drop_ascii_view(view)
         lap('translate shaders')
