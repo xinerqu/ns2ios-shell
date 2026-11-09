@@ -1739,16 +1739,18 @@ def shader_cache_root():
     """Where built libraries live between packs: a folder the user can see and delete, beside everything else this packer
     keeps. NOT %LOCALAPPDATA% -- that directory only grows and nobody knows it is there (坤哥 2026-11-09).
 
-    The launcher runs the packer with <exe folder>\\ns2ios-packer-data as the working directory, so the cache lands beside
-    ns2ios-library, in the exe's own folder. From a command line it is ns2ios-shader-cache under wherever it was run.
-    NXN_SHADER_CACHE names another folder outright.
+    The launcher runs the packer from inside its own data folder (…\\ns2ios-packer-data\\versions\\<tag>\\src\\<shell>), so the
+    cache belongs beside ns2ios-library in the executable's folder -- NOT inside a version folder, which the next update
+    replaces (2026-11-09: 2.7 GB of Tears of the Kingdom went into one). Anywhere else, it is a folder under the directory
+    the packer was run from. NXN_SHADER_CACHE names another folder outright.
     """
     root = os.environ.get('NXN_SHADER_CACHE')
     if root: return Path(root)
-    cwd = Path.cwd()
-    if cwd.name == 'ns2ios-packer-data':                  # the launcher's data folder: the exe folder is one level up
-        return cwd.parent / 'ns2ios-shader-cache'
-    return cwd / 'ns2ios-shader-cache'
+    here = Path.cwd().resolve()
+    for d in (here, *here.parents):
+        if d.name == 'ns2ios-packer-data':
+            return d.parent / 'ns2ios-shader-cache'
+    return here / 'ns2ios-shader-cache'
 
 
 _CACHE_ANNOUNCED = []
@@ -1824,20 +1826,31 @@ def _place(src, dst):
         shutil.copyfile(str(src), str(dst)); return 'copy'
 
 
-def shader_cache_publish(tid, key, img, version):
+def shader_cache_publish(tid, key, img, version, libraries=None):
     """Keep this build's image for the next pack of the same game. Any failure is a warning: the pack is already good."""
     entry = shader_cache_root() / str(tid)
     try:
         how = _place(img, entry / (key + '.img'))
         (entry / (key + '.json')).write_text(json.dumps(dict(
-            key=key, tid=str(tid), version=str(version), bytes=img.stat().st_size, created=time.time()), indent=1),
-            encoding='utf-8')
+            key=key, tid=str(tid), version=str(version), bytes=img.stat().st_size,
+            libraries=libraries, created=time.time()), indent=1), encoding='utf-8')
     except OSError as e:
         warn('could not store the shader library in the cache (%s): this pack is fine, the next one translates again' % e)
         return
     say('shader library kept for the next pack: %s (%s, %.2f GB, key %s)'
         % (entry / (key + '.img'), how, img.stat().st_size / (1 << 30), key))
     shader_cache_prune()
+
+
+def shader_cache_count(img):
+    """The library count recorded with an entry, or the image's own when the entry predates the field."""
+    js = img.with_suffix('.json')
+    try:
+        n = json.loads(js.read_text(encoding='utf-8')).get('libraries')
+        if isinstance(n, int) and n > 0: return n
+    except (OSError, ValueError):
+        pass
+    return library_count(img)
 
 
 def shader_cache_prune():
@@ -1964,12 +1977,19 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
             # libraries cannot be told apart on the phone). A rebuild over an existing shader cache used to write fewer --
             # the CRLF bug behind that is fixed, but the rule stays: whatever this run made is kept unless it holds fewer
             # libraries than the entry already there, in which case the entry wins and goes into the package.
+            # Counting libraries reads the whole index of a 2.7 GB image (about 100 s on Tears of the Kingdom), so it is
+            # only done when there IS an entry to compare against, and the count is recorded for the next comparison.
             complete = shader_cache_lookup(tid, key)
-            have, want = library_count(built), (library_count(complete) if complete else -1)
-            if complete and 0 <= have < want:
-                how = _place(complete, built)
-                say('shader library: this build wrote %d libraries, the cached one has %d: using the cached one (%s)'
-                    % (have, want, how))
+            if complete:
+                want = shader_cache_count(complete)
+                have = library_count(built)
+                if 0 <= have < want:
+                    how = _place(complete, built)
+                    say('shader library: this build wrote %d libraries, the cached one has %d: using the cached one (%s)'
+                        % (have, want, how))
+                else:
+                    shader_cache_announce()
+                    shader_cache_publish(tid, key, built, label, libraries=have)
             else:
                 shader_cache_announce()
                 shader_cache_publish(tid, key, built, label)
