@@ -44,3 +44,8 @@ work/
 # (dm/ios/tools/compile_check.py, build_smoke.py, dm/ios/tests), so it would fail here for reasons that say nothing about
 # the shell. The shell has its own workflow: shell.yml. dm/ios and docs now match upstream 4639c51 otherwise.
 .github/workflows/tests.yml
+
+# What the packer keeps beside itself: the several-game library and the shader cache (both live in the exe's folder, or in
+# the folder the packer was run from). Neither is source, and a run from inside this checkout must not leave either here.
+ns2ios-library/
+ns2ios-shader-cache/
