@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 HEAD = struct.Struct('<8sQQQ')
 ENT = struct.Struct('<QQIHBB')
 MAGIC = b'DMROMFS1'
+BUFFER = 1 << 20   # the most a reader buffers per file (see open: the buffer is sized to the file up to this)
 
 
 class Image:
@@ -165,10 +166,17 @@ else:
         if not resolved: return builtins.open(file, mode, buffering, encoding, errors, newline, **kwargs)
         if mode not in ('r', 'rb', 'rt'): raise OSError(errno.EROFS, 'RomFS images are read-only', file)
         image, relative = resolved; k = image.find(relative)
-        if not image.entry(k)[4]: raise IsADirectoryError(file)
+        _, length, _, _, is_file, _ = image.entry(k)
+        if not is_file: raise IsADirectoryError(file)
         raw = _File(image, k)
         if buffering == 0 and 'b' in mode: return raw
-        reader = io.BufferedReader(raw, io.DEFAULT_BUFFER_SIZE if buffering < 0 else buffering or io.DEFAULT_BUFFER_SIZE)
+        if buffering < 0:
+            # One buffer costs one _pread, and Windows has no pread: it is a seek and a read, about 15 us, so an 8 KiB
+            # buffer read a 26 KiB file in four of them. This tree is 28,669 shaders read whole, and a benchmark over
+            # files of 2-96 KiB in a game's image (2026-11-09) went 119 -> 222 MiB/s with the buffer sized to the file.
+            # Capped: a 4-byte magic probe still asks for 8 KiB, and a 900 MB file does not take a gigabyte of buffer.
+            buffering = min(BUFFER, max(io.DEFAULT_BUFFER_SIZE, length))
+        reader = io.BufferedReader(raw, buffering or io.DEFAULT_BUFFER_SIZE)
         return reader if 'b' in mode else io.TextIOWrapper(reader, encoding=encoding, errors=errors, newline=newline)
 
 
