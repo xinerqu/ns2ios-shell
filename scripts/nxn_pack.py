@@ -1938,11 +1938,6 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
         say('shader libraries already there (chain %s)' % cur); return
     else:
         if cur: say('translation chain %s: translating the shaders' % cur)
-        # A rebuild over a shader cache this folder already holds is NOT the same build: measured on Brain Memory, the cold
-        # run writes 751 libraries (496 <key>_b + 245 <key>_bp pulling + 4 <key>_bv + 6 others) and a rebuild in the same
-        # folder writes 502 — every pulling library is gone. So only a build that started from nothing is kept for the
-        # cache; a rebuild may still ship what it makes, but it does not become the entry other packs reuse.
-        cold = not (work / 'shader' / 'cache').exists()
         need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
                   'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
         # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
@@ -1965,21 +1960,19 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
             log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
         built = iosout / ('b-' + cur + '.img') if cur else None
         if key and built is not None and built.is_file():
-            if cold:
+            # The complete library is the only one worth shipping (坤哥 2026-11-09: a package that quietly holds fewer
+            # libraries cannot be told apart on the phone). A rebuild over an existing shader cache used to write fewer --
+            # the CRLF bug behind that is fixed, but the rule stays: whatever this run made is kept unless it holds fewer
+            # libraries than the entry already there, in which case the entry wins and goes into the package.
+            complete = shader_cache_lookup(tid, key)
+            have, want = library_count(built), (library_count(complete) if complete else -1)
+            if complete and 0 <= have < want:
+                how = _place(complete, built)
+                say('shader library: this build wrote %d libraries, the cached one has %d: using the cached one (%s)'
+                    % (have, want, how))
+            else:
                 shader_cache_announce()
                 shader_cache_publish(tid, key, built, label)
-            else:
-                # The complete library is the only one worth shipping (坤哥 2026-11-09: a package that quietly holds fewer
-                # libraries cannot be told apart on the phone). A rebuild over an existing shader cache is exactly the run
-                # that writes fewer, so when a cached cold build for this key exists, take it back over what this run made.
-                complete = shader_cache_lookup(tid, key)
-                have, want = library_count(built), (library_count(complete) if complete else -1)
-                if complete and 0 <= have < want:
-                    how = _place(complete, built)
-                    say('shader library: this rebuild wrote %d libraries, the cached cold build has %d: using the cached one (%s)'
-                        % (have, want, how))
-                else:
-                    say('shader library: %d libraries, not re-kept (the cache already holds this key)' % have)
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
     made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
