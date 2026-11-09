@@ -1578,7 +1578,32 @@ def shader_split_hint(text):
     return None
 
 
-def oodle_archives(game, mods):
+OODLE_CACHE_KEY_VERSION = 'oodle-scan-v1'
+
+
+def oodle_cache_key(game, mods):
+    """What the Oodle scan's answer depends on: the scanners' own sources, the game files, and the modules they read.
+
+    The scan reads headers only and decides nothing about the build, so its answer is a pure function of these. The RomFS is
+    named by its index digest (its file names and sizes) and each ExeFS module by its bytes: a hash, not stat, so the same
+    dump copied elsewhere hits the same entry.
+    """
+    h = hashlib.sha256()
+    h.update(OODLE_CACHE_KEY_VERSION.encode() + b'\0')
+    for p in sorted((DM / 'games').glob('*.py')) + [GFX / 'uepak.py']:
+        h.update(p.name.encode() + b'\0')
+        try: h.update(p.read_bytes())
+        except OSError: h.update(b'missing')
+    h.update(b'\0' + romfs_index_identity(romfs_source(game))[2].encode() + b'\0')
+    for m in mods:
+        h.update(str(m).encode() + b'\0')
+        with open(game / 'ExeFS' / m, 'rb') as f:
+            for chunk in iter(lambda: f.read(8 << 20), b''): h.update(chunk)
+        h.update(b'\0')
+    return h.hexdigest()[:16]
+
+
+def oodle_archives(game, mods, tid):
     """The reasons this extraction keeps its shaders where only the game's own Oodle decoder reaches them, or {}.
 
     Two of profile_guess.build_sources' answers name archives the shader split reads through that decoder running in the
@@ -1588,15 +1613,42 @@ def oodle_archives(game, mods):
     the file headers already hold. The scan is upstream's own (checked against every profile), reads headers only, and
     costs one walk of the RomFS. The other answers are left to their own messages: ue_decode wants the game booted on a
     Mac, and the three captures are what docs/CAPTURE.md answers.
+
+    Its answer is kept beside the shader cache: the walk is the whole of `rewrite main`'s 44 s on Tears of the Kingdom, and
+    it answers the same thing for the same files every time.
     """
+    key, hit = None, None
+    try: key = oodle_cache_key(game, mods)
+    except (OSError, ValueError) as e:
+        warn('cannot key the Oodle scan (%s): scanning as before' % e)
+    if key:
+        p = shader_cache_root() / 'oodle' / str(tid) / (key + '.json')
+        try:
+            if p.is_file():
+                hit = json.loads(p.read_text(encoding='utf-8'))
+                say('Oodle scan reused from the cache (key %s): %d archive(s) named'
+                    % (key, len(hit.get('archives') or {})))
+        except (OSError, ValueError):
+            hit = None
     sys.path.insert(0, str(DM / 'games'))
-    try:
-        import profile_guess
-        src = profile_guess.build_sources(game / 'ExeFS', romfs_source(game), mods)
-    except Exception as e:                                    # noqa: BLE001 - any failure here only costs the early stop
-        warn('could not scan the RomFS for Oodle-compressed shader archives (%s): packing on as before' % e)
-        return {}
-    return {k: src[k][1] for k in ('oodle_packs', 'ue_legacy') if src.get(k) and src[k][0]}
+    if hit is None:
+        try:
+            import profile_guess
+            src = profile_guess.build_sources(game / 'ExeFS', romfs_source(game), mods)
+        except Exception as e:                                # noqa: BLE001 - any failure here only costs the early stop
+            warn('could not scan the RomFS for Oodle-compressed shader archives (%s): packing on as before' % e)
+            return {}
+        found = {k: src[k][1] for k in ('oodle_packs', 'ue_legacy') if src.get(k) and src[k][0]}
+        if key:
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(json.dumps({'key': key, 'version': ' '.join(sorted(str(m) for m in mods)),
+                                         'archives': found, 'created': time.time()}, indent=1), encoding='utf-8')
+                say('Oodle scan kept for the next pack (key %s, %d archive(s) named)' % (key, len(found)))
+            except OSError as e:
+                warn('could not store the Oodle scan (%s): this pack is fine, the next one scans again' % e)
+        return found
+    return hit.get('archives') or {}
 
 
 def prune_shader_cache(work):
@@ -2739,7 +2791,7 @@ def main():
     # Oodle decoder unpacks is the end of the road, and the extraction and the rewrite that used to run first were
     # several minutes of work for an answer the RomFS headers already hold.
     if not a.skip_oodle_check:
-        why = oodle_archives(game, mods)
+        why = oodle_archives(game, mods, tid)
         if why:
             die('this game keeps its shaders in archives that only its own Oodle decoder can unpack:\n'
                 + ''.join('    %s: %s\n' % kv for kv in why.items()) +
