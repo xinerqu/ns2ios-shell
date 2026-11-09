@@ -1769,7 +1769,7 @@ def shader_cache_prune():
             % (dropped, 'y' if dropped == 1 else 'ies', total / (1 << 30), budget / (1 << 30)))
 
 
-def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None):
+def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, label=''):
     """dmsh_build.py, with no metal compiler: nometal_run.py turns `xcrun metal` into a copy, so the "libraries" hold MSL
     source and the phone compiles them once on first launch. dmsh_build.py creates <iosout>/b-<chain version> itself."""
     # Completeness is decided by the per-shader results dmsh_build.py writes, not by "some file is there": a run that was
@@ -1846,6 +1846,11 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None):
         say('shader libraries already there (chain %s)' % cur); return
     else:
         if cur: say('translation chain %s: translating the shaders' % cur)
+        # A rebuild over a shader cache this folder already holds is NOT the same build: measured on Brain Memory, the cold
+        # run writes 751 libraries (496 <key>_b + 245 <key>_bp pulling + 4 <key>_bv + 6 others) and a rebuild in the same
+        # folder writes 502 — every pulling library is gone. So only a build that started from nothing is kept for the
+        # cache; a rebuild may still ship what it makes, but it does not become the entry other packs reuse.
+        cold = not (work / 'shader' / 'cache').exists()
         need_tool('spirv-cross', 'translate SPIR-V to Metal Shading Language',
                   'install Vulkan SDK 1.4.357.0 (its Bin/ holds spirv-cross.exe) or build SPIRV-Cross at tag vulkan-sdk-1.4.357.0')
         # dmsh_build.py refuses to start unless the game profile's dmsh_chain.h holds the chain version it computed, and that
@@ -1868,7 +1873,11 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None):
             log=work / 'logs' / 'shaders.log', what='translating shaders to Metal source')
         built = iosout / ('b-' + cur + '.img') if cur else None
         if key and built is not None and built.is_file():
-            shader_cache_publish(tid, key, built, Path(str(pkg)).parent.name)
+            if cold:
+                shader_cache_publish(tid, key, built, label)
+            else:
+                say('shader library not kept for the cache: this folder already held a shader cache, and a rebuild over '
+                    'one writes fewer libraries than the cold run (Brain Memory: 502 against 751, every <key>_bp gone)')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
     made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
@@ -2812,7 +2821,7 @@ def main():
                 ident = ' '.join('%s:%s' % (v, romfs_index_identity(romfs_source(dirs[v]))[2]) for v in versions)
             except (OSError, ValueError, KeyError, TypeError) as e:
                 warn('cannot name the game files\' identity (%s): the shader library will not be kept for the next pack' % e)
-            step_translate(pkg_for_tools, w, xlate, w / 'build' / 'ios' / 'dmsh_b', tid, a.force, identity=ident)
+            step_translate(pkg_for_tools, w, xlate, w / 'build' / 'ios' / 'dmsh_b', tid, a.force, identity=ident, label=' '.join(versions))
         finally:
             drop_ascii_view(view)
         lap('translate shaders')
