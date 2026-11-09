@@ -54,7 +54,7 @@ def _metallib(tool, rest, *a, **k):
     o = rest.index('-o')
     out = rest[o + 1]
     files = [x for x in rest if not x.startswith('-')]
-    if all(x.isascii() for x in files + [out]):
+    if all(x.isascii() and ' ' not in x for x in files + [out]):     # a space splits an argument in Apple's metallib, as in metal
         return _real([*tool, *rest], *a, **k)
     d = _scratch()
     try:

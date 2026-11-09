@@ -32,7 +32,35 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  
  def source_without_rule_bodies():   # this file's code form (dmsh_chain.code_form): no comments, docstrings or formatting, and the rule functions' bodies blanked
      return dmsh_chain.code_form(open(__file__, 'r').read(), {f.__name__ for f, _ in RULES})
-@@ -1655,7 +1663,7 @@
+@@ -648,6 +656,7 @@
+         atomic_json(os.path.join(d, key + '_b.json'), MTL.with_compiler(target, refl))
+ 
+ VIN_STATS = collections.Counter()
++SRC_STATS = collections.Counter()   # units whose library had to stay MSL source
+ PULL_STATS = collections.Counter()
+ SIDE_STATS = collections.Counter()
+ BF_STATS = collections.Counter()
+@@ -734,8 +743,17 @@
+         try:
+             for t, d in targets: MTL.compile_split(t, u, [os.path.join(d, key + n + '.metallib') for n in names], lambda lib, groups=groups: dmsh_side.cut(lib, *groups))
+         except (subprocess.CalledProcessError, ValueError) as e:
+-            if fetch: BF_STATS['failed'] += 1; print(f'[RED] {key}: the readable-tile version does not build ({str(e)[:120]}): its draws go without the tile read', flush=True)
+-            else: SIDE_STATS['failed'] += 1; print(f'[RED] {key}: the alpha test and logic operation entry points do not build ({str(e)[:120]}): its draws go without them', flush=True)
++            # The compiler refused this unit (a path Apple's tools cannot take, or a source they cannot build). Leave the MSL
++            # source as the library, exactly as the no-tools route does: the host compiles what is not MTLB on the device, so
++            # the shader still draws. Before this the unit was skipped outright and the shader had NO library at all, which
++            # only the packer's completeness check caught (2026-11-10: 973 of Big Brain Academy's shaders, every vertex one).
++            for _, d in targets:
++                try:
++                    with open(os.path.join(d, key + '_b.metallib'), 'wb') as f: f.write(unit.encode('utf-8'))
++                except OSError: pass
++            SRC_STATS['unit fallback'] += 1
++            if fetch: BF_STATS['failed'] += 1; print(f'{key}: the readable-tile version does not build ({str(e)[:120]}): its library is source, the phone compiles it', flush=True)
++            else: SIDE_STATS['failed'] += 1; print(f'{key}: the alpha test and logic operation entry points do not build ({str(e)[:120]}): its library is source, the phone compiles it', flush=True)
+             continue
+         finally:
+             try: os.unlink(u)
+@@ -1655,7 +1673,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
@@ -41,7 +69,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              spv_single_lane(os.path.join(w, key + '.spv'))
              r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
-@@ -1827,7 +1835,7 @@
+@@ -1827,7 +1845,7 @@
          sys.exit(f'[RED] {name} holds no record of shader {key}, which the shader map names: the package and the map come from different shader_split.py runs{old}; '
                   f'split the shaders again (the NSP script does when {dm_dir} is removed)')
      o, e = recs[key]
@@ -50,7 +78,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  for key in keys: digests[key] = shader_key(key, *rec_of(key))
  def plain_digest(k):   # a paired pixel shader's key, also when it is not built this time
      if k in digests: return digests[k]
-@@ -1870,7 +1878,12 @@
+@@ -1870,7 +1888,12 @@
      try:
          if key in cache_hits and restored(key, wb):
              refl = json.loads(output_of('mac', key + '_b.json'))
@@ -64,3 +92,12 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              if refl['stage'] == 'vs': write_refl(key, pull_finish(key, src, vin_finish(key, src, refl)))
              if refl['stage'] == 'ps': refl.update(ps_libraries(key, os.path.join(out, key + '_b.metal'), src, refl['bindings'])); write_refl(key, refl)   # stored without them (publish_cache)
              return key, 'ok', '', refl
+@@ -1932,6 +1955,8 @@
+ print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
+ print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
+       f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')
++if SRC_STATS['unit fallback']:
++    print(f"units whose library stayed MSL source (the compiler refused them): {SRC_STATS['unit fallback']:,} -- the phone compiles those once")
+ print('mesh libraries (<vertex>_<geometry>_m3, dmsh_mesh.py): ' + (', '.join(f'{k} {v}' for k, v in MESH_STATS.items()) or 'none'))
+ print(MTL.summary())
+ for lvl in [k for k in st if k != 'ok']:

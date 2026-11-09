@@ -656,6 +656,7 @@ def write_refl(key, refl):
         atomic_json(os.path.join(d, key + '_b.json'), MTL.with_compiler(target, refl))
 
 VIN_STATS = collections.Counter()
+SRC_STATS = collections.Counter()   # units whose library had to stay MSL source
 PULL_STATS = collections.Counter()
 SIDE_STATS = collections.Counter()
 BF_STATS = collections.Counter()
@@ -742,8 +743,17 @@ def ps_libraries(key, msl, full, bindings):
         try:
             for t, d in targets: MTL.compile_split(t, u, [os.path.join(d, key + n + '.metallib') for n in names], lambda lib, groups=groups: dmsh_side.cut(lib, *groups))
         except (subprocess.CalledProcessError, ValueError) as e:
-            if fetch: BF_STATS['failed'] += 1; print(f'[RED] {key}: the readable-tile version does not build ({str(e)[:120]}): its draws go without the tile read', flush=True)
-            else: SIDE_STATS['failed'] += 1; print(f'[RED] {key}: the alpha test and logic operation entry points do not build ({str(e)[:120]}): its draws go without them', flush=True)
+            # The compiler refused this unit (a path Apple's tools cannot take, or a source they cannot build). Leave the MSL
+            # source as the library, exactly as the no-tools route does: the host compiles what is not MTLB on the device, so
+            # the shader still draws. Before this the unit was skipped outright and the shader had NO library at all, which
+            # only the packer's completeness check caught (2026-11-10: 973 of Big Brain Academy's shaders, every vertex one).
+            for _, d in targets:
+                try:
+                    with open(os.path.join(d, key + '_b.metallib'), 'wb') as f: f.write(unit.encode('utf-8'))
+                except OSError: pass
+            SRC_STATS['unit fallback'] += 1
+            if fetch: BF_STATS['failed'] += 1; print(f'{key}: the readable-tile version does not build ({str(e)[:120]}): its library is source, the phone compiles it', flush=True)
+            else: SIDE_STATS['failed'] += 1; print(f'{key}: the alpha test and logic operation entry points do not build ({str(e)[:120]}): its library is source, the phone compiles it', flush=True)
             continue
         finally:
             try: os.unlink(u)
@@ -1945,6 +1955,8 @@ print(f'shadow-input libraries (<key>_bv, dmsh_vin.py): {VIN_STATS["generated"]}
 print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
 print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
       f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')
+if SRC_STATS['unit fallback']:
+    print(f"units whose library stayed MSL source (the compiler refused them): {SRC_STATS['unit fallback']:,} -- the phone compiles those once")
 print('mesh libraries (<vertex>_<geometry>_m3, dmsh_mesh.py): ' + (', '.join(f'{k} {v}' for k, v in MESH_STATS.items()) or 'none'))
 print(MTL.summary())
 for lvl in [k for k in st if k != 'ok']:

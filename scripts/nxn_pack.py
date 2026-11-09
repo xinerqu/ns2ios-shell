@@ -136,7 +136,9 @@ def ascii_view(work):
     工具看到的是 ASCII，**一个字节都不搬**。收尾用 os.rmdir 摘掉这个名字（不会动里面的文件）。
     A second name: the work folder is also reachable under a plain-ASCII junction, which is all Apple's metallib needs.
     A junction is the same files under another name, so nothing is copied; os.rmdir removes the name, not the contents."""
-    if os.name != 'nt' or str(work).isascii(): return None
+    # A space is as bad as a Chinese character: Apple's metal.exe splits an argument that contains one into two, and
+    # then reports `error: no input files` (2026-11-10: `Big Brain Academy` lost 973 libraries that way).
+    if os.name != 'nt' or (str(work).isascii() and ' ' not in str(work)): return None
     base = Path(tempfile.gettempdir())
     if not str(base).isascii(): base = Path(os.environ.get('SystemDrive', 'C:') + '\\')
     link = base / ('nxnwork-' + hashlib.sha1(str(work).lower().encode('utf-8')).hexdigest()[:12])
