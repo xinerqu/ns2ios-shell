@@ -1970,6 +1970,24 @@ def shader_cache_count(img):
     return library_count(img)
 
 
+def shader_cache_meta(img):
+    """The json recorded beside an entry, or {} when there is none."""
+    try: return json.loads(img.with_suffix('.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError): return {}
+
+
+def shader_cache_note(tid, key, **fields):
+    """Add fields to an entry's json (the counts a later hit prints instead of reading the whole image back)."""
+    p = shader_cache_root() / str(tid) / (key + '.json')
+    try:
+        d = shader_cache_meta(p) if p.is_file() else {}
+        d.update(fields)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(d, indent=1), encoding='utf-8')
+    except OSError:
+        pass
+
+
 def shader_cache_prune():
     """Drop the oldest entries until the cache fits its budget (NXN_SHADER_CACHE_GB, 12 GB by default)."""
     root = shader_cache_root()
@@ -2055,8 +2073,10 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
     key = None
     if cur and identity:
         key = shader_cache_key(tid, cur, identity)
+    reused = None
     cached = shader_cache_lookup(tid, key) if key and not force else None
     if cached:
+        reused = cached
         # A hit places the image where dmsh_build.py would have written it; the reporting below reads it back and prints
         # what it holds, so a reused library is checked exactly like a fresh one.
         shader_cache_announce()
@@ -2123,6 +2143,17 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
     if not libs and imgs:
         img = imgs[-1]
         say('shader library image %s (%d bytes)' % (img.name, img.stat().st_size))
+        # A library that came from the cache already has these counts written beside it: printing them costs nothing, and
+        # reading 2.6 GB back to count 28,669 metallib headers cost 5 s of a pack that otherwise reused everything.
+        meta = shader_cache_meta(img) if reused is not None else {}
+        if all(isinstance(meta.get(k), int) and meta[k] >= 0 for k in ('libraries', 'shaders', 'compiled', 'source')):
+            say('[summary] shaders=%d compiled=%d source=%d' % (meta['shaders'], meta['compiled'], meta['source']))
+            if meta['source']:
+                say('shader libraries: %d of %d compiled here (MTLB); %d hold MSL source, the phone compiles those once '
+                    '(this machine has no Apple compiler)' % (meta['compiled'], meta['libraries'], meta['source']))
+            else:
+                say('shader libraries: all %d compiled here (MTLB), the phone compiles nothing' % meta['libraries'])
+            return
         # Which route it took, read off the bytes rather than promised: every *_b.metallib starts with MTLB when Apple's
         # compiler wrote it here, and holds MSL source when this machine had none and the phone compiles it once. The chain
         # number does not answer it on its own (2026-11-08: two runs of the same game, one of each route, and the log had
@@ -2146,6 +2177,10 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
                 # without it the two sides would each have to parse the other's prose.
                 base = [k for k in lib_files if k.endswith('_b.metallib')]
                 base_src = [k for k in source if k.endswith('_b.metallib')]
+                if base and key:
+                    # The numbers a later hit prints without reading the image back.
+                    shader_cache_note(tid, key, libraries=len(lib_files), shaders=len(base),
+                                      compiled=len(base) - len(base_src), source=len(base_src))
                 if base:
                     say('[summary] shaders=%d compiled=%d source=%d' % (len(base), len(base) - len(base_src), len(base_src)))
                 if source:
@@ -2411,8 +2446,16 @@ def step_assemble(shell, stage, game, patched, mods, gdir, rows, name, version, 
     if romfs.is_file():
         # <App>/romfs.img, the shape upstream's build_ipa.sh gives a package whose extraction holds an image, and the one
         # main.m looks for first (romfs_locate). One file instead of a hundred thousand, and the app stops paying to copy them.
-        shutil.copyfile(romfs, A / 'romfs.img')
-        say('RomFS in place: romfs.img (%.1f GB)' % (romfs.stat().st_size / 2**30))
+        # A hard link: the stage and the extraction are both temporary and on one volume, nothing writes this file in place,
+        # and copying 15.9 GB cost 29 s of the 33 s assemble took (Tears of the Kingdom, 2026-11-10).
+        dst = A / 'romfs.img'
+        try:
+            if dst.exists(): dst.unlink()
+            os.link(str(romfs), str(dst))
+            how = 'hard link'
+        except OSError:
+            shutil.copyfile(romfs, dst); how = 'copy, another volume'
+        say('RomFS in place: romfs.img (%.1f GB, %s)' % (romfs.stat().st_size / 2**30, how))
     else:
         shutil.copytree(romfs, A / 'romfs', symlinks=True)
         say('RomFS in place')
