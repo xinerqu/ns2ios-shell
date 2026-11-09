@@ -1925,8 +1925,7 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
                     say('shader library: this rebuild wrote %d libraries, the cached cold build has %d: using the cached one (%s)'
                         % (have, want, how))
                 else:
-                    say('shader library not kept for the cache: this folder already held a shader cache, and a rebuild over '
-                        'one writes fewer libraries than the cold run (Brain Memory: 502 against 751, every <key>_bp gone)')
+                    say('shader library: %d libraries, not re-kept (the cache already holds this key)' % have)
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
     made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
