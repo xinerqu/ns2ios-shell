@@ -142,11 +142,46 @@ jobs:
         run: dotnet publish dm/gfx/tools/dmsh_xlate -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/dmsh_xlate
 
       - name: Build SPIRV-Cross at the pinned tag
+        env:
+          # A fixed build time, because two things in this exe are the build's clock and nothing else: the PE header's
+          # TimeDateStamp, and a `2026-11-09T19:55:56` string CMake writes into gitversion.h (SPIRV-Cross's
+          # CMakeLists.txt:95, `string(TIMESTAMP ...)`). dmsh_chain.lock records this exe's sha16, so an identical
+          # SPIRV-Cross rebuilt on another day moved the translation chain and threw away every game's shader cache:
+          # v0.0.0034's and v0.0.0035's exe differed in 8 bytes out of 2 276 864 and became byte-identical once those
+          # were normalised (2026-11-09). CMake >= 3.8 reads SOURCE_DATE_EPOCH instead of the clock.
+          SOURCE_DATE_EPOCH: '1735689600'
         run: |
           git clone --branch vulkan-sdk-1.4.357.0 --depth 1 https://github.com/KhronosGroup/SPIRV-Cross
           # no -G: the runner's Visual Studio version changes over time and naming it by version is what broke this before
-          cmake -S SPIRV-Cross -B SPIRV-Cross/build -DSPIRV_CROSS_ENABLE_TESTS=OFF
+          # /Brepro: the linker stamps the PE header with a hash of the contents, not the clock (MSVC's answer to
+          # SOURCE_DATE_EPOCH). The two are promises; the step below checks the bytes that actually came out.
+          cmake -S SPIRV-Cross -B SPIRV-Cross/build -DSPIRV_CROSS_ENABLE_TESTS=OFF \
+                -DCMAKE_EXE_LINKER_FLAGS=/Brepro -DCMAKE_SHARED_LINKER_FLAGS=/Brepro
           cmake --build SPIRV-Cross/build --config Release --target spirv-cross
+          exe=$(find SPIRV-Cross -name 'spirv-cross.exe' -type f | head -1)
+          test -n "$exe" || { echo "::error::spirv-cross.exe was not produced"; exit 1; }
+          python - "$exe" <<'PY'
+          import re, struct, sys
+          path = sys.argv[1]
+          d = bytearray(open(path, 'rb').read())
+          pe = struct.unpack('<I', d[0x3c:0x40])[0]
+          if d[pe:pe + 4] != b'PE\0\0':
+              sys.exit('not a PE file: ' + path)
+          stamp = struct.unpack('<I', d[pe + 8:pe + 12])[0]
+          stamps = 0
+          if stamp:
+              d[pe + 8:pe + 12] = b'\0\0\0\0'
+              pat = struct.pack('<I', stamp)
+              i = d.find(pat)
+              while i != -1:                      # the debug directory keeps a second copy of it
+                  d[i:i + 4] = b'\0\0\0\0'
+                  stamps += 1
+                  i = d.find(pat, i + 4)
+          dates = list(re.finditer(rb'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d', bytes(d)))
+          for m in dates: d[m.start():m.end()] = b'0000-00-00T00:00:00'
+          open(path, 'wb').write(bytes(d))
+          print('spirv-cross build time erased: %d timestamp field(s), %d date string(s)' % (stamps, len(dates)))
+          PY
 
       - name: Build glslang at the pinned tag
         run: |
