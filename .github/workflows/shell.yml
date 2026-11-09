@@ -150,6 +150,9 @@ jobs:
           # v0.0.0034's and v0.0.0035's exe differed in 8 bytes out of 2 276 864 and became byte-identical once those
           # were normalised (2026-11-09). CMake >= 3.8 reads SOURCE_DATE_EPOCH instead of the clock.
           SOURCE_DATE_EPOCH: '1735689600'
+        # The normalising step below is bash: $( ), test -n and a heredoc. A step without a shell on windows-latest is
+        # run by the PowerShell that ships there, which parsed the heredoc as a redirection and failed before anything ran.
+        shell: bash
         run: |
           git clone --branch vulkan-sdk-1.4.357.0 --depth 1 https://github.com/KhronosGroup/SPIRV-Cross
           # no -G: the runner's Visual Studio version changes over time and naming it by version is what broke this before
