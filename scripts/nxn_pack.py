@@ -1682,11 +1682,48 @@ SHADER_CACHE_KEY_VERSION = 'shader-lib-v1'
 
 
 def shader_cache_root():
-    """Where built libraries live between packs. LOCALAPPDATA on Windows, ~/.cache elsewhere; NXN_SHADER_CACHE moves it."""
+    """Where built libraries live between packs: a folder the user can see and delete, beside everything else this packer
+    keeps. NOT %LOCALAPPDATA% -- that directory only grows and nobody knows it is there (坤哥 2026-11-09).
+
+    The launcher runs the packer with <exe folder>\\ns2ios-packer-data as the working directory, so the cache lands beside
+    ns2ios-library, in the exe's own folder. From a command line it is ns2ios-shader-cache under wherever it was run.
+    NXN_SHADER_CACHE names another folder outright.
+    """
     root = os.environ.get('NXN_SHADER_CACHE')
     if root: return Path(root)
-    base = os.environ.get('LOCALAPPDATA') or os.environ.get('XDG_CACHE_HOME') or (Path.home() / '.cache')
-    return Path(base) / 'ns2ios' / 'shader-cache'
+    cwd = Path.cwd()
+    if cwd.name == 'ns2ios-packer-data':                  # the launcher's data folder: the exe folder is one level up
+        return cwd.parent / 'ns2ios-shader-cache'
+    return cwd / 'ns2ios-shader-cache'
+
+
+_CACHE_ANNOUNCED = []
+
+
+def shader_cache_announce():
+    """One line per run saying where the cache is and how big it is: a folder that only grows has to say so."""
+    if _CACHE_ANNOUNCED: return
+    _CACHE_ANNOUNCED.append(1)
+    root = shader_cache_root()
+    n = sz = 0
+    if root.is_dir():
+        for p in root.glob('*/*.img'):
+            try: n += 1; sz += p.stat().st_size
+            except OSError: pass
+    say('shader library cache: %s (%d entr%s, %.2f GB; delete the folder to reclaim it)'
+        % (root, n, 'y' if n == 1 else 'ies', sz / (1 << 30)))
+
+
+def library_count(image):
+    """How many *.metallib files an image holds, or -1 when it cannot be read."""
+    try:
+        import sys
+        if str(TOOLS) not in sys.path: sys.path.insert(0, str(TOOLS))
+        import romfs as _romfs
+        im = _romfs.Image(str(image))
+        return sum(1 for k in range(im.count) if im.entry(k)[4] and im.name(k).endswith(b'.metallib'))
+    except Exception:                                     # noqa: BLE001 - used only to compare two builds
+        return -1
 
 
 def shader_cache_budget():
@@ -1838,6 +1875,7 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
     if cached:
         # A hit places the image where dmsh_build.py would have written it; the reporting below reads it back and prints
         # what it holds, so a reused library is checked exactly like a fresh one.
+        shader_cache_announce()
         dst = iosout / ('b-' + cur + '.img')
         how = _place(cached, dst)
         say('shader libraries reused from the cache: %s (%.2f GB, chain %s, %s)'
@@ -1874,10 +1912,21 @@ def step_translate(pkg, work, xlate, iosout, tid, force=False, identity=None, la
         built = iosout / ('b-' + cur + '.img') if cur else None
         if key and built is not None and built.is_file():
             if cold:
+                shader_cache_announce()
                 shader_cache_publish(tid, key, built, label)
             else:
-                say('shader library not kept for the cache: this folder already held a shader cache, and a rebuild over '
-                    'one writes fewer libraries than the cold run (Brain Memory: 502 against 751, every <key>_bp gone)')
+                # The complete library is the only one worth shipping (坤哥 2026-11-09: a package that quietly holds fewer
+                # libraries cannot be told apart on the phone). A rebuild over an existing shader cache is exactly the run
+                # that writes fewer, so when a cached cold build for this key exists, take it back over what this run made.
+                complete = shader_cache_lookup(tid, key)
+                have, want = library_count(built), (library_count(complete) if complete else -1)
+                if complete and 0 <= have < want:
+                    how = _place(complete, built)
+                    say('shader library: this rebuild wrote %d libraries, the cached cold build has %d: using the cached one (%s)'
+                        % (have, want, how))
+                else:
+                    say('shader library not kept for the cache: this folder already held a shader cache, and a rebuild over '
+                        'one writes fewer libraries than the cold run (Brain Memory: 502 against 751, every <key>_bp gone)')
     # Proof, not a promise: the directory the build just made has to be the chain this run read before it started. The
     # line above says what was asked for; only this says what was produced (2026-11-03: they differed).
     made = [p.name for p in iosout.glob('b-*')] if iosout.is_dir() else []   # 目录或 .img 都算
