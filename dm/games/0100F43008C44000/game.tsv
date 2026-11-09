@@ -23,6 +23,12 @@ shader_versions	v393216
 # ---- Files ----
 # every module main imports from
 modules	main sdk
+# No packer has a path for this one yet: the shaders sit in Oodle-, LZ5- or PKZ-compressed archives, and only the game
+# own decoder unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c) -- arm64 code the Mac host runs, and this
+# fork has no Mac build step at all. So it fails on Windows, Linux and macOS alike; supported_list.py marks the row
+# from this key.
+needs_mac_shaders	1
+
 romfs_marker	arc/data.trpfs
 zip_store	.bnk:.pck:.trpfd:.trpfs:.metallib
 
@@ -43,4 +49,3 @@ mem_map_limit	on
 shader_groups	#arc/system_resource=system #arc/ik_effect=effect #arc/ik_pokemon=pokemon #arc/ui=layout /arc/=arc
 shader_note	Pokémon Legends: Z-A shaders
 # The packs are Oodle Mermaid streams; the shader split decodes them with the game's own OodleLZ_Decompress in the Mac host (dm/host/hle_oodle.c), which the NSP script builds for any game with Trinity packs
-needs_mac_shaders	1

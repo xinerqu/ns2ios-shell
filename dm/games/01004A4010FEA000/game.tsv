@@ -28,6 +28,12 @@ shader_versions	v131072
 # ---- Files ----
 # load order as on Horizon: main, subsdk*, sdk (subsdk0 = NintendoSDK_movie)
 modules	main subsdk0 sdk
+# No packer has a path for this one yet: the shaders sit in Oodle-, LZ5- or PKZ-compressed archives, and only the game
+# own decoder unpacks those (shader_split.py oodle(), dm/host/hle_oodle.c) -- arm64 code the Mac host runs, and this
+# fork has no Mac build step at all. So it fails on Windows, Linux and macOS alike; supported_list.py marks the row
+# from this key.
+needs_mac_shaders	1
+
 romfs_marker	root_000.pkz
 zip_store	.avi:.pkz:.webm:.metallib
 
@@ -45,4 +51,3 @@ mem_used	0x7400000
 # ---- Shader split (shader_split.py; the shader objects in root_000.pkz) ----
 shader_groups	/autoshadereff.dat/=eff /shadereff=eff /shader=core
 shader_note	Bayonetta 3 shaders
-needs_mac_shaders	1
