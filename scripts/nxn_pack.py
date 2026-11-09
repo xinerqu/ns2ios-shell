@@ -1682,6 +1682,58 @@ def prune_shader_cache(work):
     return n
 
 
+SPLIT_CACHE_KEY_VERSION = 'split-v1'
+
+
+def split_cache_key(versions, dirs, tid):
+    """What the shader split's output depends on: the splitter and the modules it loads, the game files, the profile's
+    version list. The package it writes is a handful of .bin files (one per stage and source group) plus the four tables,
+    so keeping them is cheap; without it every pack re-reads 306,910 RomFS entries and lifts 28,669 records out of them
+    (153 s on Tears of the Kingdom, 5 of the 10 minutes upstream measures for Breath of the Wild's first build)."""
+    h = hashlib.sha256()
+    h.update('\0'.join([SPLIT_CACHE_KEY_VERSION, str(tid), os.environ.get('DM_GAME', ''),
+                        os.environ.get('DM_GAMES_DIR', '')]).encode())
+    for p in (GFX / 'shader_split.py', TOOLS / 'romfs.py', DM / 'games' / 'profile_guess.py',
+              GFX / 'cpk.py', GFX / 'cra.py'):
+        h.update(b'\0' + p.name.encode() + b'\0')
+        try: h.update(p.read_bytes())
+        except OSError: h.update(b'missing')
+    for v in versions:
+        h.update(b'\0' + str(v).encode() + b'\0' + romfs_index_identity(romfs_source(dirs[v]))[2].encode())
+    return h.hexdigest()[:16]
+
+
+def split_cache_lookup(tid, key):
+    d = shader_cache_root() / 'split' / str(tid) / key
+    return d if (d / 'pkg').is_dir() and (d / 'tables').is_dir() else None
+
+
+def _copy_tree(src, dst):
+    dst.mkdir(parents=True, exist_ok=True)
+    for p in src.iterdir():
+        if p.is_file(): _place(p, dst / p.name)
+
+
+def split_cache_restore(hit, pkg, tb):
+    _copy_tree(hit / 'pkg', pkg)
+    _copy_tree(hit / 'tables', tb)
+
+
+def split_cache_publish(tid, key, pkg, tb, version):
+    dest = shader_cache_root() / 'split' / str(tid) / key
+    try:
+        _copy_tree(pkg, dest / 'pkg')
+        _copy_tree(tb, dest / 'tables')
+        (dest / 'what.json').write_text(json.dumps(dict(key=key, tid=str(tid), version=str(version),
+                                                        created=time.time()), indent=1), encoding='utf-8')
+    except OSError as e:
+        warn('could not store the shader split (%s): this pack is fine, the next one splits again' % e)
+        return 0
+    n = sum(p.stat().st_size for p in (dest / 'pkg').iterdir() if p.is_file()) +         sum(p.stat().st_size for p in (dest / 'tables').iterdir() if p.is_file())
+    say('shader split kept for the next pack (%.1f MB, key %s)' % (n / 1048576, key))
+    return n
+
+
 def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
     """shader_split.py: pull the shaders out of the game files and produce the four tables. The rows must match the
     profile's (that is how we know the files are the version the profile was built from).
@@ -1702,15 +1754,28 @@ def step_shaders(dirs, versions, prof_dir, tables, work, tid, force=False):
             and stamp.read_text(encoding='utf-8').strip() == key and all((tb / n).is_file() for n in tables):
         say('shader split already done (%s)' % key); return pkg, tb, []
     tb.mkdir(parents=True, exist_ok=True)
+    # The split's own key: it is the most expensive stage nobody cached (153 s on Tears of the Kingdom), and its output is
+    # a few .bin files plus the four tables, so keeping them costs a copy, not an image.
+    cache_key, hit = None, None
+    if not force:
+        try: cache_key = split_cache_key(versions, dirs, tid)
+        except (OSError, ValueError) as e:
+            warn('cannot key the shader split (%s): splitting as before' % e)
+        if cache_key: hit = split_cache_lookup(tid, cache_key)
     # argv of shader_split.py: romfs, main, package, shader_map.tsv, shader_facts.tsv, shader_pairs.tsv, pso_pairs.tsv --
     # the last is what the pipeline prebuild takes of agl's BAHS program variations, as upstream's build_ipa_from_nsp.py
     # asks for it (split_shaders, names + ('pso_pairs.tsv',)). Several versions go in as comma-separated lists in the
     # same order as the profile's shader_versions, because the tables on disk are a union over exactly that set.
     names = ['shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv']
-    run([PY, GFX / 'shader_split.py', ','.join(str(romfs_source(dirs[v])) for v in versions),
-         ','.join(str(dirs[v] / 'ExeFS' / 'main') for v in versions), pkg] + [tb / n for n in names],
-        env={'DM_GAME': tid, 'J': str(JOBS)}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
-        hint=shader_split_hint)
+    if hit is not None:
+        split_cache_restore(hit, pkg, tb)
+        say('shader split reused from the cache (%s, key %s)' % (key, cache_key))
+    else:
+        run([PY, GFX / 'shader_split.py', ','.join(str(romfs_source(dirs[v])) for v in versions),
+             ','.join(str(dirs[v] / 'ExeFS' / 'main') for v in versions), pkg] + [tb / n for n in names],
+            env={'DM_GAME': tid, 'J': str(JOBS)}, log=work / 'logs' / 'shader_split.log', what='splitting the shaders out of the game files',
+            hint=shader_split_hint)
+        if cache_key: split_cache_publish(tid, cache_key, pkg, tb, key)
     stamp.write_text(key, encoding='utf-8')   # the reuse above must not serve another set of versions
     diff = []
     for n in names:
