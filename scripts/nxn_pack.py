@@ -1454,15 +1454,69 @@ def fill_mem_used(patched, mods, gdir, rows):
     return value, total
 
 
-def step_rewrite(exe_dir, mods, out, work, force=False):
+PATCHED_CACHE_KEY_VERSION = 'patched-v1'
+
+
+def rewriter_identity():
+    """What decides a rewrite besides the module itself: patch_nso.py, the SDK patch table, and every profile's patches.py
+    (patch_nso.py loads them all, and refuses a build ID that two of them claim), plus the profile this environment selects.
+    Hashing the module and these together is what a rewritten module depends on; the Python and library versions are not in
+    it, because they decide nothing about the bytes that come out."""
+    h = hashlib.sha256()
+    h.update('\0'.join([PATCHED_CACHE_KEY_VERSION, os.environ.get('DM_GAME', ''),
+                        os.environ.get('DM_GAMES_DIR', '')]).encode())
+    files = [TOOLS / 'patch_nso.py', TOOLS / 'sdk_patches.py'] + sorted((DM / 'games').glob('*/patches.py'))
+    for p in files:
+        h.update(b'\0' + p.name.encode() + b'\0')
+        try: h.update(p.read_bytes())
+        except OSError: h.update(b'missing')
+    return h.hexdigest()[:16]
+
+
+def patched_cache_key(module, identity):
+    h = hashlib.sha256()
+    h.update('\0'.join([PATCHED_CACHE_KEY_VERSION, identity]).encode() + b'\0')
+    with open(module, 'rb') as f:
+        for chunk in iter(lambda: f.read(8 << 20), b''): h.update(chunk)
+    return h.hexdigest()[:16]
+
+
+def step_rewrite(exe_dir, mods, out, work, tid, force=False):
     # patch_nso.py is pure Python (capstone + lz4): its stubs are hand-assembled machine code, not built at run time,
     # so no C compiler is needed here even though its comments mention clang.
+    # The rewritten module is kept beside the shader library cache under a key of its own inputs: the work folder is deleted
+    # after a pack, so without it every run rewrote 85 s of main again (Brain Memory, 2026-11-09), and the files it makes are
+    # tens of megabytes, not gigabytes.
     if not force and all((out / (m + '.patched.bin')).is_file() and (out / (m + '.fixups.tsv')).is_file() for m in mods):
         say('rewritten modules already there'); return
     out.mkdir(parents=True, exist_ok=True)
+    try: identity = rewriter_identity()
+    except OSError as e:
+        identity = None
+        warn('cannot read the rewriter\'s own inputs (%s): rewriting without the cache' % e)
     for m in mods:
+        key = None
+        if identity:
+            try: key = patched_cache_key(exe_dir / m, identity)
+            except OSError as e: warn('cannot key %s (%s): rewriting without the cache' % (m, e))
+        hit = (shader_cache_root() / 'patched' / str(tid) / key) if key and not force else None
+        if hit is not None and (hit / (m + '.patched.bin')).is_file():
+            how = _place(hit / (m + '.patched.bin'), out / (m + '.patched.bin'))
+            for n in (m + '.fixups.tsv',):
+                if (hit / n).is_file(): shutil.copyfile(str(hit / n), str(out / n))
+            say('rewritten module %s reused from the cache (%.1f MB, %s)'
+                % (m, (out / (m + '.patched.bin')).stat().st_size / (1 << 20), how))
+            continue
         run([PY, TOOLS / 'patch_nso.py', exe_dir / m, out, m],
             log=work / 'logs' / ('rewrite_%s.log' % m), what='rewriting %s' % m)
+        if hit is not None and (out / (m + '.patched.bin')).is_file():
+            try:
+                dst = hit / (m + '.patched.bin'); dst.parent.mkdir(parents=True, exist_ok=True)
+                how = _place(out / (m + '.patched.bin'), dst)
+                shutil.copyfile(str(out / (m + '.fixups.tsv')), str(hit / (m + '.fixups.tsv')))
+                say('rewritten module %s kept for the next pack (%s, key %s)' % (m, how, key))
+            except OSError as e:
+                warn('could not store %s in the cache (%s): this pack is fine, the next one rewrites it' % (m, e))
 
 
 def graphics_route(prof_dir, registered=None):
@@ -2716,7 +2770,7 @@ def main():
         say('derived profile: %s (%s)' % (derived, disp))
 
     patched = work / 'build' / 'patched'
-    step_rewrite(game / 'ExeFS', mods, patched, work, a.force)
+    step_rewrite(game / 'ExeFS', mods, patched, work, tid, a.force)
     lap('rewrite main')
     # After the rewrite, not before: only the rewritten modules' bytes reach GetInfo's UsedMemorySize.
     # Only for a derived profile: a game the profile was brought up on has its mem_used settled by the profile author,
