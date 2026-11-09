@@ -228,20 +228,35 @@ def scandir(path):
 
 
 def walk(top, topdown=True, onerror=None, followlinks=False):
-    if not _resolve(top):
+    resolved = _resolve(top)
+    if not resolved:
         yield from _os.walk(top, topdown=topdown, onerror=onerror, followlinks=followlinks); return
-    def visit(path):
+    # An image's index already says which entry is a folder, and which children a folder has. Walking used to ask stat() for
+    # that once per entry: each call resolved the whole path again, so one scan of a 306,910-entry image (a packer's Oodle
+    # check, upstream's profile_guess) spent 154 s of 214 s inside this function, 2.46 M finds and 49 s of nt.stat included
+    # (2026-11-09). The children come out of the index now; nothing below the top is resolved a second time.
+    image = resolved[0]
+    def children_of(path, k):
+        a, b, _, _, is_file, _ = image.entry(k)
+        if is_file: raise NotADirectoryError(str(path))
+        dirs, files = [], []
+        for j in range(a, a + b):
+            name = _os.fsdecode(image.name(j))
+            (files if image.entry(j)[4] else dirs).append((name, j))
+        return dirs, files
+    def visit(path, k):
         try:
-            dirs, files = [], []
-            with scandir(path) as entries:
-                for e in entries: (dirs if e.is_dir() else files).append(e.name)
+            dirs, files = children_of(path, k)
         except OSError as error:
             if onerror: onerror(error)
             return
-        if topdown: yield str(path), dirs, files
-        for name in dirs: yield from visit(_os.path.join(path, name))
-        if not topdown: yield str(path), dirs, files
-    yield from visit(top)
+        if topdown: yield str(path), [n for n, _ in dirs], [n for n, _ in files]
+        for name, j in dirs: yield from visit(_os.path.join(path, name), j)
+        if not topdown: yield str(path), [n for n, _ in dirs], [n for n, _ in files]
+    try:
+        yield from visit(top, image.find(resolved[1]))
+    except OSError as error:
+        if onerror: onerror(error)
 
 
 class Path(type(_Path())):
