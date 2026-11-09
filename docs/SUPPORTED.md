@@ -34,7 +34,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Batman: Arkham Knight | `0100ACD0163D0000` | 1.0.5 |  |
 | Bayonetta | `010076F0049A2000` | 1.1 |  |
 | Bayonetta 2 | `01007960049A0000` | 1.2 |  |
-| Bayonetta 3 | `01004A4010FEA000` | 1.2.0 | 暂不支持 |
+| Bayonetta 3 | `01004A4010FEA000` | 1.2.0 |  |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 | handheld |
 | Blasphemous | `0100698009C6E000` | 1.0.8 |  |
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
@@ -57,14 +57,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
 | DRAGON QUEST III HD-2D Remake | `01003E601E324000` | 1.1.2 | 60 fps |
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
-| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps · 暂不支持 |
+| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps |
 | EA SPORTS FC 27 | `0100C49025D3E000` | 1.8d.310c | 60 fps |
 | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `0100CE4010AAC000` | 1.0.3 |  |
-| FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps · 暂不支持 |
+| FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps |
 | FINAL FANTASY RESONANCE (Asian release) | `0100B8A026F14000` | 1.0.1 | 60 fps |
 | FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 1.4.0 |  |
 | FINAL FANTASY X/X-2 HD Remaster | `0100BC300CB48000` | 1.0.0 |  |
-| Fire Emblem Engage | `0100A6301214E000` | 2.0.0 |  |
+| Fire Emblem Engage | `0100A6301214E000` | 2.0.0 | 60 fps |
 | Fire Emblem Fortune's Weave | `04007EF01F8AE000` | v131072 | 60 fps |
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 |  |
 | Ghost Trick: Phantom Detective | `010029B018432000` | 1.0.0 |  |
@@ -95,8 +95,8 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `0100B8E016F76000` | 1.0.3 | 60 fps |
-| OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 |  |
-| OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
+| OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
+| OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
 | Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
 | Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 | 60 fps |
@@ -107,7 +107,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Pokemon Pokopia | `0400A3A01EE4C000` | v655360 |  |
 | Pokémon Brilliant Diamond | `0100000011D90000` | 1.3.0 | 60 fps |
 | Pokémon Legends: Arceus | `01001F5010DFA000` | 1.1.1 |  |
-| Pokémon Legends: Z-A | `0100F43008C44000` | 2.0.2 | 暂不支持 |
+| Pokémon Legends: Z-A | `0100F43008C44000` | 2.0.2 |  |
 | Pokémon Scarlet | `0100A3D008C5C000` | 1.0.0 |  |
 | Pokémon Shield | `01008DB008C2C000` | 1.3.2 |  |
 | Pokémon Sword | `0100ABF008968000` | 1.3.2 |  |

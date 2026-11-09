@@ -37,16 +37,18 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if r.returncode: red(f'{path}: spirv-cross failed: {r.stderr.strip()[:300]}')
      # The reflection lists every declared resource; the Metal entry point only takes the ones the shader uses (Hades' ShadowMap.frag declares a buffer it never reads,
      # which the game's own pipeline layout leaves out): keep the rows whose slot is an argument of the entry point, so the host only binds, and only reports, real ones
-@@ -147,7 +150,7 @@
-     airs = []
+@@ -148,7 +151,9 @@
      def comp(m):
          a = m[:-6] + f'.{sdk}.air'
--        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', *extra, m, '-o', a], capture_output=True, text=True)
-+        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', *extra, m, '-o', a], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+         # -fwrapv: signed integer overflow wraps, as SPIR-V's integer arithmetic does; in MSL it is undefined and the compiler folds around it (dmsh_build.py MAC_METAL)
+-        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', '-fwrapv', *extra, m, '-o', a], capture_output=True, text=True)
++        # stdin=DEVNULL: the fork's, so a shim that waits on input cannot hang the build on Windows.
++        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', '-fwrapv', *extra, m, '-o', a],
++                           capture_output=True, text=True, stdin=subprocess.DEVNULL)
          if r.returncode: red(f'{m}: metal compile failed: {r.stderr.strip()[:400]}')
          return a
      with cf.ThreadPoolExecutor(os.cpu_count()) as ex: airs = list(ex.map(comp, msls))
-@@ -160,6 +163,10 @@
+@@ -161,6 +166,10 @@
  def main():
      a = sys.argv[1:]
      ios = None
@@ -57,7 +59,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if '--ios' in a: i = a.index('--ios'); ios = a[i + 1]; del a[i:i + 2]
      if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]')
      roots, out = a[:-1], a[-1]
-@@ -176,15 +183,20 @@
+@@ -177,15 +186,20 @@
          if skipped: print('[RED] skipped shader stages Metal does not have: ' + ', '.join(f'{k} {v}' for k, v in sorted(skipped.items())))
          msls = [m for v in seen.values() for m in v[2]]
          tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; resources kind:set.binding=slot (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)',
