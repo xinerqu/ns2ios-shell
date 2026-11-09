@@ -45,3 +45,4 @@ mem_used	0x7400000
 # ---- Shader split (shader_split.py; the shader objects in root_000.pkz) ----
 shader_groups	/autoshadereff.dat/=eff /shadereff=eff /shader=core
 shader_note	Bayonetta 3 shaders
+needs_mac_shaders	1

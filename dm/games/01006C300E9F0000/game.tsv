@@ -48,3 +48,4 @@ app_pool	0xCD500000
 # zlib-compressed, in paks whose blocks are LZ5-compressed; the NSP script decodes them on the Mac with the game's own LZ5 (uepak.py, shader_split.py ue_legacy_jobs, DM_OODLE_SERVE)
 shader_groups	GlobalShaderCache=global #Engine/=engine #JackGame/=game
 shader_note	DRAGON QUEST XI S shaders
+needs_mac_shaders	1

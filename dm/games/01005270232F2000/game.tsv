@@ -49,3 +49,4 @@ shader_groups	ShaderArchive-Global-=global ShaderArchive-=game
 shader_note	OCTOPATH TRAVELER 0 shaders
 # The shaders are in the shader code archives of the pak (ShaderArchive-*.ushaderbytecode), each one Oodle-compressed; the NSP script decodes them on the Mac with the game's own Oodle (uepak.py, DM_OODLE_JOB),
 # as for any game with Unreal paks. Unreal combines vertex and pixel shaders per draw from its pipeline state, so every vertex shader is made to link with any pixel shader (shader_split.py separable_pairs)
+needs_mac_shaders	1
