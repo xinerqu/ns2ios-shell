@@ -60,7 +60,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              continue
          finally:
              try: os.unlink(u)
-@@ -1655,7 +1673,7 @@
+@@ -1658,7 +1676,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
@@ -69,7 +69,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              spv_single_lane(os.path.join(w, key + '.spv'))
              r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
-@@ -1827,7 +1845,7 @@
+@@ -1830,7 +1848,7 @@
          sys.exit(f'[RED] {name} holds no record of shader {key}, which the shader map names: the package and the map come from different shader_split.py runs{old}; '
                   f'split the shaders again (the NSP script does when {dm_dir} is removed)')
      o, e = recs[key]
@@ -78,7 +78,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  for key in keys: digests[key] = shader_key(key, *rec_of(key))
  def plain_digest(k):   # a paired pixel shader's key, also when it is not built this time
      if k in digests: return digests[k]
-@@ -1870,7 +1888,12 @@
+@@ -1873,7 +1891,12 @@
      try:
          if key in cache_hits and restored(key, wb):
              refl = json.loads(output_of('mac', key + '_b.json'))
@@ -92,7 +92,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              if refl['stage'] == 'vs': write_refl(key, pull_finish(key, src, vin_finish(key, src, refl)))
              if refl['stage'] == 'ps': refl.update(ps_libraries(key, os.path.join(out, key + '_b.metal'), src, refl['bindings'])); write_refl(key, refl)   # stored without them (publish_cache)
              return key, 'ok', '', refl
-@@ -1932,6 +1955,8 @@
+@@ -1935,6 +1958,8 @@
  print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
  print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
        f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')
