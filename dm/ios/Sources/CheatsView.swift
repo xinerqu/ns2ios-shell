@@ -306,10 +306,13 @@ struct CheatsSection: View {
         guessedCode = Self.codeSet(text, tid: tid)
         pruneCode()
         // The host turned the suspects off at its load, but its load happens at Play: this panel is what puts them back in
-        // DM_CHEATS_ON, so it has to drop them too. Without this the crash repeats every launch -- the guard never gets
-        // ahead of the toggle state the player cannot see.
+        // DM_CHEATS_ON, so it has to drop them too. Once per build, not on every visit: the reason stays in last-run.txt
+        // until a clean run replaces it, so a repeat here turned the same entry off again every time the panel was opened
+        // -- a player who switched it back on found it off the next time and could never keep it on.
         let suspects = states.filter { $0.value.why.contains("crashed within") }.map(\.key)
-        if !suspects.isEmpty {
+        let mark = "cheats.crashPruned." + (build.isEmpty ? "?" : build)
+        if !suspects.isEmpty && !UserDefaults.standard.bool(forKey: mark) {
+            UserDefaults.standard.set(true, forKey: mark)
             let kept = selected.subtracting(suspects)
             if kept != selected {
                 onNames = names.filter { kept.contains($0) }.joined(separator: "\n")
