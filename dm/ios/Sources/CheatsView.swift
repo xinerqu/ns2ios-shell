@@ -30,7 +30,6 @@ struct CheatsSection: View {
 
     @AppStorage private var text: String
     @AppStorage private var onNames: String
-    @AppStorage private var allowCode: Bool   // off: entries that patch instructions are not switchable
 
     /// A game's own keys. The library page passes its title ID, so two games in one app no longer share the pasted text,
     /// the switches or the "allow code patches" choice -- gameSettingsPrefix() cannot do it here, because it reads
@@ -49,7 +48,6 @@ struct CheatsSection: View {
         Self.migrateLegacyKeys(to: suffix)
         _text = AppStorage(wrappedValue: "", "cheats.text" + suffix)
         _onNames = AppStorage(wrappedValue: "", "cheats.on" + suffix)
-        _allowCode = AppStorage(wrappedValue: false, "cheats.allowCode" + suffix)
     }
 
     /// Copies the unprefixed keys into `suffix`'s when those are still unset. Idempotent: once the game has its own value
@@ -97,6 +95,12 @@ struct CheatsSection: View {
         return guessedCode.contains(name)
     }
 
+    /// What the panel offers: value codes only. Instruction patches are not listed at all -- iOS keeps executable pages
+    /// closed to writes in hardware (W^X), so applying one cannot work and only takes the game down; offering a switch for
+    /// it just invited crashes. The count of what was hidden is stated below instead.
+    private var visibleNames: [String] { names.filter { !isCode($0) } }
+    private var hiddenCode: [String] { names.filter { isCode($0) } }
+
     var body: some View {
         Section {
             if !crashed.isEmpty {
@@ -108,16 +112,11 @@ struct CheatsSection: View {
                 Text(Self.L("Paste the codes below, then switch on the entries you want.", "把金手指文本粘贴到下面，然后打开你要的条目。"))
                     .font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
             }
-            ForEach(names, id: \.self) { name in
+            ForEach(visibleNames, id: \.self) { name in
                 VStack(alignment: .leading, spacing: 2) {
                     Toggle(name, isOn: Binding(get: { selected.contains(name) }, set: { setOn(name, $0) }))
                         .font(.body.weight(.semibold)).foregroundStyle(.white)
-                        .disabled(isCode(name) && !allowCode)
-                    if isCode(name) {
-                        Text(Self.L("Patches instructions — the iPhone crashes on these, so they start off. Turn on \"Allow code patches\" to try one.",
-                                    "改代码的条目 —— iPhone 上会崩，所以默认关闭。想试请先打开下面的「允许改代码」。"))
-                            .font(.footnote).foregroundStyle(.orange)
-                    } else if lastRun[name]?.measured == "data" {
+                    if lastRun[name]?.measured == "data" {
                         Text(Self.L("Changes values — safe", "改数值 —— 安全")).font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
                     }
                     if let st = lastRun[name], st.state == "dead" || st.state == "unsupported" {
@@ -126,9 +125,10 @@ struct CheatsSection: View {
                     }
                 }
             }
-            if !names.isEmpty {
-                Toggle(Self.L("Allow code patches (they crash the game on the iPhone)", "允许改代码（iPhone 上会崩，谨慎）"), isOn: $allowCode)
-                    .font(.body.weight(.semibold)).foregroundStyle(.white)
+            if !hiddenCode.isEmpty {
+                Text(Self.L("\(hiddenCode.count) entries that patch instructions are hidden: iOS does not allow writing a game's code pages (the CPU enforces W^X on executable memory), so applying one freezes the game instead of changing it. Only value codes are listed here.",
+                             "\(hiddenCode.count) 条「改代码」的条目已屏蔽：iOS 不允许写入游戏的代码页（CPU 对可执行内存有 W^X 保护），写进去只会让游戏卡死而不是生效。这里只列改数值的条目。"))
+                    .font(.footnote).foregroundStyle(.orange)
             }
             Button {
                 editorOpen = true
@@ -165,9 +165,6 @@ struct CheatsSection: View {
             pruneCode()
             Self.applySaved(dir: dirURL)         // puts the saved text and switches in place, for a launch that goes straight to Play
         }
-        .onChange(of: allowCode) { _, on in
-            if !on { pruneCode() }   // the switch that allowed them is gone: so are they
-        }
         .sheet(isPresented: $editorOpen) {
             CheatEditor(initial: text) { commitText($0) }
         }
@@ -184,7 +181,7 @@ struct CheatsSection: View {
         let kept = Set(names.filter { live.contains($0) && selected.contains($0) })
         if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: "\n") }
         pruneCode()
-        Self.apply(text: v, on: names.filter { kept.contains($0) && (allowCode || !isCode($0)) }, log: false, dir: dirURL)
+        Self.apply(text: v, on: names.filter { kept.contains($0) && !isCode($0) }, log: false, dir: dirURL)
         fputs("launcher: cheats \(names.count) entries, \(kept.count) on\n", stderr)
     }
 
@@ -215,15 +212,14 @@ struct CheatsSection: View {
         let d = UserDefaults.standard
         let text = d.string(forKey: "cheats.text" + suffix) ?? ""
         var want = selectedSet(d.string(forKey: "cheats.on" + suffix) ?? "")
-        // Only entries that would actually be switched on are dropped, and the log says which: a code entry left in
-        // DM_CHEATS_ON kills the game, and a value entry taken out by mistake looks exactly like "nothing works".
+        // Instruction patches are never switched on: the panel does not list them (visibleNames), and this is the last word
+        // before DM_CHEATS_ON is written from the saved state, which may still hold a name from an older build. A code
+        // entry left in DM_CHEATS_ON takes the game down.
         let patches = codeSet(text, tid: tid)
-        if !d.bool(forKey: "cheats.allowCode" + suffix) {
-            let dropped = want.intersection(patches)
-            want.subtract(patches)
-            if !dropped.isEmpty {
-                fputs("launcher: cheats left \(dropped.count) entry(ies) out at start (instruction patches, allow-code off): \(dropped.sorted().joined(separator: ", "))\n", stderr)
-            }
+        let dropped = want.intersection(patches)
+        want.subtract(patches)
+        if !dropped.isEmpty {
+            fputs("launcher: cheats left \(dropped.count) entry(ies) out (instruction patches, not applied on iOS): \(dropped.sorted().joined(separator: ", "))\n", stderr)
         }
         fputs("launcher: cheats \(entryNames(text).count) entr(ies), \(want.count) on, \(patches.count) marked as patches, folder \(dir?.path ?? "-")\n", stderr)
         apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false, dir: dir ?? Self.dir)
@@ -348,7 +344,6 @@ struct CheatsSection: View {
     /// Keeps instruction patches out of DM_CHEATS_ON while they are not allowed: the host would take them, and the game
     /// dies on the first one it executes.
     private func pruneCode() {
-        guard !allowCode else { return }
         let code = Set(names.filter { isCode($0) })
         guard !code.isEmpty else { return }
         let kept = selected.subtracting(code)
