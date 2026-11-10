@@ -173,6 +173,19 @@ static _Atomic int g_master = 1;   // the master switch: 0 = no cheat runs (the 
 static int g_safe;             // safe mode: the last run ended without a clean exit while cheats were on
 static _Atomic uint64_t g_present_ns;   // the last present: the ~60 Hz thread stands down while it is recent
 static _Atomic int g_dbg;      // DM_CHEATS_DEBUG
+// When the cheats may write. Not at load: a code patch applied during the game's own start-up rewrites instructions it is
+// about to run as part of that start-up (Tears of the Kingdom reaches the function at 0x04407D0 between its heap setup and
+// its init array, and a hook there left it with a size field of -1788 and then a hang with no crash report). nnMain having
+// been entered says the game's own init is over, and a few presented frames say its main loop is really running.
+static _Atomic int g_game_main;    // main.c: nnMain has been entered
+static _Atomic int g_present_n;    // frames presented so far
+static int g_delay_frames = 60;    // DM_CHEATS_DELAY_FRAMES: frames after nnMain before the first write (0 = at once)
+static int g_early;                // DM_CHEATS_EARLY: write from load, the old behaviour
+void dm_cheats_game_main(void) { atomic_store(&g_game_main, 1); }
+static int cheat_ready(void) {
+    if (g_early) return 1;
+    return atomic_load(&g_game_main) && atomic_load(&g_present_n) >= g_delay_frames;
+}
 static int g_any;              // DM_CHEATS_ANY_BUILD
 
 // Region 0: the guest main NSO as the loader mapped it (dm/host/loader.c map_image: text pages and the patch area
@@ -1112,6 +1125,7 @@ static void note_settle(cheat_t *c) {
 // operation or another pass runs is simply skipped (the next frame / tick applies again). The master switch stops
 // everything; safe mode holds the masters back too; a "set" cheat turns itself off after its pass
 static void cheats_pass(void) {
+    if (!cheat_ready()) return;
     if (!atomic_load(&g_active) || !atomic_load(&g_master)) return;
     if (pthread_mutex_trylock(&g_lock)) return;
     if (!atomic_load(&g_master)) { pthread_mutex_unlock(&g_lock); return; }   // switched off while this pass waited for the lock
@@ -1136,6 +1150,7 @@ static void cheats_pass(void) {
 static void tick_start(void);   // defined below: the first frame is what starts it
 void dm_cheats_present(void) {
     atomic_store(&g_present_ns, now_ns());
+    atomic_fetch_add(&g_present_n, 1);
     cheats_pass();
     tick_start();   // the first frame is what lets the ~60 Hz thread start (see tick_start)
 }
@@ -1156,16 +1171,12 @@ static void *cheat_tick_thread(void *arg) {
 // one: a run without cheats keeps no thread waking 60 times a second. It runs from then on, standing down while the game
 // presents; a reload that loses the file leaves g_active off and the passes return at once.
 //
-// Not before the game's first frame: a code patch applied during start-up rewrites instructions the game is about to run
-// as part of its own initialization (Tears of the Kingdom calls the function at 0x04407D0 between its heap setup and its
-// init array, and a hook there leaves it with a size field of -1788 and then a hang). Waiting for the first present is
-// what a Switch player effectively gets: there the codes are written by dmnt while the title screen is already up.
-// DM_CHEATS_EARLY=1 restores the old behaviour for a code that has to be in place before the game draws anything.
-static int g_early;
+// Not before the game is really running: see g_game_main above. cheat_ready() is the gate both the pass and this thread
+// go through, so a cheat cannot slip in early on one path while the other waits.
 static int g_tick_started;
 static void tick_start(void) {
     if (g_tick_started) return;
-    if (!g_early && !atomic_load(&g_present_ns)) return;   // the first frame starts it (dm_cheats_present)
+    if (!cheat_ready()) return;
     g_tick_started = 1;
     pthread_t th; pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&th, &a, cheat_tick_thread, NULL)) LOG("[RED] cheats: cannot start the ~60 Hz apply thread (errno %d), only presents apply", errno);
@@ -2035,6 +2046,7 @@ void dm_cheats_init(void) {
     if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
     atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
     { const char *y = getenv("DM_CHEATS_EARLY"); g_early = y && *y && atoi(y) != 0; }
+    { const char *y = getenv("DM_CHEATS_DELAY_FRAMES"); if (y && *y) g_delay_frames = atoi(y); }
     g_panel = getenv("DM_CHEATS_PANEL") && *getenv("DM_CHEATS_PANEL") && atoi(getenv("DM_CHEATS_PANEL"));
     const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
     e = getenv("DM_CHEATS");
