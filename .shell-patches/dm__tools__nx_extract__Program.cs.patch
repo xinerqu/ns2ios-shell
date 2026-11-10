@@ -1,7 +1,7 @@
 diff --git a/dm/tools/nx_extract/Program.cs b/dm/tools/nx_extract/Program.cs
 --- a/dm/tools/nx_extract/Program.cs
 +++ b/dm/tools/nx_extract/Program.cs
-@@ -141,7 +141,8 @@
+@@ -147,7 +147,8 @@
              Console.WriteLine("program has no data section: empty RomFS");
              return Damaged();
          }

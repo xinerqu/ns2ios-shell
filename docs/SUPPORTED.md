@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**151 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**154 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -34,7 +34,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Batman: Arkham Knight | `0100ACD0163D0000` | 1.0.5 |  |
 | Bayonetta | `010076F0049A2000` | 1.1 |  |
 | Bayonetta 2 | `01007960049A0000` | 1.2 |  |
-| Bayonetta 3 | `01004A4010FEA000` | 1.2.0 |  |
+| Bayonetta 3 | `01004A4010FEA000` | 1.2.0 | 暂不支持 |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 | handheld |
 | Blasphemous | `0100698009C6E000` | 1.0.8 |  |
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
@@ -57,10 +57,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
 | DRAGON QUEST III HD-2D Remake | `01003E601E324000` | 1.1.2 | 60 fps |
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
-| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps |
+| DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps · 暂不支持 |
 | EA SPORTS FC 27 | `0100C49025D3E000` | 1.8d.310c | 60 fps |
 | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `0100CE4010AAC000` | 1.0.3 |  |
-| FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps |
+| FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps · 暂不支持 |
 | FINAL FANTASY RESONANCE (Asian release) | `0100B8A026F14000` | 1.0.1 | 60 fps |
 | FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 1.4.0 |  |
 | FINAL FANTASY X/X-2 HD Remaster | `0100BC300CB48000` | 1.0.0 |  |
@@ -69,7 +69,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 |  |
 | Ghost Trick: Phantom Detective | `010029B018432000` | 1.0.0 |  |
 | Hades | `0100535012974000` | 1.0.38233 |  |
-| Hades II | `0100A00019DE0000` | 0.0.126424 |  |
+| Hades II | `0100A00019DE0000` | 0.0.126424（也可 1.0.141667） |  |
 | Hollow Knight | `0100633007D48000` | 1.5.12620 |  |
 | Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 |  |
 | Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 | 60 fps |
@@ -96,8 +96,9 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `0100B8E016F76000` | 1.0.3 | 60 fps |
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
-| OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps |
+| OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
+| Ori and the Blind Forest: Definitive Edition | `010061D00DB74000` | 1.0.2 |  |
 | Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
 | Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 | 60 fps |
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
@@ -107,7 +108,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Pokemon Pokopia | `0400A3A01EE4C000` | v655360 |  |
 | Pokémon Brilliant Diamond | `0100000011D90000` | 1.3.0 | 60 fps |
 | Pokémon Legends: Arceus | `01001F5010DFA000` | 1.1.1 |  |
-| Pokémon Legends: Z-A | `0100F43008C44000` | 2.0.2 |  |
+| Pokémon Legends: Z-A | `0100F43008C44000` | 2.0.2 | 暂不支持 |
 | Pokémon Scarlet | `0100A3D008C5C000` | 1.0.0 |  |
 | Pokémon Shield | `01008DB008C2C000` | 1.3.2 |  |
 | Pokémon Sword | `0100ABF008968000` | 1.3.2 |  |
@@ -116,6 +117,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Portal 2 | `0100ABD01785C000` | 1.0.3 |  |
 | Princess Peach: Showtime! | `01007A3009184000` | 1.0.0 | 60 fps |
 | Raging Loop | `010020400E1C2000` | 1.0.0 |  |
+| Red Dead Redemption | `01007820196A6000` | 1.0.7（也可 1.0.0 / 1.0.4） | 60 fps |
 | Return of the Obra Dinn | `010032E00E6E2000` | 1.0.1 |  |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 1.0.0 | handheld |
 | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 |  |
@@ -157,6 +159,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
 | The Rogue Prince of Persia | `01008D9022462000` | 1.1.0 | 60 fps |
 | TRIANGLE STRATEGY | `0100CC80140F8000` | 1.1.1 | 60 fps |
+| TUNIC | `0100DA801624E000` | 1.0.3 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
 | Well Dweller | `0100217023F6C000` | 1.0.0 |  |

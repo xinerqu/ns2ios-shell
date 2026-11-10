@@ -13,34 +13,39 @@ diff --git a/dm/gfx/tools/tool_lock.py b/dm/gfx/tools/tool_lock.py
 +    return hashlib.sha256(open(p, 'rb').read()).hexdigest()[:16]
  
  def tools_now():
-     """Actual tool fingerprints: translator dll (including the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
-@@ -26,7 +30,9 @@
+     """Actual tool fingerprints: the translator (a native executable that holds the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
+@@ -24,9 +28,12 @@
+ 
+ NO_RUN = 'does not run'
  def xlate_embedded():
-     """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)': without a .NET 10 runtime for the architecture it starts as (a Python
-     under Rosetta starts the universal apphost as x86_64) it exits 131 with nothing on stdout, which read as an empty digest and a stale translator (docs/reference/packing.md)"""
+-    """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)', so a translator that cannot start (missing, not executable, a download
+-    quarantined by macOS) is named as such rather than read as an empty digest and a stale translator"""
 -    try: r = subprocess.run([os.path.join(XLATE_DIR, 'dmsh_xlate'), '--source-sha'], capture_output=True, text=True, errors='replace', timeout=60)
++    """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)', so a
++    translator that cannot start (missing, not executable, a download quarantined by macOS) is named as such rather than
++    read as an empty digest and a stale translator"""
 +    x = os.path.join(XLATE_DIR, 'dmsh_xlate')
 +    if not os.path.isfile(x) and os.path.isfile(x + '.exe'): x += '.exe'   # a Windows build is dmsh_xlate.exe
 +    try: r = subprocess.run([x, '--source-sha'], capture_output=True, text=True, errors='replace', timeout=60)
      except (OSError, subprocess.SubprocessError) as e: return f'{NO_RUN} ({e})'
      if r.returncode == 0 and r.stdout.strip(): return r.stdout.strip()
      return '%s (%s)' % (NO_RUN, (r.stderr.strip().splitlines() or r.stdout.strip().splitlines() or [f'exit code {r.returncode}'])[0])
-@@ -38,7 +44,9 @@
+@@ -38,7 +45,9 @@
      now = tools_now(); ran = not now['xlate_source'].startswith(NO_RUN)
      bad = [f'{k}: lock {want.get(k)} / actual {v}' for k, v in now.items() if want.get(k) != v and (ran or k != 'xlate_source')]
      if not ran: bad.append(no_run_message(now['xlate_source']))
--    elif now['xlate_source'] != xlate_source_sha(): bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
+-    elif now['xlate_source'] != xlate_source_sha(): bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild it: dm/tools/native_tools.sh dmsh_xlate)')
 +    # A Windows checkout converts line endings, so a translator built there embeds a digest of CRLF sources while the tree
 +    # computes one of LF sources. The lock is the authority: when it already names what the translator reports, accept it.
-+    elif now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
++    elif now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild it: dm/tools/native_tools.sh dmsh_xlate)')
      return bad
  
  if __name__ == '__main__':
-@@ -46,7 +54,11 @@
+@@ -46,7 +55,11 @@
      if a == ['--update-lock']:
          t = tools_now()
          if t['xlate_source'].startswith(NO_RUN): sys.exit('[RED] ' + no_run_message(t['xlate_source']))
--        if t['xlate_source'] != xlate_source_sha(): sys.exit(f'[RED] the translator was not built from the in-repo source (embedded {t["xlate_source"]} / in repo {xlate_source_sha()}): rebuild dmsh_xlate first')
+-        if t['xlate_source'] != xlate_source_sha(): sys.exit(f'[RED] the translator was not built from the in-repo source (embedded {t["xlate_source"]} / in repo {xlate_source_sha()}): rebuild it first (dm/tools/native_tools.sh dmsh_xlate)')
 +        # Line endings decide this hash and a Windows checkout converts them, so a translator built there reports a digest
 +        # the tree cannot reproduce. Record what the translator says and let the lock be the authority, as check_tools does.
 +        if t['xlate_source'] != xlate_source_sha():

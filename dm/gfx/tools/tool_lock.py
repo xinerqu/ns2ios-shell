@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# The translation chain's tools against their lock file dm/gfx/tools/dmsh_chain.lock: the translator (its dlls and the source digest it embeds), SPIRV-Cross and the Metal compilers (macOS / iOS).
+# The translation chain's tools against their lock file dm/gfx/tools/dmsh_chain.lock: the translator (its native executable, which holds Ryujinx's shader library, and the source digest it embeds), SPIRV-Cross and the Metal compilers (macOS / iOS).
 # The lock is part of the chain version (dmsh_chain.py); these checks are not: they decide no shader's output, so a fix to a check or its message neither changes V nor the shaders' cache keys
 # (dmsh_build.py CODE_FP). dmsh_build.py runs check_tools before it builds anything; own_compilers.py replaces it for a player's Mac.
 # Usage: tool_lock.py --check-tools   verify that the actual tools match the lock file; on mismatch print [RED] lines and exit 1
-#        tool_lock.py --update-lock   rewrite the lock file from the actual tools (run after changing Ryujinx / spirv-cross / Xcode, then dmsh_chain.py --header; both are committed)
+#        tool_lock.py --update-lock   rewrite the lock file from the actual tools (run after rebuilding the translator (dm/tools/native_tools.sh) or spirv-cross, or changing Xcode, then dmsh_chain.py --header; both are committed)
 import os, sys, hashlib, subprocess, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dmsh_chain import LOCK, XLATE_DIR, SPIRV_CROSS, xlate_source_sha
@@ -15,9 +15,9 @@ def sha16(p):
     return hashlib.sha256(open(p, 'rb').read()).hexdigest()[:16]
 
 def tools_now():
-    """Actual tool fingerprints: translator dll (including the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
-    t = {}
-    for dll in ('dmsh_xlate.dll', 'Ryujinx.Graphics.Shader.dll', 'Ryujinx.Common.dll'): t[dll] = sha16(os.path.join(XLATE_DIR, dll))
+    """Actual tool fingerprints: the translator (a native executable that holds the Ryujinx shader library), spirv-cross, metal compiler (macOS / iOS)"""
+    xl = os.path.join(XLATE_DIR, 'dmsh_xlate')
+    t: dict = {'dmsh_xlate': sha16(xl) if os.path.isfile(xl) else 'missing'}
     t['xlate_source'] = xlate_embedded()
     sc = shutil.which(SPIRV_CROSS)
     t['spirv-cross'] = sha16(sc) if sc else 'missing'
@@ -28,8 +28,9 @@ def tools_now():
 
 NO_RUN = 'does not run'
 def xlate_embedded():
-    """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)': without a .NET 10 runtime for the architecture it starts as (a Python
-    under Rosetta starts the universal apphost as x86_64) it exits 131 with nothing on stdout, which read as an empty digest and a stale translator (docs/reference/packing.md)"""
+    """The source digest the translator embeds (dmsh_xlate --source-sha), or 'does not run (<its first error line>)', so a
+    translator that cannot start (missing, not executable, a download quarantined by macOS) is named as such rather than
+    read as an empty digest and a stale translator"""
     x = os.path.join(XLATE_DIR, 'dmsh_xlate')
     if not os.path.isfile(x) and os.path.isfile(x + '.exe'): x += '.exe'   # a Windows build is dmsh_xlate.exe
     try: r = subprocess.run([x, '--source-sha'], capture_output=True, text=True, errors='replace', timeout=60)
@@ -37,7 +38,7 @@ def xlate_embedded():
     if r.returncode == 0 and r.stdout.strip(): return r.stdout.strip()
     return '%s (%s)' % (NO_RUN, (r.stderr.strip().splitlines() or r.stdout.strip().splitlines() or [f'exit code {r.returncode}'])[0])
 
-def no_run_message(embedded): return f'the translator {embedded}: it needs the .NET 10 runtime for this Mac\'s architecture (brew install --cask dotnet-sdk); unset DOTNET_ROOT if it names another one'
+def no_run_message(embedded): return f'the translator {embedded}: {os.path.join(XLATE_DIR, "dmsh_xlate")} is the committed native executable (dm/tools/native_tools.sh builds it); check out the repository again if it is missing or damaged'
 
 def check_tools():
     want = dict(l.rstrip('\n').split('\t', 1) for l in open(LOCK) if '\t' in l and not l.startswith('#'))
@@ -46,7 +47,7 @@ def check_tools():
     if not ran: bad.append(no_run_message(now['xlate_source']))
     # A Windows checkout converts line endings, so a translator built there embeds a digest of CRLF sources while the tree
     # computes one of LF sources. The lock is the authority: when it already names what the translator reports, accept it.
-    elif now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild dmsh_xlate)')
+    elif now['xlate_source'] != xlate_source_sha() and want.get('xlate_source') != now['xlate_source']: bad.append(f'the translator was not built from the in-repo source: embedded source {now["xlate_source"]} / in repo {xlate_source_sha()} (rebuild it: dm/tools/native_tools.sh dmsh_xlate)')
     return bad
 
 if __name__ == '__main__':
