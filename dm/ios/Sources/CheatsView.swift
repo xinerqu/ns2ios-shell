@@ -1,11 +1,12 @@
 // Cheats on the iPhone, in the launcher itself: paste Atmosphère codes, switch on the entries wanted, play.
 //
-// The text goes to Documents/cheats/cheats.txt and the switched-on names to DM_CHEATS_ON, which hle_cheats.c reads at
-// startup (dm/host/hle_cheats.c: it parses the file, then turns on the entries named in that variable). Upstream's loader
-// only reads a .txt named after a build ID, so this fork's copy also accepts that fixed name under DM_CHEATS_ANY_BUILD
-// (and only as the fallback: a real <build>.txt still wins). The panel therefore never has to know the build ID.
+// The text goes to Documents/ns2ios/cheats/<title ID>/cheats.txt and the switched-on names to DM_CHEATS_ON, which
+// hle_cheats.c reads at startup (dm/host/hle_cheats.c: it parses the file, then turns on the entries named in that
+// variable). Upstream's loader only reads a .txt named after a build ID, so this fork's copy also accepts that fixed name
+// under DM_CHEATS_ANY_BUILD (and only as the fallback: a real <build>.txt still wins). The panel therefore never has to
+// know the build ID.
 //
-// What happened on the last run comes back the other way: hle_cheats.c writes Documents/cheats/last-run.txt with one line
+// What happened on the last run comes back the other way: hle_cheats.c writes last-run.txt in that same folder with one line
 // per entry (state, name, reason) and this screen shows it under the switches. A phone has no cheats menu, so without that
 // the only trace of "this one was turned off, and why" would be the log.
 //
@@ -20,13 +21,49 @@ import Foundation
 private func cheatKeySuffix() -> String { gameSettingsPrefix() }
 
 struct CheatsSection: View {
-    /// Where this game's cheat files live. nil: the environment's DM_CHEATS, else Documents/cheats (the one-game app). The library's
+    /// Where this game's cheat files live. nil: the environment's DM_CHEATS, else ns2ios/cheats (the one-game app). The library's
     /// game page passes ns2ios/cheats/<title ID> itself, because DM_CHEATS is only set once that game is started.
     var cheatsDir: URL? = nil
+    /// The game's title ID when the app holds several games: its dm/main.fixups.tsv (TEXT_END, which decides what counts
+    /// as an instruction patch) lives inside DmGame<tid>.framework, not in the app's own dm/.
+    var tid: String? = nil
 
-    @AppStorage("cheats.text" + cheatKeySuffix()) private var text: String = ""
-    @AppStorage("cheats.on" + cheatKeySuffix()) private var onNames: String = ""
-    @AppStorage("cheats.allowCode" + cheatKeySuffix()) private var allowCode = false   // off: entries that patch instructions are not switchable
+    @AppStorage private var text: String
+    @AppStorage private var onNames: String
+    @AppStorage private var allowCode: Bool   // off: entries that patch instructions are not switchable
+
+    /// A game's own keys. The library page passes its title ID, so two games in one app no longer share the pasted text,
+    /// the switches or the "allow code patches" choice -- gameSettingsPrefix() cannot do it here, because it reads
+    /// DM_GAME_KEY/DM_APP_DM, which only exist once the game is started. A one-game package keeps the keys it always used.
+    private static func keySuffix(_ tid: String?) -> String {
+        guard let tid, tid.count == 16, tid.allSatisfy({ $0.isHexDigit }) else { return cheatKeySuffix() }
+        return "game." + tid
+    }
+
+    init(cheatsDir: URL? = nil, tid: String? = nil) {
+        self.cheatsDir = cheatsDir
+        self.tid = tid
+        let suffix = Self.keySuffix(tid)
+        // What was pasted before this change lives under the unprefixed keys: give this game a copy the first time it is
+        // opened, or the panel would look empty and the codes would have to be pasted again.
+        Self.migrateLegacyKeys(to: suffix)
+        _text = AppStorage(wrappedValue: "", "cheats.text" + suffix)
+        _onNames = AppStorage(wrappedValue: "", "cheats.on" + suffix)
+        _allowCode = AppStorage(wrappedValue: false, "cheats.allowCode" + suffix)
+    }
+
+    /// Copies the unprefixed keys into `suffix`'s when those are still unset. Idempotent: once the game has its own value
+    /// nothing is touched again, and a cleared panel is not refilled from the old one.
+    private static func migrateLegacyKeys(to suffix: String) {
+        guard !suffix.isEmpty else { return }
+        let d = UserDefaults.standard
+        for k in ["cheats.text", "cheats.on", "cheats.allowCode"] {
+            let own = k + suffix
+            guard d.object(forKey: own) == nil else { continue }
+            if let legacy = d.object(forKey: k) { d.set(legacy, forKey: own) }
+        }
+    }
+
     @State private var expanded = false
     @State private var lastRun: [String: RunState] = [:]
     @State private var lastBuild: String = ""
@@ -123,10 +160,10 @@ struct CheatsSection: View {
         }
         .onAppear {
             loadArmed()                          // a run died with these on: they are off from now, and why is on screen
-            guessedCode = Self.codeSet(text)     // its own estimate first: it needs no run, and last-run.txt may not exist yet
+            guessedCode = Self.codeSet(text, tid: tid)     // its own estimate first: it needs no run, and last-run.txt may not exist yet
             loadLastRun()                        // what the host made of the last run; the measured column overrides the estimate
             pruneCode()
-            Self.applySaved()                    // puts the saved text and switches in place, for a launch that goes straight to Play
+            Self.applySaved(dir: dirURL)         // puts the saved text and switches in place, for a launch that goes straight to Play
         }
         .onChange(of: allowCode) { _, on in
             if !on { pruneCode() }   // the switch that allowed them is gone: so are they
@@ -137,12 +174,12 @@ struct CheatsSection: View {
 
     private func setText(_ v: String) {
         text = v
-        guessedCode = Self.codeSet(v)   // new text, new estimate: the badges and the kept switches follow it
+        guessedCode = Self.codeSet(v, tid: tid)   // new text, new estimate: the badges and the kept switches follow it
         let live = Set(Self.entryNames(v))
         let kept = Set(names.filter { live.contains($0) && selected.contains($0) })
         if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: "\n") }
         pruneCode()
-        Self.apply(text: v, on: names.filter { kept.contains($0) && (allowCode || !isCode($0)) }, log: false)
+        Self.apply(text: v, on: names.filter { kept.contains($0) && (allowCode || !isCode($0)) }, log: false, dir: dirURL)
         fputs("launcher: cheats \(names.count) entries, \(kept.count) on\n", stderr)
     }
 
@@ -150,39 +187,54 @@ struct CheatsSection: View {
         var s = selected
         if on { s.insert(name) } else { s.remove(name) }
         onNames = names.filter { s.contains($0) }.joined(separator: "\n")
-        Self.apply(text: text, on: names.filter { s.contains($0) }, log: true)
+        Self.apply(text: text, on: names.filter { s.contains($0) }, log: true, dir: dirURL)
     }
 
     // MARK: - what the host reads and writes
 
     /// Called from the Play button: the section sits below the fold, so onAppear alone cannot be relied on to have run
     /// before the game starts. Reads what was saved and puts it in place.
-    static func applySaved() {
+    static func applySaved() { applySaved(dir: nil) }
+
+    /// `dir`: where this game's codes live. The library's Play button passes ns2ios/cheats/<title ID> itself, because
+    /// DM_CHEATS is only set once dm_shell_start_game runs and this call comes just before it -- the environment cannot be
+    /// asked yet, and a paste that was never written would leave the host with no file at all.
+    static func applySaved(dir: URL?) {
+        // The title ID is the folder's own name (ns2ios/cheats/<title ID>), so the instruction-patch estimate finds the
+        // game's own table even though DM_APP_DM is not set yet, and the saved state is read from this game's keys.
+        let tid = dir.flatMap { u -> String? in
+            let n = u.lastPathComponent
+            return n.count == 16 && n.allSatisfy { $0.isHexDigit } ? n : nil
+        }
+        let suffix = keySuffix(tid)
         let d = UserDefaults.standard
-        let text = d.string(forKey: "cheats.text") ?? ""
-        var want = selectedSet(d.string(forKey: "cheats.on") ?? "")
-        if !d.bool(forKey: "cheats.allowCode") { want.subtract(codeSet(text)) }   // instruction patches stay out
-        apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false)
+        let text = d.string(forKey: "cheats.text" + suffix) ?? ""
+        var want = selectedSet(d.string(forKey: "cheats.on" + suffix) ?? "")
+        if !d.bool(forKey: "cheats.allowCode" + suffix) { want.subtract(codeSet(text, tid: tid)) }   // instruction patches stay out
+        apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false, dir: dir ?? Self.dir)
     }
 
     /// DM_CHEATS_ON is the entries to switch on; ANY_BUILD lets the fixed file name be read without the build ID.
     /// Overwrites what an env file set: this panel is the switch for these two, and it shows the state it applied.
-    private static func apply(text: String, on: [String], log: Bool) {
+    /// `dir` is passed in rather than read from the environment: the library page knows the game's folder before the host
+    /// does (DM_CHEATS is set by main.m only when the game starts), and the file has to land where that same
+    /// DM_CHEATS will point, or the host loads nothing.
+    private static func apply(text: String, on: [String], log: Bool, dir: URL) {
         if on.isEmpty { unsetenv("DM_CHEATS_ON") } else { setenv("DM_CHEATS_ON", on.joined(separator: ","), 1) }
         setenv("DM_CHEATS_ANY_BUILD", "1", 1)
-        write(text)
+        write(text, to: dir)
         if log {
             fputs("launcher: cheats \(entryNames(text).count) entries, \(on.count) on\(on.isEmpty ? "" : ": " + on.joined(separator: ", "))\n", stderr)
         }
     }
 
-    /// The codes themselves, where hle_cheats.c looks first (DM_CHEATS points at Documents/cheats). Empty text removes
+    /// The codes themselves, where hle_cheats.c looks first (DM_CHEATS points at this game's cheats folder). Empty text removes
     /// the file, so a cleared panel cannot quietly keep applying last time's codes.
     ///
     /// The name is not free: the host only reads a .txt named after a build ID, so this fork's hle_cheats.c accepts
     /// cheats.txt under DM_CHEATS_ANY_BUILD (still only the fallback -- a real <build>.txt wins). One app holds one game,
     /// so a fixed name cannot pick up another game's codes.
-    private static func write(_ v: String) {
+    private static func write(_ v: String, to dir: URL) {
         let f = dir.appendingPathComponent("cheats.txt")
         do {
             if v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -241,7 +293,7 @@ struct CheatsSection: View {
         }
         lastRun = states
         lastBuild = build
-        guessedCode = Self.codeSet(text)
+        guessedCode = Self.codeSet(text, tid: tid)
         pruneCode()
         // The host turned the suspects off at its load, but its load happens at Play: this panel is what puts them back in
         // DM_CHEATS_ON, so it has to drop them too. Without this the crash repeats every launch -- the guard never gets
@@ -258,10 +310,12 @@ struct CheatsSection: View {
 
     private var dirURL: URL { cheatsDir ?? Self.dir }
     private static var dir: URL {
-        // DM_CHEATS is where the host reads cheats from: Documents/cheats for a one-game package, ns2ios/cheats/<title ID> for an app that
-        // holds several games (main.m). Writing to the fixed path would have made the panel and the host disagree.
+        // DM_CHEATS is where the host reads cheats from: ns2ios/cheats/<title ID> for an app that holds several games
+        // (main.m), ns2ios/cheats for a one-game package. There is no Documents/cheats any more -- that top-level folder
+        // sat beside the game data for no reason -- so the fallback follows the same layout the host uses.
         let d = ProcessInfo.processInfo.environment["DM_CHEATS"].map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("cheats", isDirectory: true)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ns2ios/cheats", isDirectory: true)
         if !FileManager.default.fileExists(atPath: d.path) {
             try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         }
@@ -286,8 +340,12 @@ struct CheatsSection: View {
     /// The estimate: an entry whose fixed-address stores point into main's text (below TEXT_END) patches instructions.
     /// An entry that follows a pointer at all (58xxxxxx) writes data and is never marked. TEXT_END comes from the app's own
     /// dm/main.fixups.tsv, so this stays in step with the build; without that file nothing is marked.
-    static func codeSet(_ text: String) -> Set<String> {
-        guard let end = textEnd else { return [] }
+    ///
+    /// `tid` matters: with several games the table is not in the app's dm/ but inside DmGame<tid>.framework. Returning an
+    /// empty set there is not harmless -- pruneCode would keep nothing out of DM_CHEATS_ON, so an instruction patch would be
+    /// switched on by default and the game would die on the first one it runs. That is why this asks the game's own table.
+    static func codeSet(_ text: String, tid: String? = nil) -> Set<String> {
+        guard let end = textEnd(tid: tid) else { return [] }
         var out: Set<String> = []
         var cur: String?
         var pointer = false
@@ -314,15 +372,24 @@ struct CheatsSection: View {
     }
 
     /// TEXT_END from the app's own table; nil when this build has none, and then no entry is marked.
-    static var textEnd: UInt64? {
-        let url = Bundle.main.bundleURL.appendingPathComponent("dm/main.fixups.tsv")
-        guard let s = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        for line in s.split(whereSeparator: { $0.isNewline }) where line.hasPrefix("#") {
-            let p = line.split(separator: "\t")
-            guard p.count >= 2, p[0].contains("TEXT_END") else { continue }
-            var v = p[1].trimmingCharacters(in: .whitespaces)
-            if v.hasPrefix("0x") || v.hasPrefix("0X") { v.removeFirst(2) }   // the table writes 0x2836550
-            return UInt64(v, radix: 16)
+    ///
+    /// A one-game package has dm/ at the app's root. A library app has none there: each game's tables sit in
+    /// Frameworks/DmGame<tid>.framework/dm, which is also where main.m points DM_APP_DM.
+    static func textEnd(tid: String?) -> UInt64? {
+        var urls = [Bundle.main.bundleURL.appendingPathComponent("dm/main.fixups.tsv")]
+        if let tid, !tid.isEmpty, let fw = Bundle.main.privateFrameworksPath {
+            urls.append(URL(fileURLWithPath: fw)
+                .appendingPathComponent("DmGame\(tid).framework/dm/main.fixups.tsv"))
+        }
+        for url in urls {
+            guard let s = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            for line in s.split(whereSeparator: { $0.isNewline }) where line.hasPrefix("#") {
+                let p = line.split(separator: "\t")
+                guard p.count >= 2, p[0].contains("TEXT_END") else { continue }
+                var v = p[1].trimmingCharacters(in: .whitespaces)
+                if v.hasPrefix("0x") || v.hasPrefix("0X") { v.removeFirst(2) }   // the table writes 0x2836550
+                return UInt64(v, radix: 16)
+            }
         }
         return nil
     }

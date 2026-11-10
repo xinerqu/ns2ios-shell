@@ -229,6 +229,11 @@ private final class LibraryModel: ObservableObject {
         starting = game.tid
         errors[game.tid] = nil
         let tid = game.tid
+        // The cheats page wrote its file and switches when it was last touched, but its @AppStorage values are the truth and
+        // its onAppear may never have run for this game: put them in place here, before the host loads them. The folder is
+        // passed in because DM_CHEATS is only set by dm_shell_start_game, which has not run yet (Launcher.swift's Play
+        // button makes the same call for a one-game package, where the environment already points at ns2ios/cheats).
+        CheatsSection.applySaved(dir: LibraryArt.cheatsURL(tid))
         // dlopen 与预加载可能要一两秒，放到后台；回到主线程再动 UI。
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var failure: String?
@@ -674,7 +679,7 @@ private struct CheatsPage: View {
     var body: some View {
         ScrollView {
             // 不加半透明底板：字本身加粗纯白就够了（坤哥 2026-11-08 定的口径）
-            CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid))
+            CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid), tid: game.tid)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
         }

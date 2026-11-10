@@ -334,7 +334,9 @@ static int boot_env(void) {
     // Zero or several games: the library is the first screen and dm_shell_start_game() (Library.swift's pick) sets the game up. Only the
     // package-wide switches belong here, before any game is known.
     if (dm_shell_library_needed()) {
-        for (NSString *d in @[@"save", @"temp", @"cheats", @"ns2ios"])
+        // No Documents/cheats: a library app keeps each game's codes in ns2ios/cheats/<title ID> (dm_shell_start_game),
+        // and the app-wide folder only ever held the one-game package's file.
+        for (NSString *d in @[@"save", @"temp", @"ns2ios"])
             [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
         setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
         setenv("DM_CHEATS_DEFER", "1", 1);   // the cheat load waits for Play, as in the one-game package
@@ -350,10 +352,13 @@ static int boot_env(void) {
     if (!dm) { romfs_identity_report(doc); fprintf(stderr, "boot: game files not found (Documents/romfs.img, Documents/romfs or <App>/romfs)\n"); return 0; }
     setenv("DM_SAVE", [doc stringByAppendingPathComponent:@"save"].fileSystemRepresentation, 0);
     setenv("DM_TEMP", [doc stringByAppendingPathComponent:@"temp"].fileSystemRepresentation, 0);
-    // Atmosphère cheat files the player drops in from the Files app: Documents/cheats/<build ID>.txt, named by the main
-    // NSO's build ID (hle_cheats.c logs the one it is looking for). Nothing else on iOS sets these switches, so without
+    // Atmosphère cheat files the player drops in from the Files app: Documents/ns2ios/cheats/<build ID>.txt, named by the
+    // main NSO's build ID (hle_cheats.c logs the one it is looking for). Nothing else on iOS sets these switches, so without
     // this line every cheat is off with "cheats: off (neither DM_CHEATS nor DM_ROOT is set)"; an env.txt line still wins.
-    setenv("DM_CHEATS", [doc stringByAppendingPathComponent:@"cheats"].fileSystemRepresentation, 0);
+    // The library app's path is ns2ios/cheats/<title ID> and is set per game by dm_shell_start_game; a one-game package
+    // has no title ID to ask for here, so it keeps one folder for its only game. Never Documents/cheats (a stray
+    // top-level folder next to the game data).
+    setenv("DM_CHEATS", [[[doc stringByAppendingPathComponent:@"ns2ios"] stringByAppendingPathComponent:@"cheats"] fileSystemRepresentation], 0);
     // The host loads at launch, before the settings screen exists, so the cheat load waits for Play (front_ios.m calls
     // dm_cheats_after_launcher): otherwise it would only log "no file for build" and never see the panel's file.
     setenv("DM_CHEATS_DEFER", "1", 1);
