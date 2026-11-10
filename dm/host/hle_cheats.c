@@ -125,7 +125,7 @@ typedef struct {
     uint8_t nd;                // meta never-decrease: the host keeps the highest value of (nd_region, nd_off), no program
     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
-    uint8_t dbg_read;          // DM_CHEATS_DEBUG: its first code write has been read back once (see cheat_write)
+    uint8_t dbg_read;          // its first code write has been read back once through the game's own mapping (see cheat_write)
     uint8_t code_logged;       // its first code write has been logged with both words (see cheat_write): the only record of
                                // what a code patch actually changed, and of whether the old word was what the file expects
     uint8_t wcode, wdata;      // what its writes have actually reached: main's text, and anything else. last-run.txt reports it
@@ -743,8 +743,10 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
     }
     // Once per cheat, the first code write is read back through the game's own mapping. A second mapping of main is only
     // worth anything if the write lands in the same physical pages; a copy-on-write view would have every code cheat report
-    // success while the game keeps executing the old bytes.
-    if (atomic_load(&g_dbg) && !c->dbg_read && w.kind == WH_MAIN &&
+    // success while the game keeps executing the old bytes. Always, not only under DM_CHEATS_DEBUG: this is the one line
+    // that says whether a code patch reached the game at all, and a patch that does not run is indistinguishable from one
+    // that runs and does nothing.
+    if (!c->dbg_read && w.kind == WH_MAIN &&
         (addr - (uint64_t)(uintptr_t)g_main_mod->base) < main_rx_end()) {
         c->dbg_read = 1;
         size_t n = len < 4 ? (size_t)len : 4;
