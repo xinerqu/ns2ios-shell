@@ -13854,7 +13854,11 @@ void mtl_read_texels(const tex_t *t, unsigned level, unsigned layer0, const NVNc
     // A guest thread can live indefinitely without draining its outer pool: release readback temporaries here, after the GPU and CPU copies finish.
     // Finding: docs/reference/memory.md, GPU readback without an autorelease pool.
     @autoreleasepool {
-    id<MTLTexture> mt = tex_mtl(t);
+    // Off the submit thread nothing may touch the upload batch: tex_mtl resolves (and maybe uploads) a texture, and
+    // up_begin aborts there by design (#471 -- Tears of the Kingdom reads textures on bake::ModuleMgr, and this is the
+    // path a cheat that changes when it bakes reaches). Read the host texture that already exists instead; one that was
+    // never uploaded reads as 0, the same thing that thread saw before, and the game goes on instead of the app dying.
+    id<MTLTexture> mt = on_sub_thread() ? tex_mtl(t) : (id<MTLTexture>)tex_get(t->serial);
     if (!mt || !tex_level_ok(mt, level, "CPU readback")) { memset(dst, 0, img * nz); return; }
     mtl_finish_gpu_at(WS_READTEX);
     id<MTLBuffer> buf = [g_dev newBufferWithLength:wb * hb * nz options:MTLResourceStorageModeShared];
