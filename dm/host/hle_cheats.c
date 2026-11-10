@@ -126,6 +126,8 @@ typedef struct {
     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
     uint8_t dbg_read;          // DM_CHEATS_DEBUG: its first code write has been read back once (see cheat_write)
+    uint8_t code_logged;       // its first code write has been logged with both words (see cheat_write): the only record of
+                               // what a code patch actually changed, and of whether the old word was what the file expects
     uint8_t wcode, wdata;      // what its writes have actually reached: main's text, and anything else. last-run.txt reports it
                                // so the launcher can replace its own guess with what really happened.
     uint8_t pair_off;          // the off (restore) half of an on / off pair
@@ -711,7 +713,24 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
                                  w.kind == WH_MAIN ? "main NSO" : w.kind == WH_HEAP ? "heap" : w.kind == WH_MODULE ? w.mod->name : "guest page");
     int bad = 0;
     switch (w.kind) {
-        case WH_MAIN: main_write_pages(addr, len, &val); break;
+        // A code patch is the one thing here that can kill the game from a distance, and until now nothing recorded it: the
+        // log said "this entry ran" and then the game stopped, with no word about what changed. Log the first code write of
+        // each entry with both words -- the old one tells whether the address still holds the instruction the file was
+        // written against (a mismatch means the offsets belong to another build, which is what makes a patch crash).
+        case WH_MAIN: {
+            uint64_t off = addr - (uint64_t)(uintptr_t)g_main_mod->base;
+            if (off < main_rx_end() && !c->code_logged) {
+                size_t n = len < 4 ? (size_t)len : 4;
+                uint32_t before = 0, want = 0;
+                memcpy(&before, (void *)(uintptr_t)addr, n);
+                memcpy(&want, &val, n);
+                c->code_logged = 1;
+                LOG("cheats: \"%s\" patches code main+0x%llX (%zu bytes): 0x%08X -> 0x%08X", c->name,
+                    (unsigned long long)off, n, before, want);
+            }
+            main_write_pages(addr, len, &val);
+            break;
+        }
         // The heap write happens under the memory lock (dm_guest_heap_write), so a concurrent SetHeapSize cannot shrink it
         // out from under the copy; it only refuses if the span shrank since the check a moment ago: a failed access as ever
         case WH_HEAP: bad = dm_guest_heap_write(addr, &val, len) != 0; break;
