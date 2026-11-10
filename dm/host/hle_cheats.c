@@ -720,6 +720,9 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
         case WH_MAIN: {
             uint64_t off = addr - (uint64_t)(uintptr_t)g_main_mod->base;
             if (off < main_rx_end()) {
+                if (g_main_mod->data_off && off >= g_main_mod->data_off)
+                    LOG("[RED] cheats: \"%s\" writes main+0x%llX, which is past data_off (0x%llX): that is data, not code",
+                        c->name, (unsigned long long)off, (unsigned long long)g_main_mod->data_off);
                 size_t n = len < 8 ? (size_t)len : 8;
                 uint8_t before[8] = {0}, want[8] = {0};
                 memcpy(before, (void *)(uintptr_t)addr, n);
@@ -1961,6 +1964,13 @@ static void load_all(void) {
     if (g_main_mod && !g_alias) {
         alias_setup();
         if (g_alias) LOG("cheats: writable alias of main mapped");
+        // Where the image's regions begin. A code cheat writes an offset it got from somewhere else, and the only way to
+        // tell "blank code at the end of .text" from "the start of .data" -- which reads as zeros too and is what a cave
+        // written too far covers -- is to put the boundaries in the log next to the write.
+        if (g_main_mod) LOG("cheats: main image: text ends 0x%llX (code pages to 0x%llX), ro 0x%llX, data 0x%llX, key page 0x%llX",
+                            (unsigned long long)g_main_mod->text_end, (unsigned long long)main_rx_end(),
+                            (unsigned long long)g_main_mod->ro_off, (unsigned long long)g_main_mod->data_off,
+                            (unsigned long long)g_main_mod->key_page_off);
         // alias_setup logged why it could not be mapped; this line is the consequence the player sees
     }
     if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
