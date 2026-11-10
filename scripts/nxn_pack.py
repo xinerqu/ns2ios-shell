@@ -1483,13 +1483,31 @@ def patched_cache_key(module, identity):
     return h.hexdigest()[:16]
 
 
+# Everything patch_nso.py writes beside the module, and therefore everything a cache entry has to hold: .gates.tsv is
+# the one the host cannot run without (each module loads with gates 0 and aborts at the first gate with "FATAL unknown
+# gate"), and the other four are read at run time or by the diagnostics. Kept here so the store and the restore branch
+# cannot drift apart again (GitHub issue #13: a cache hit copied .fixups.tsv alone).
+REWRITE_OUTPUTS = ('.patched.bin', '.fixups.tsv', '.gates.tsv', '.sites.tsv', '.cuts.tsv', '.obs.tsv', '.changed.tsv')
+REWRITE_OUTPUTS_MANIFEST = '.outputs.txt'   # what the entry actually holds, so a module that writes fewer is still a hit
+
+
+def rewrite_outputs(d, m):
+    """The outputs of patch_nso.py this folder holds for module m."""
+    return [s for s in REWRITE_OUTPUTS if (d / (m + s)).is_file()]
+
+
+def rewrite_complete(d, m):
+    """Whether d holds a rewritten module the host can run: the bytes, their layout, and the gate table."""
+    return all((d / (m + s)).is_file() for s in ('.patched.bin', '.fixups.tsv', '.gates.tsv'))
+
+
 def step_rewrite(exe_dir, mods, out, work, tid, force=False):
     # patch_nso.py is pure Python (capstone + lz4): its stubs are hand-assembled machine code, not built at run time,
     # so no C compiler is needed here even though its comments mention clang.
     # The rewritten module is kept beside the shader library cache under a key of its own inputs: the work folder is deleted
     # after a pack, so without it every run rewrote 85 s of main again (Brain Memory, 2026-11-09), and the files it makes are
     # tens of megabytes, not gigabytes.
-    if not force and all((out / (m + '.patched.bin')).is_file() and (out / (m + '.fixups.tsv')).is_file() for m in mods):
+    if not force and all(rewrite_complete(out, m) for m in mods):
         say('rewritten modules already there'); return
     out.mkdir(parents=True, exist_ok=True)
     try: identity = rewriter_identity()
@@ -1503,20 +1521,43 @@ def step_rewrite(exe_dir, mods, out, work, tid, force=False):
             except OSError as e: warn('cannot key %s (%s): rewriting without the cache' % (m, e))
         hit = (shader_cache_root() / 'patched' / str(tid) / key) if key and not force else None
         if hit is not None and (hit / (m + '.patched.bin')).is_file():
-            how = _place(hit / (m + '.patched.bin'), out / (m + '.patched.bin'))
-            for n in (m + '.fixups.tsv',):
-                if (hit / n).is_file(): shutil.copyfile(str(hit / n), str(out / n))
-            say('rewritten module %s reused from the cache (%.1f MB, %s)'
-                % (m, (out / (m + '.patched.bin')).stat().st_size / (1 << 20), how))
-            continue
+            # An entry written before .gates.tsv was stored (issue #13) has no manifest and no gate table: reusing it
+            # produced a package whose modules all loaded with gates 0. Such an entry is a miss, and the rewrite below
+            # overwrites it.
+            manifest = hit / (m + REWRITE_OUTPUTS_MANIFEST)
+            listed = [l.strip() for l in manifest.read_text(encoding='utf-8', errors='replace').splitlines() if l.strip()] if manifest.is_file() else []
+            lacking = [s for s in listed if not (hit / (m + s)).is_file()]
+            if not listed:
+                say('rewritten module %s not reused from the cache: the entry names no outputs (%s), rewriting'
+                    % (m, 'written before the gate table was kept' if not manifest.is_file() else 'empty manifest'))
+            elif lacking:
+                say('rewritten module %s not reused from the cache: the entry is missing %s, rewriting'
+                    % (m, ', '.join(lacking)))
+            elif not rewrite_complete(hit, m) or '.gates.tsv' not in listed:
+                say('rewritten module %s not reused from the cache: the entry holds no gate table, rewriting' % m)
+            else:
+                how = _place(hit / (m + '.patched.bin'), out / (m + '.patched.bin'))
+                for n in listed:
+                    if n != '.patched.bin': shutil.copyfile(str(hit / (m + n)), str(out / (m + n)))
+                say('rewritten module %s reused from the cache (%.1f MB, %s, %d outputs)'
+                    % (m, (out / (m + '.patched.bin')).stat().st_size / (1 << 20), how, len(listed)))
+                continue
         run([PY, TOOLS / 'patch_nso.py', exe_dir / m, out, m],
             log=work / 'logs' / ('rewrite_%s.log' % m), what='rewriting %s' % m)
         if hit is not None and (out / (m + '.patched.bin')).is_file():
             try:
                 dst = hit / (m + '.patched.bin'); dst.parent.mkdir(parents=True, exist_ok=True)
                 how = _place(out / (m + '.patched.bin'), dst)
-                shutil.copyfile(str(out / (m + '.fixups.tsv')), str(hit / (m + '.fixups.tsv')))
-                say('rewritten module %s kept for the next pack (%s, key %s)' % (m, how, key))
+                kept = ['.patched.bin']
+                for n in rewrite_outputs(out, m):
+                    if n == '.patched.bin': continue
+                    shutil.copyfile(str(out / (m + n)), str(hit / (m + n))); kept.append(n)
+                (hit / (m + REWRITE_OUTPUTS_MANIFEST)).write_text('\n'.join(kept) + '\n', encoding='utf-8')
+                say('rewritten module %s kept for the next pack (%s, key %s, %d outputs)'
+                    % (m, how, key, len(kept)))
+                if '.gates.tsv' not in kept:
+                    warn('%s was rewritten without a gate table: this package cannot run, and the entry will not be '
+                         'reused (see the rewrite log)' % m)
             except OSError as e:
                 warn('could not store %s in the cache (%s): this pack is fine, the next one rewrites it' % (m, e))
 
