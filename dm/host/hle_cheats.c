@@ -1125,7 +1125,16 @@ static void note_settle(cheat_t *c) {
 // operation or another pass runs is simply skipped (the next frame / tick applies again). The master switch stops
 // everything; safe mode holds the masters back too; a "set" cheat turns itself off after its pass
 static void cheats_pass(void) {
-    if (!cheat_ready()) return;
+    static int gate_logged;
+    if (!cheat_ready()) {
+        // Once per run: whether the gate is closed and on which condition. Without this a log where the cheats simply
+        // never ran is indistinguishable from one where they ran and did nothing.
+        if (!gate_logged) { gate_logged = 1;
+            LOG("cheats: held back: nnMain=%d frames=%d delay=%d", atomic_load(&g_game_main), atomic_load(&g_present_n), g_delay_frames); }
+        return;
+    }
+    if (!gate_logged) { gate_logged = 1;
+        LOG("cheats: applying now: nnMain=%d frames=%d delay=%d", atomic_load(&g_game_main), atomic_load(&g_present_n), g_delay_frames); }
     if (!atomic_load(&g_active) || !atomic_load(&g_master)) return;
     if (pthread_mutex_trylock(&g_lock)) return;
     if (!atomic_load(&g_master)) { pthread_mutex_unlock(&g_lock); return; }   // switched off while this pass waited for the lock
