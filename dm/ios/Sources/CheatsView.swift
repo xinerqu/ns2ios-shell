@@ -64,7 +64,7 @@ struct CheatsSection: View {
         }
     }
 
-    @State private var expanded = false
+    @State private var editorOpen = false
     @State private var lastRun: [String: RunState] = [:]
     @State private var lastBuild: String = ""
     @State private var crashed: [String] = []   // the entries the previous run died with (its armed file), off this launch
@@ -76,8 +76,8 @@ struct CheatsSection: View {
 
     /// The shell's own screens are English (nothing here has a localization table); this section is the one a player reads
     /// before starting, so it speaks the phone's language. zh-Hans/zh-Hant both count as Chinese.
-    private static var isChinese: Bool { (Locale.preferredLanguages.first ?? "").hasPrefix("zh") }
-    private static func L(_ en: String, _ cn: String) -> String { isChinese ? cn : en }
+    static var isChinese: Bool { (Locale.preferredLanguages.first ?? "").hasPrefix("zh") }
+    static func L(_ en: String, _ cn: String) -> String { isChinese ? cn : en }
 
     // [Name] and {Name} are both switches here: the panel is the only menu a phone has, and DM_CHEATS_PANEL makes the
     // host treat a {Name} master as an ordinary entry instead of always running it.
@@ -104,7 +104,7 @@ struct CheatsSection: View {
                              "上次开着这些时崩溃了，已自动关闭：\(crashed.joined(separator: "、"))。想再试请手动打开。"))
                     .font(.footnote).foregroundStyle(.orange)
             }
-            if names.isEmpty && !expanded {
+            if names.isEmpty {
                 Text(Self.L("Paste the codes below, then switch on the entries you want.", "把金手指文本粘贴到下面，然后打开你要的条目。"))
                     .font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.85))
             }
@@ -130,16 +130,16 @@ struct CheatsSection: View {
                 Toggle(Self.L("Allow code patches (they crash the game on the iPhone)", "允许改代码（iPhone 上会崩，谨慎）"), isOn: $allowCode)
                     .font(.body.weight(.semibold)).foregroundStyle(.white)
             }
-            DisclosureGroup(isExpanded: $expanded) {
-                TextEditor(text: Binding(get: { text }, set: setText))
-                    .font(.system(.callout, design: .monospaced))
-                    .frame(minHeight: 220)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityLabel("Cheat codes")
+            Button {
+                editorOpen = true
             } label: {
-                Text(names.isEmpty ? Self.L("Paste cheat codes", "粘贴金手指") : Self.L("Cheat codes (\(names.count) entries)", "金手指（\(names.count) 条）"))
-                    .font(.body.weight(.semibold)).foregroundStyle(.white)
+                HStack(spacing: 6) {
+                    Text(names.isEmpty ? Self.L("Paste cheat codes", "粘贴金手指") : Self.L("Cheat codes (\(names.count) entries)", "金手指（\(names.count) 条）"))
+                        .font(.body.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "square.and.pencil")
+                }
+                .foregroundStyle(.white)
             }
         } header: {
             Text(Self.L("Cheats", "金手指"))
@@ -168,11 +168,16 @@ struct CheatsSection: View {
         .onChange(of: allowCode) { _, on in
             if !on { pruneCode() }   // the switch that allowed them is gone: so are they
         }
+        .sheet(isPresented: $editorOpen) {
+            CheatEditor(initial: text) { commitText($0) }
+        }
     }
 
     // MARK: - state changes
 
-    private func setText(_ v: String) {
+    /// The editor page closed with Done: take the new text, recompute what is an instruction patch, drop the ones that are
+    /// no longer in the file, and write the result where the host reads it -- once, not on every keystroke.
+    private func commitText(_ v: String) {
         text = v
         guessedCode = Self.codeSet(v, tid: tid)   // new text, new estimate: the badges and the kept switches follow it
         let live = Set(Self.entryNames(v))
@@ -443,5 +448,51 @@ struct CheatsSection: View {
             out.append(name)
         }
         return out
+    }
+}
+
+/// The codes on a page of their own. Inside the list a TextEditor fought the scroll view for every drag -- selecting a
+/// block bounced back to the top, the keyboard covered the rows below, and each keystroke rewrote the file. Here the
+/// draft is local: Done takes it, Cancel drops it, and the keyboard has two ways out (a button above it, and a drag).
+private struct CheatEditor: View {
+    let initial: String
+    var onDone: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: String
+    @FocusState private var focused: Bool
+
+    init(initial: String, onDone: @escaping (String) -> Void) {
+        self.initial = initial
+        self.onDone = onDone
+        _draft = State(initialValue: initial)
+    }
+
+    var body: some View {
+        NavigationStack {
+            TextEditor(text: $draft)
+                .font(.system(.callout, design: .monospaced))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($focused)
+                .scrollDismissesKeyboard(.interactively)
+                .padding(.horizontal, 12)
+                .navigationTitle(CheatsSection.L("Cheat codes", "金手指"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(CheatsSection.L("Cancel", "取消")) { dismiss() }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(CheatsSection.L("Done", "完成")) { onDone(draft); dismiss() }
+                            .fontWeight(.semibold)
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button(CheatsSection.L("Hide keyboard", "收起键盘")) { focused = false }
+                    }
+                }
+        }
+        .presentationDragIndicator(.visible)
+        .onAppear { focused = true }   // the reason the page was opened: type or paste straight away
     }
 }

@@ -676,11 +676,13 @@ private struct Backdrop: View {
 // 金手指一页：面板要的目录是 main.m 给这个游戏设的 DM_CHEATS，库阶段还没设，所以直接给它。
 private struct CheatsPage: View {
     let game: LibraryGame
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
         ScrollView {
             // 不加半透明底板：字本身加粗纯白就够了（坤哥 2026-11-08 定的口径）
             CheatsSection(cheatsDir: LibraryArt.cheatsURL(game.tid), tid: game.tid)
                 .padding(.horizontal, 24)
+                .padding(.top, 52)      // room for the floating back button below
                 .padding(.vertical, 12)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -691,10 +693,21 @@ private struct CheatsPage: View {
             }
             .ignoresSafeArea()
         }
-        .navigationBarTitleDisplayMode(.inline)
-        // 和设置页同一处理：**不显示标题**（「金手指」那三个字删掉，坤哥 2026-11-08 两次点名），
-        // 导航栏底色也去掉，只留返回箭头——否则照片上会露出一块「很高的框体」。
-        .toolbarBackground(.hidden, for: .navigationBar)
+        // 整条导航栏都去掉（坤哥 2026-11-10）：留着的透明栏仍然吃掉最上面那一条的点击，内容看着在那儿却点不到。
+        // 返回改成浮在左上角的按钮，不再占高度。
+        .toolbar(.hidden, for: .navigationBar)
+        .overlay(alignment: .topLeading) {
+            Button { dismiss() } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .padding(.leading, 16)
+            .padding(.top, 6)
+            .accessibilityLabel(LibText.t("返回", "Back"))
+        }
     }
 }
 
