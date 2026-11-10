@@ -382,9 +382,12 @@ struct CheatsSection: View {
             // key-press test; neither word is an address, so reading them as one marked ordinary value codes as
             // instruction patches -- and pruneCode then kept them out of DM_CHEATS_ON. That is exactly how data codes
             // stopped running the moment TEXT_END became readable.
+            //
+            // The register nybble must NOT be required to be 0: community files write `040A0000`, where the third hex
+            // digit is M (0 = main) and the fourth is R (A = x10). Requiring R == 0 marked nothing at all.
             guard kind == 0 else { continue }
-            let region = (op >> 20) & 0xF, reg = (op >> 16) & 0xF
-            guard region == 0, reg == 0 else { continue }   // another region, or reg[R] added: the word is not the address
+            let region = (op >> 20) & 0xF
+            guard region == 0 || region >= 5 else { continue }   // 0 is main and 5–F are main too; 1 heap, 2 alias, 3 aslr, 4 absolute
             if let addr = UInt64(f[1], radix: 16), addr < end { out.insert(c) }
         }
         settle()
