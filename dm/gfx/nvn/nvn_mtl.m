@@ -5807,7 +5807,6 @@ static void pso_user_record(const char *fmt, ...) {
 }
 // Build the library from a .metallib file without permanently occupying a file descriptor: newLibraryWithURL keeps that file open for as long as the library object lives (one per game shader - of the 258 descriptors the iOS app permanently holds in a run, 213 are these,
 // while the default soft limit of an iOS process is 256; new shaders created in other acts raise it further). Here the file is mapped into memory and closed immediately, and the library is built from the in-memory data; the mapping is released when the library's data object is freed
-static __thread int t_lib_layer;
 // 在没有苹果编译器的机器上打的包，库是源码，设备端起 newLibraryWithSource 编。上游那条 xcrun 命令行
 // （dm/ios/tools/ios_metal.py 的 METAL）带两个开关，这里必须给同样的设置，否则画面就是错的：
 //  · preserveInvariance 对应 -fpreserve-invariance：[[invariant]] 的顶点位置只有在两个着色器都带这个标志时
@@ -5844,7 +5843,6 @@ static id<MTLLibrary> lib_from_file_(NSString *path, NSError **err) {
     if (fd < 0) {   // not in the folder: the library's image, whose one descriptor is shared, and only this file's pages are mapped
         int open_errno = errno; romfs_img *img; const img_ent *x = msl_image_file(path, &img); msl_map f;
         if (x && msl_image_map(img, x, &f)) {
-            t_lib_layer = memmem(f.data, f.size, "render_target_array_index", 25) != NULL;
 #ifdef DM_SHELL
             // A package made on a machine without Apple's Metal compiler carries its shaders as source inside these
             // entries (dm/gfx/tools/nometal_run.py), and a packed library reaches the host through this branch only: the
@@ -5869,7 +5867,6 @@ static id<MTLLibrary> lib_from_file_(NSString *path, NSError **err) {
     }
     if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) { if (fd >= 0) close(fd); if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"cannot open %@", path]}]; return nil; }
     size_t len = (size_t)st.st_size; void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
-    t_lib_layer = m != MAP_FAILED && memmem(m, len, "render_target_array_index", 25) != NULL;   // the library's functions use the layer: for a vertex library, its output (shader_load)
 #ifdef DM_SHELL
     // A package made on a machine without Apple's Metal compiler carries its shaders as source inside these .metallib files
     // (gfx/tools/nometal_run.py). Metal builds a library from a binary only, so hand it the source through the call
