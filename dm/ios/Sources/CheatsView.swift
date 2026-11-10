@@ -210,7 +210,17 @@ struct CheatsSection: View {
         let d = UserDefaults.standard
         let text = d.string(forKey: "cheats.text" + suffix) ?? ""
         var want = selectedSet(d.string(forKey: "cheats.on" + suffix) ?? "")
-        if !d.bool(forKey: "cheats.allowCode" + suffix) { want.subtract(codeSet(text, tid: tid)) }   // instruction patches stay out
+        // Only entries that would actually be switched on are dropped, and the log says which: a code entry left in
+        // DM_CHEATS_ON kills the game, and a value entry taken out by mistake looks exactly like "nothing works".
+        let patches = codeSet(text, tid: tid)
+        if !d.bool(forKey: "cheats.allowCode" + suffix) {
+            let dropped = want.intersection(patches)
+            want.subtract(patches)
+            if !dropped.isEmpty {
+                fputs("launcher: cheats left \(dropped.count) entry(ies) out at start (instruction patches, allow-code off): \(dropped.sorted().joined(separator: ", "))\n", stderr)
+            }
+        }
+        fputs("launcher: cheats \(entryNames(text).count) entr(ies), \(want.count) on, \(patches.count) marked as patches, folder \(dir?.path ?? "-")\n", stderr)
         apply(text: text, on: entryNames(text).filter { want.contains($0) }, log: false, dir: dir ?? Self.dir)
     }
 
@@ -334,7 +344,11 @@ struct CheatsSection: View {
         let code = Set(names.filter { isCode($0) })
         guard !code.isEmpty else { return }
         let kept = selected.subtracting(code)
-        if kept != selected { onNames = names.filter { kept.contains($0) }.joined(separator: Self.nl) }
+        if kept != selected {
+            onNames = names.filter { kept.contains($0) }.joined(separator: Self.nl)
+            let off = selected.subtracting(kept).sorted()
+            fputs("launcher: cheats kept \(off.count) entry(ies) off, they patch instructions: \(off.joined(separator: ", "))\n", stderr)
+        }
     }
 
     /// The estimate: an entry whose fixed-address stores point into main's text (below TEXT_END) patches instructions.
@@ -364,7 +378,13 @@ struct CheatsSection: View {
             guard f.count >= 2, f[0].count == 8, let op = UInt32(f[0], radix: 16) else { continue }
             let kind = op >> 28
             if kind == 5 { pointer = true; continue }                       // 58xxxxxx: loads a pointer, writes go to the object
-            guard kind == 0 || kind == 4 || kind == 8 else { continue }      // fixed-address stores
+            // Only opcode 0 stores to a fixed main offset: `0TMR00AA AAAAAAAA V…`. Opcode 4 loads a register and 8 is a
+            // key-press test; neither word is an address, so reading them as one marked ordinary value codes as
+            // instruction patches -- and pruneCode then kept them out of DM_CHEATS_ON. That is exactly how data codes
+            // stopped running the moment TEXT_END became readable.
+            guard kind == 0 else { continue }
+            let region = (op >> 20) & 0xF, reg = (op >> 16) & 0xF
+            guard region == 0, reg == 0 else { continue }   // another region, or reg[R] added: the word is not the address
             if let addr = UInt64(f[1], radix: 16), addr < end { out.insert(c) }
         }
         settle()
@@ -388,7 +408,9 @@ struct CheatsSection: View {
                 guard p.count >= 2, p[0].contains("TEXT_END") else { continue }
                 var v = p[1].trimmingCharacters(in: .whitespaces)
                 if v.hasPrefix("0x") || v.hasPrefix("0X") { v.removeFirst(2) }   // the table writes 0x2836550
-                return UInt64(v, radix: 16)
+                // A sane TEXT_END: main is tens of megabytes. A garbage value would call every write an instruction patch.
+                guard let n = UInt64(v, radix: 16), n > 0x1000, n < 0x1000_0000 else { continue }
+                return n
             }
         }
         return nil
