@@ -84,6 +84,7 @@ extern kern_return_t mach_vm_deallocate(vm_map_t target_task, mach_vm_address_t 
 #include <strings.h>
 #include <stdarg.h>
 #include <stdatomic.h>
+#include <pthread.h>   // pthread_jit_write_protect_np: the write window for a code page (main_write_pages)
 #include <ctype.h>
 
 // Limits of Atmosphère's own order (0x2000 dwords of program, 256 cheats per file): no shared cheat-site file and no
@@ -652,8 +653,15 @@ static int main_write_check(cheat_t *c, uint64_t addr, uint64_t len) {
 static void main_write_pages(uint64_t addr, uint64_t len, const void *src) {
     uint64_t off = addr - (uint64_t)(uintptr_t)g_main_mod->base; int code = off < main_rx_end();
     dm_guest_write_prepare((void *)(uintptr_t)addr, len);   // the write-protect dirty tracking must see this write coming
-    memcpy(g_alias ? g_alias + (size_t)off : (uint8_t *)(uintptr_t)addr, src, len);
-    if (code) sys_icache_invalidate((void *)(uintptr_t)addr, len);   // the game's own fetches must see the new instructions
+    uint8_t *dst = g_alias ? g_alias + (size_t)off : (uint8_t *)(uintptr_t)addr;
+    // A code page is executable memory, and iOS keeps those closed to writes in hardware (APRR, A12 and later): a plain
+    // memcpy lands, but the page it lands in is one the game is still executing from -- the same page carries real code
+    // (the cave at 0x2BB9FEC shares a 16 KB page with 0x2BB8000..0x2BB9C00). Writing one then taking it into the
+    // instruction stream is what hung Tears of the Kingdom, with no crash report. The window below is Apple's own way in,
+    // the same one hle_jit.c opens for nn::jit's GenerateCode; writes to data pages do not need it.
+    if (code) pthread_jit_write_protect_np(0);
+    memcpy(dst, src, len);
+    if (code) { pthread_jit_write_protect_np(1); sys_icache_invalidate((void *)(uintptr_t)addr, len); }   // the game's own fetches must see the new instructions
 }
 
 // Read len bytes at a guest address without any consequence for a cheat: 0 and the value, or -1 when unmapped (the dry run
