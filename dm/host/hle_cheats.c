@@ -126,8 +126,6 @@ typedef struct {
     uint8_t ask;               // meta "ask": the panel may set the value held in the program words vw[]
     uint8_t weak;              // meta: scripts/cheat_anchor.py resolved one of its anchors weakly
     uint8_t dbg_read;          // its first code write has been read back once through the game's own mapping (see cheat_write)
-    uint8_t code_logged;       // its first code write has been logged with both words (see cheat_write): the only record of
-                               // what a code patch actually changed, and of whether the old word was what the file expects
     uint8_t wcode, wdata;      // what its writes have actually reached: main's text, and anything else. last-run.txt reports it
                                // so the launcher can replace its own guess with what really happened.
     uint8_t pair_off;          // the off (restore) half of an on / off pair
@@ -714,19 +712,27 @@ static void cheat_write(cheat_t *c, uint64_t addr, uint64_t len, uint64_t val) {
     int bad = 0;
     switch (w.kind) {
         // A code patch is the one thing here that can kill the game from a distance, and until now nothing recorded it: the
-        // log said "this entry ran" and then the game stopped, with no word about what changed. Log the first code write of
-        // each entry with both words -- the old one tells whether the address still holds the instruction the file was
-        // written against (a mismatch means the offsets belong to another build, which is what makes a patch crash).
+        // log said "this entry ran" and then the game stopped, with no word about what changed. Every code write that
+        // actually changes something is logged with both words, the full width (an Atmosphère T = 8 store patches a hook
+        // AND the instruction after it, and half a line sent us looking for a wrong address once): the old word tells
+        // whether the site still holds what the file was written against. A pass that rewrites the same bytes stays silent,
+        // so a patch that runs every frame logs once.
         case WH_MAIN: {
             uint64_t off = addr - (uint64_t)(uintptr_t)g_main_mod->base;
-            if (off < main_rx_end() && !c->code_logged) {
-                size_t n = len < 4 ? (size_t)len : 4;
-                uint32_t before = 0, want = 0;
-                memcpy(&before, (void *)(uintptr_t)addr, n);
-                memcpy(&want, &val, n);
-                c->code_logged = 1;
-                LOG("cheats: \"%s\" patches code main+0x%llX (%zu bytes): 0x%08X -> 0x%08X", c->name,
-                    (unsigned long long)off, n, before, want);
+            if (off < main_rx_end()) {
+                size_t n = len < 8 ? (size_t)len : 8;
+                uint8_t before[8] = {0}, want[8] = {0};
+                memcpy(before, (void *)(uintptr_t)addr, n);
+                memcpy(want, &val, n);
+                if (memcmp(before, want, n) != 0) {
+                    char b[20] = "", w[20] = "";
+                    for (size_t i = 0; i < n; i++) {
+                        snprintf(b + i * 2, 3, "%02X", before[n - 1 - i]);
+                        snprintf(w + i * 2, 3, "%02X", want[n - 1 - i]);
+                    }
+                    LOG("cheats: \"%s\" patches code main+0x%llX (%zu bytes): 0x%s -> 0x%s", c->name,
+                        (unsigned long long)off, n, b, w);
+                }
             }
             main_write_pages(addr, len, &val);
             break;
