@@ -147,25 +147,18 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              return -1;
          }
          int k = g_changed_state == 1 ? changed_hit(off, len) : -2;
-@@ -604,8 +653,15 @@
- static void main_write_pages(uint64_t addr, uint64_t len, const void *src) {
+@@ -605,6 +654,10 @@
      uint64_t off = addr - (uint64_t)(uintptr_t)g_main_mod->base; int code = off < main_rx_end();
      dm_guest_write_prepare((void *)(uintptr_t)addr, len);   // the write-protect dirty tracking must see this write coming
--    memcpy(g_alias ? g_alias + (size_t)off : (uint8_t *)(uintptr_t)addr, src, len);
--    if (code) sys_icache_invalidate((void *)(uintptr_t)addr, len);   // the game's own fetches must see the new instructions
-+    uint8_t *dst = g_alias ? g_alias + (size_t)off : (uint8_t *)(uintptr_t)addr;
-+    // A code page is executable memory, and iOS keeps those closed to writes in hardware (APRR, A12 and later): a plain
-+    // memcpy lands, but the page it lands in is one the game is still executing from -- the same page carries real code
-+    // (the cave at 0x2BB9FEC shares a 16 KB page with 0x2BB8000..0x2BB9C00). Writing one then taking it into the
-+    // instruction stream is what hung Tears of the Kingdom, with no crash report. The window below is Apple's own way in,
-+    // the same one hle_jit.c opens for nn::jit's GenerateCode; writes to data pages do not need it.
-+    if (code) pthread_jit_write_protect_np(0);
-+    memcpy(dst, src, len);
-+    if (code) { pthread_jit_write_protect_np(1); sys_icache_invalidate((void *)(uintptr_t)addr, len); }   // the game's own fetches must see the new instructions
+     memcpy(g_alias ? g_alias + (size_t)off : (uint8_t *)(uintptr_t)addr, src, len);
++    // A code page is executable memory and iOS keeps those closed to writes in hardware; pthread_jit_write_protect_np would
++    // be the door, but it is API_UNAVAILABLE on iOS (hle_jit.c wraps it in #if !TARGET_OS_IPHONE for the same reason), so
++    // this write has no supported way in. A cave that shares its 16 KB page with code the game is running (0x2BB9FEC sits
++    // in the same page as 0x2BB8000..0x2BB9C00) then takes the game down with no crash report. Data pages are unaffected.
+     if (code) sys_icache_invalidate((void *)(uintptr_t)addr, len);   // the game's own fetches must see the new instructions
  }
  
- // Read len bytes at a guest address without any consequence for a cheat: 0 and the value, or -1 when unmapped (the dry run
-@@ -676,12 +732,60 @@
+@@ -676,12 +729,60 @@
                                   w.kind == WH_MAIN ? "main NSO" : w.kind == WH_HEAP ? "heap" : w.kind == WH_MODULE ? w.mod->name : "guest page");
      int bad = 0;
      switch (w.kind) {
@@ -227,7 +220,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (bad) cheat_fail(c, "write", addr, "page not mapped writable");
  }
-@@ -1003,6 +1107,10 @@
+@@ -1003,6 +1104,10 @@
      if (c->broken || c->dead || c->label) return 0;
      if ((half == 0) != (c->master != 0)) return 0;
      if (half == 0 && g_safe) return 0;
@@ -238,7 +231,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (half && !c->on) return 0;
      return 1;
  }
-@@ -1025,6 +1133,16 @@
+@@ -1025,6 +1130,16 @@
  // operation or another pass runs is simply skipped (the next frame / tick applies again). The master switch stops
  // everything; safe mode holds the masters back too; a "set" cheat turns itself off after its pass
  static void cheats_pass(void) {
@@ -255,7 +248,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (!atomic_load(&g_active) || !atomic_load(&g_master)) return;
      if (pthread_mutex_trylock(&g_lock)) return;
      if (!atomic_load(&g_master)) { pthread_mutex_unlock(&g_lock); return; }   // switched off while this pass waited for the lock
-@@ -1046,9 +1164,12 @@
+@@ -1046,9 +1161,12 @@
  
  // Per presented frame (hle_nvn.c dump_frame): apply the cheats and note the present, so the idle thread stands down
  // (brief: once per presented frame; the idle thread only when it is not presenting)
@@ -268,7 +261,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // The fixed ~60 Hz passes when the game is not presenting (window minimized, graphics suspended or before the first
-@@ -1065,10 +1186,14 @@
+@@ -1065,10 +1183,14 @@
  
  // Started with the first file that has a cheat in it (load_all, at launch or on "Reload cheats"), never for a game without
  // one: a run without cheats keeps no thread waking 60 times a second. It runs from then on, standing down while the game
@@ -284,7 +277,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      g_tick_started = 1;
      pthread_t th; pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
      if (pthread_create(&th, &a, cheat_tick_thread, NULL)) LOG("[RED] cheats: cannot start the ~60 Hz apply thread (errno %d), only presents apply", errno);
-@@ -1099,6 +1224,69 @@
+@@ -1099,6 +1221,69 @@
      return q;
  }
  static void files_drain(void) { dispatch_sync(files_queue(), ^{}); }
@@ -354,7 +347,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  
  // The safe-mode flag: <dir>/.cheats-running-<title> exists while some cheat runs (a plain cheat on, or the masters while
  // not in safe mode, with the master switch on); a clean exit removes it (dm_cheats_exit), a crash leaves it for the next
-@@ -1114,7 +1302,7 @@
+@@ -1114,7 +1299,7 @@
      for (int i = 0; i < g_ncheat && !any; i++) {
          const cheat_t *c = &g_cheat[i];
          if (c->label || c->broken) continue;
@@ -363,7 +356,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      char p[1100]; flag_file(p, sizeof p, "running");
      int want = any && atomic_load(&g_master);
-@@ -1235,7 +1423,7 @@
+@@ -1235,7 +1420,7 @@
      }
      for (int k = 0; k < g_non; k++)
          for (int i = 0; i < g_ncheat; i++)
@@ -372,7 +365,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
  }
  
  // ---------- typed values the panel may set ("ask") ----------
-@@ -1459,7 +1647,10 @@
+@@ -1459,7 +1644,10 @@
              if (nl > 127) while (keep > 0 && ((unsigned char)p[1 + keep] & 0xC0) == 0x80) keep--;
              snprintf(cur->name, NAME_MAX, "%.*s", keep, p + 1);
              cur->master = end == '}';
@@ -384,7 +377,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char sec[NAME_MAX];
              int mark = section_marker(cur->name, sec, sizeof sec);
              if (mark == 1) snprintf(section, sizeof section, "%s", sec);
-@@ -1766,9 +1957,14 @@
+@@ -1766,9 +1954,14 @@
      int pick = -1, other = 0;   // pick = the matching candidate; other = when a non-matching one is used by DM_CHEATS_ANY_BUILD
      int nbuild = 0, lone = -1;  // the candidates named after a build ID, and the last of them: DM_CHEATS_ANY_BUILD takes the
                                  // single such file, never a readme.txt that collect_dir listed beside it
@@ -399,7 +392,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
          if (!hex) continue;
          nbuild++; lone = i;
          if (name_is_build(nm, g_build)) {
-@@ -1785,6 +1981,7 @@
+@@ -1785,6 +1978,7 @@
              g_nothers++;
          }
      }
@@ -407,7 +400,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      if (pick < 0 && !(g_any && nbuild == 1)) {
          LOG("cheats: %s: no file for build %s", g_dir, g_build);
          if (g_nothers && atomic_load(&g_dbg)) {   // the menu's "another version" rows, this file's context
-@@ -1805,8 +2002,14 @@
+@@ -1805,8 +1999,14 @@
      if (g_main_mod && !g_alias) {
          alias_setup();
          if (g_alias) LOG("cheats: writable alias of main mapped");
@@ -424,7 +417,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      }
      if (g_alias) changed_load();   // which text words a code write must leave alone (only where code can be written at all)
      parse_file(g_path);
-@@ -1847,8 +2050,21 @@
+@@ -1847,8 +2047,21 @@
  
  // Read the switches, find the game's file and load it (load_all starts the idle apply thread when it has cheats). Called after load_modules
  // (main.c host_preload): the build ID to pick the file by comes from the modules them
@@ -446,7 +439,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
      const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
      e = getenv("DM_CHEATS");
      if (e && *e) snprintf(g_dir, sizeof g_dir, "%s", e);
-@@ -1861,10 +2077,11 @@
+@@ -1861,10 +2074,11 @@
          for (int k = 0; k < 16; k++) g_build[k] = (char)toupper((unsigned char)bid[k]);
          g_build[16] = 0;
      }
@@ -459,7 +452,7 @@ diff --git a/dm/host/hle_cheats.c b/dm/host/hle_cheats.c
              char *t = strchr(s, ',');
              if (t) *t = 0;
              if (*s) snprintf(g_on[g_non++], NAME_MAX, "%s", s);
-@@ -1877,8 +2094,46 @@
+@@ -1877,8 +2091,46 @@
          for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "main") && !g_mod[i].nro) { g_main_mod = &g_mod[i]; break; }
          folder_flags();
          if (g_main_mod) { pthread_mutex_lock(&g_lock); load_all(); pthread_mutex_unlock(&g_lock); }   // load_all maps the writable alias once a file is picked
