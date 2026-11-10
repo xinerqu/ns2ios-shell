@@ -1133,9 +1133,11 @@ static void cheats_pass(void) {
 
 // Per presented frame (hle_nvn.c dump_frame): apply the cheats and note the present, so the idle thread stands down
 // (brief: once per presented frame; the idle thread only when it is not presenting)
+static void tick_start(void);   // defined below: the first frame is what starts it
 void dm_cheats_present(void) {
     atomic_store(&g_present_ns, now_ns());
     cheats_pass();
+    tick_start();   // the first frame is what lets the ~60 Hz thread start (see tick_start)
 }
 
 // The fixed ~60 Hz passes when the game is not presenting (window minimized, graphics suspended or before the first
@@ -1152,10 +1154,18 @@ static void *cheat_tick_thread(void *arg) {
 
 // Started with the first file that has a cheat in it (load_all, at launch or on "Reload cheats"), never for a game without
 // one: a run without cheats keeps no thread waking 60 times a second. It runs from then on, standing down while the game
-// presents; a reload that loses the file leaves g_active off and the passes return at once
+// presents; a reload that loses the file leaves g_active off and the passes return at once.
+//
+// Not before the game's first frame: a code patch applied during start-up rewrites instructions the game is about to run
+// as part of its own initialization (Tears of the Kingdom calls the function at 0x04407D0 between its heap setup and its
+// init array, and a hook there leaves it with a size field of -1788 and then a hang). Waiting for the first present is
+// what a Switch player effectively gets: there the codes are written by dmnt while the title screen is already up.
+// DM_CHEATS_EARLY=1 restores the old behaviour for a code that has to be in place before the game draws anything.
+static int g_early;
 static int g_tick_started;
 static void tick_start(void) {
     if (g_tick_started) return;
+    if (!g_early && !atomic_load(&g_present_ns)) return;   // the first frame starts it (dm_cheats_present)
     g_tick_started = 1;
     pthread_t th; pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     if (pthread_create(&th, &a, cheat_tick_thread, NULL)) LOG("[RED] cheats: cannot start the ~60 Hz apply thread (errno %d), only presents apply", errno);
@@ -2024,6 +2034,7 @@ void dm_cheats_init(void) {
     // one when Play is pressed.
     if (getenv("DM_CHEATS_DEFER") && !g_after_launcher) return;
     atomic_store(&g_dbg, !!getenv("DM_CHEATS_DEBUG"));
+    { const char *y = getenv("DM_CHEATS_EARLY"); g_early = y && *y && atoi(y) != 0; }
     g_panel = getenv("DM_CHEATS_PANEL") && *getenv("DM_CHEATS_PANEL") && atoi(getenv("DM_CHEATS_PANEL"));
     const char *e = getenv("DM_CHEATS_ANY_BUILD"); g_any = e && *e && atoi(e) != 0;
     e = getenv("DM_CHEATS");
