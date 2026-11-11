@@ -65,7 +65,7 @@ private struct LibraryGame: Identifiable, Hashable {
     let version: String?
     let dataOK: Bool          // Documents/ns2ios/games/<tid>/romfs.img 存在且非空
     let chainOK: Bool         // chain 为空、DMChain 缺失、或两者相等
-    let icon: UIImage?        // 只在「没有封面」的格子里画一个小图标当记号，不再铺满整张卡（坤哥 2026-11-11）
+    let icon: UIImage?        // 游戏本身没有封面时拿它当卡片（我们自己画的那一张）；刮到真封面后就让位
     var cover: UIImage?       // 刮来的缓存或包里带的 16:9 封面；nil = 还没有，库页会去网上问一次
     let background: UIImage?  // a 16:9 picture the player picked on the device (LibraryArt.backgroundURL), nil when none
     let dmDir: URL            // the framework's dm/: its launcher.json is the settings this game offers
@@ -733,39 +733,18 @@ private struct CoverCell: View {
         ZStack {
             if let cover = game.cover {
                 Image(uiImage: cover).resizable().scaledToFill()
+            } else if let icon = game.icon {
+                // 游戏本身没有封面：用它的图标当卡片 —— 这就是「我们自己画的一张」（坤哥 2026-11-11 认可）。
+                // 刮到真封面之后这里就换成 16:9 的横幅。
+                Image(uiImage: icon).resizable().scaledToFill()
             } else {
-                // 没有封面时不再把 icon 铺满整张卡（坤哥 2026-11-11：铺满的图标太大、糊，且挡着背景）。
-                // 现在是一块深色卡 + **中间一个小图标** + 名字；刮到封面后就换成 16:9 的横幅。
-                LinearGradient(colors: [Color(white: 0.16), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
-                VStack(spacing: height * 0.06) {
-                    if let icon = game.icon {
-                        Image(uiImage: icon)
-                            .resizable().scaledToFit()
-                            .frame(width: height * 0.34, height: height * 0.34)
-                            .clipShape(RoundedRectangle(cornerRadius: height * 0.075, style: .continuous))
-                            .opacity(0.92)
-                    } else {
-                        Image(systemName: "gamecontroller.fill")
-                            .font(.system(size: height * 0.2)).foregroundStyle(.white.opacity(0.28))
-                    }
-                    Text(game.name)
-                        .font(.system(size: max(11, height * 0.062), weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.72)).lineLimit(1)
-                        .minimumScaleFactor(0.7).padding(.horizontal, 10)
-                }
+                LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
+                Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.24)).foregroundStyle(.white.opacity(0.3))
             }
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(focused ? 0.6 : 0.3), radius: focused ? 26 : 8, y: focused ? 10 : 4)
-        .overlay(alignment: .topTrailing) {
-            if game.cover == nil {
-                Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.35))
-                    .padding(10)
-                    .accessibilityLabel(LibText.t("正在取封面", "Looking for a cover"))
-            }
-        }
         .accessibilityLabel(game.name)
     }
 }
@@ -776,11 +755,11 @@ private struct Backdrop: View {
     let game: LibraryGame?
     let animated: Bool
 
-    // 背景的取舍顺序：玩家自己挑的 > 16:9 封面（刮来的或包里带的）> **App 自带的默认背景**（那张女孩趴在沙发上玩
-    // Switch 的插画，dm/ios/tools/default-background.jpg，由 shell_build.sh 拷进包里）。
-    // **不再拿 icon 当背景**：它是正方形的，铺满全屏只剩一团色块（坤哥 2026-11-11：兜底就该是那张默认插画）。
+    // 背景**只有两种**（坤哥 2026-11-11 定的，别再往里加）：玩家自己挑的那一张，或者包里自带的插画
+    // （dm/ios/tools/default-background.jpg：女孩趴在沙发上玩 Switch，shell_build.sh 拷进包）。
+    // 封面不参与背景 —— 封面是卡片的事，两码事。
     private var art: UIImage? {
-        game?.background ?? game?.cover ?? LibraryArt.defaultBackground
+        game?.background ?? LibraryArt.defaultBackground
     }
 
     // 模糊半径（pt）。**0 = 原图直接铺满**：这是坤哥点名要的（2026-11-07「几乎看不到内容，不知道成功没有」）。
@@ -798,12 +777,10 @@ private struct Backdrop: View {
     ], startPoint: .top, endPoint: .bottom)
 
     // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认背景时 id 不变，切过去就不会黑一下再亮。
+    // 背景只有两张可能的图（玩家挑的 / 默认插画），所以身份也只看这两者。
     private var artID: String {
         guard let game else { return "none" }
-        if game.background != nil { return game.tid + "/own" }
-        if game.cover != nil { return game.tid + "/cover" }
-        if LibraryArt.defaultBackground != nil { return "default" }
-        return game.tid + "/icon"
+        return game.background != nil ? game.tid + "/own" : "default"
     }
 
     var body: some View {
@@ -949,18 +926,11 @@ private struct GameDetail: View {
     private var left: some View {
         VStack(alignment: .leading, spacing: 14) {
             Group {
-                // 和库页同一套规矩：玩家挑的图 > 封面（刮来的或包里带的）> 默认插画。**不让 icon 铺满**：
-                // 正方形小图放大到 330×186 又糊又空（坤哥 2026-11-11），没有封面时就画一个小图标。
-                if let art = game.background ?? game.cover {
+                // 和库页的卡片同一套规矩：玩家挑的图 > 封面（包里带的或刮来的）> 图标当卡片。
+                if let art = game.background ?? game.cover ?? game.icon {
                     Image(uiImage: art).resizable().scaledToFill()
                 } else {
-                    LinearGradient(colors: [Color(white: 0.16), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
-                    if let icon = game.icon {
-                        Image(uiImage: icon).resizable().scaledToFit().frame(width: 88, height: 88)
-                            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    } else {
-                        Image(systemName: "gamecontroller.fill").font(.system(size: 40)).foregroundStyle(.white.opacity(0.28))
-                    }
+                    Color(white: 0.1).overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 44)).foregroundStyle(.white.opacity(0.3)))
                 }
             }
             .frame(width: 330, height: 186)
