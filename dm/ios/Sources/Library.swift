@@ -755,11 +755,13 @@ private struct Backdrop: View {
     let game: LibraryGame?
     let animated: Bool
 
-    // 背景**只有两种**（坤哥 2026-11-11 定的，别再往里加）：玩家自己挑的那一张，或者包里自带的插画
-    // （dm/ios/tools/default-background.jpg：女孩趴在沙发上玩 Switch，shell_build.sh 拷进包）。
-    // 封面不参与背景 —— 封面是卡片的事，两码事。
+    // 背景三种，按这个顺序取（坤哥 2026-11-11 原话：玩家自己挑的 > 网上缓存的 > 默认那张女孩插画）：
+    //   ① 玩家用 PhotosPicker 挑的图：Documents/ns2ios/art/<tid>.jpg
+    //   ② 缓存下来的 16:9 图（刮来的、或包里带的 cover.jpg）：Documents/ns2ios/covers/<tid>.jpg
+    //   ③ 包里自带的插画：dm/ios/tools/default-background.jpg（女孩趴在沙发上玩 Switch，shell_build.sh 拷进 dm/）
+    // 只有这三层。不拿正方形 icon 当背景（放大铺满只剩一团色块），也不存在「我们自己画一张背景」。
     private var art: UIImage? {
-        game?.background ?? LibraryArt.defaultBackground
+        game?.background ?? game?.cover ?? LibraryArt.defaultBackground
     }
 
     // 模糊半径（pt）。**0 = 原图直接铺满**：这是坤哥点名要的（2026-11-07「几乎看不到内容，不知道成功没有」）。
@@ -777,10 +779,12 @@ private struct Backdrop: View {
     ], startPoint: .top, endPoint: .bottom)
 
     // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认背景时 id 不变，切过去就不会黑一下再亮。
-    // 背景只有两张可能的图（玩家挑的 / 默认插画），所以身份也只看这两者。
+    // 三层背景各算各的：玩家挑的（每个游戏不同）、某游戏的缓存图、默认插画（所有没图的共用一张）。
     private var artID: String {
         guard let game else { return "none" }
-        return game.background != nil ? game.tid + "/own" : "default"
+        if game.background != nil { return game.tid + "/own" }
+        if game.cover != nil { return game.tid + "/cover" }
+        return "default"
     }
 
     var body: some View {
