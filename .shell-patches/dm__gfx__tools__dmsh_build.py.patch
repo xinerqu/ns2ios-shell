@@ -69,7 +69,20 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              spv_single_lane(os.path.join(w, key + '.spv'))
              r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
-@@ -926,7 +944,7 @@
+@@ -848,6 +866,12 @@
+ if want: want = set(keys)   # dependency outputs are cleaned too, so a failed pixel build cannot leave old MSL for padding
+ NJ = int(os.environ.get('J', '8'))
+ PROCS = int(os.environ.get('DMSH_PROCS', NJ))   # processes that finish shaders (fin_worker); 0: NJ threads of this one
++# Windows has no fork, and spawn cannot stand in for it here: this script does its work at import time, so every worker
++# would re-run the whole build instead of finishing one shader (patch_nso.py falls back to serial for the same reason).
++# PROCS = 0 is the path that runs the same fin() in this process's threads -- what every build did before the pool, and
++# what the packing machine gets (2026-11-11: the smoke pack on Windows died in get_context('fork')).
++if PROCS and not hasattr(os, 'fork'):
++    PROCS = 0
+ BATCH = 4 * NJ   # shaders translated and finished together: the next batch is translated while this one is finished, and a shader's working files go when it is (fin).
+ # Minecraft Dungeons II, 15,826 shaders: at most 3,279 files under the build folder with batches of 256 removed whole, 68,230 before batches (Octopath Traveler 0's stopped build)
+ # A full build starts from no shader outputs, a partial one from none of the keys it builds, so what a run leaves is what it built: every output is restored from the cache anyway.
+@@ -926,7 +950,7 @@
          sys.exit(f'[RED] {name} holds no record of shader {key}, which the shader map names: the package and the map come from different shader_split.py runs{old}; '
                   f'split the shaders again (the NSP script does when {dm_dir} is removed)')
      o, e = recs[key]
@@ -78,7 +91,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  for key in keys: digests[key] = shader_key(key, *rec_of(key))
  def plain_digest(k):   # a paired pixel shader's key, also when it is not built this time
      if k in digests: return digests[k]
-@@ -969,7 +987,12 @@
+@@ -969,7 +993,12 @@
      try:
          if key in cache_hits and restored(key, wb):
              refl = json.loads(output_of('mac', key + '_b.json'))
@@ -92,7 +105,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              if refl['stage'] == 'vs': write_refl(key, pull_finish(key, src, vin_finish(key, src, refl)))
              if refl['stage'] == 'ps': refl.update(ps_libraries(key, os.path.join(out, key + '_b.metal'), src, refl['bindings'])); write_refl(key, refl)   # stored without them (publish_cache)
              return key, 'ok', '', refl
-@@ -1082,6 +1105,8 @@
+@@ -1082,6 +1111,8 @@
  print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
  print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
        f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')
