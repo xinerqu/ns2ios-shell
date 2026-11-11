@@ -178,6 +178,35 @@ static NSString *shell_game_dm_for(NSString *doc, NSString *want_tid, char *err,
             snprintf(err, errn, "No game data: put romfs.img in the Files app, this app's ns2ios/games/%s folder.", tid.UTF8String);
             return nil;
         }
+        // 这份数据是不是这个 framework 打出来的那一版：打包器把镜像的身份写进 <fw>/romfs.id，格式与判据都是上游的
+        // （dm/host/romfs_identity.h：镜像大小 + 头与索引的 FNV-1a 哈希，不读文件数据）。库模式下数据由玩家自己拷进
+        // 「文件」，拿错版本以前只表现为进游戏后莫名崩或花屏，这里先拦一次。没有 romfs.id 的 framework（这条检查
+        // 之前打的包）照旧接受任何完整镜像，行为不变。
+        {
+            romfs_id want, got;
+            int verdict = romfs_id_check([fw stringByAppendingPathComponent:@"romfs.id"].fileSystemRepresentation,
+                                         romfs.fileSystemRepresentation, &want, &got);
+            if (verdict == ROMFS_ID_BAD) {
+                snprintf(g_boot_message, sizeof g_boot_message,
+                         "This game's identity file (romfs.id) cannot be read. Install the app again.");
+                fprintf(stderr, "[RED] boot: %s (%s)\n", g_boot_message, base.UTF8String);
+                snprintf(err, errn, "This copy of the game is damaged: install the app again.");
+                return nil;
+            }
+            if (verdict != ROMFS_ID_OK && verdict != ROMFS_ID_NONE) {
+                snprintf(g_boot_message, sizeof g_boot_message,
+                         "The game data in this app is another version of the game. This app needs %llu bytes (index %016llx); ns2ios/games/%s/romfs.img has %llu bytes (index %016llx). Copy the romfs.img that came with this app's version of the game.",
+                         (unsigned long long)want.size, (unsigned long long)want.index, tid.UTF8String,
+                         (unsigned long long)got.size, (unsigned long long)got.index);
+                fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
+                snprintf(err, errn, "Another version of the game data: replace ns2ios/games/%s/romfs.img with the one that came with this version.", tid.UTF8String);
+                return nil;
+            }
+            // 判据：有这个 id 的包要打这一行，没有的要打下一行 —— 否则分不清「验过了」和「根本没验」
+            if (verdict == ROMFS_ID_OK) fprintf(stderr, "boot: game data identity %llu bytes, index %016llx\n",
+                                                (unsigned long long)want.size, (unsigned long long)want.index);
+            else fprintf(stderr, "boot: no romfs.id in %s, any complete game data is accepted\n", base.UTF8String);
+        }
         setenv("DM_GAME_IMAGE", exe.fileSystemRepresentation, 1);   // loader.c reads the modules from this framework, not from Frameworks/Guest
         setenv("DM_APP_DM", fwdm.fileSystemRepresentation, 1);      // Launcher.swift reads this game's dm/launcher.json from here
         // 从这里进游戏的都走过库页，而库页的设置页一律把值存在 game.<tid> 下，所以这里必须跟着用 per-game 键

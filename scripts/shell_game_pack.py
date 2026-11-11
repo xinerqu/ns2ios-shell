@@ -26,7 +26,7 @@ from pathlib import Path
 NXN = Path(__file__).resolve().parent.parent
 TOOLS = NXN / 'dm' / 'tools'
 sys.path.insert(0, str(TOOLS))
-import guest_dylib, nacp                                                    # noqa: E402
+import guest_dylib, nacp, romfs_image                                # noqa: E402
 
 KEEP_TABLES = ('shader_map.tsv', 'c1_full.tsv', 'cb_extent.tsv', 'pso_manifest.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv',
                'env.txt', 'launcher.json')
@@ -103,6 +103,20 @@ def write_ipa(shell, lib, ipa):
                     if src.is_file():
                         o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw.name, src.relative_to(fw).as_posix()))
     say('package %s (%s + %d game(s): %s)' % (ipa, shell.name, len(have), ', '.join(p.name for p in have)))
+
+
+def write_data_identity(fwdir, img, tid, version, build):
+    """The framework's romfs.id: the identity of the image the game data was packed from (dm/host/romfs_identity.h).
+    size and index decide a match, title/version/build only name the image in the app's message. A folder has none (upstream
+    writes none for one), and a stale file has to go: the same library packs the game again with the other form sometimes.
+    Returns the identity line, '' for a folder; raises ValueError for an image that cannot be identified."""
+    fwdir, img = Path(fwdir), Path(img)
+    if not img.is_file():
+        (fwdir / 'romfs.id').unlink(missing_ok=True)
+        return ''
+    line = romfs_image.identity(str(img), tid, version, build)
+    (fwdir / 'romfs.id').write_text(line + '\n', encoding='ascii', newline='\n')
+    return line
 
 
 def main():
@@ -234,6 +248,16 @@ def main():
         for src in sorted((app / extra).rglob('*')):
             if src.is_file(): link_or_copy(src, data / extra / src.relative_to(app / extra))
     say('data folder %s: %s' % (data, ', '.join(how) or 'nothing'))
+
+    # ---- 这份数据是不是这个 framework 打出来的那一版（上游的 romfs.id，dm/host/romfs_identity.h）----
+    # 库模式下数据是玩家自己拷进「文件」的：拿错版本以前只表现为进游戏后莫名崩或花屏。framework 里带上镜像的身份，
+    # 壳在启动前比一次（main.m shell_game_dm_for），对不上就说清楚要哪一版，不硬着头皮进。
+    try:
+        ident = write_data_identity(fwdir, data / 'romfs.img', tid, game['display_version'],
+                                    info.get('CFBundleVersion', ''))
+    except ValueError as e:
+        die('the game data has no usable identity: %s' % e)
+    say('game data identity: %s' % (ident or 'none (a RomFS folder)'))
 
     if a.ipa:
         shell = Path(a.shell) if a.shell else next(iter(sorted(NXN.parent.glob('ns2ios-*.zip')) or
