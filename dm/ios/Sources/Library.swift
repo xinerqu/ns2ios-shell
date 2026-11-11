@@ -428,6 +428,15 @@ private struct LibraryView: View {
         NavigationStack {
             ZStack {
                 Backdrop(game: model.games.first { $0.tid == shown } ?? current, animated: !reduceMotion)
+                // 整屏横滑切游戏：这一层透明、只收拖动手势 —— 落在**背景上**的滑动就能换上一个/下一个，
+                // 不必去点那一排小图标（坤哥 2026-11-11）。图标条与按钮在这层之上，各收自己的事件。
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 30).onEnded { value in
+                        let dx = value.translation.width
+                        guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
+                        step(dx < 0 ? 1 : -1)
+                    })
                 VStack(spacing: 0) {
                     topBar
                     Spacer(minLength: 0)
@@ -484,47 +493,43 @@ private struct LibraryView: View {
 
     // MARK: the flow
 
+    // 底部图标条（坤哥 2026-11-11）：背景是主角，图标只当导航。
+    // **命名来源**：framework/icon.png 只有 180×180，所以当前图标 92pt（3x = 276px，放大约 1.5 倍）就够，
+    // 再大只是糊；相邻的 58pt 基本 1:1。想整体变大变小只改这三个数（side/neighbour/unit）。
     private var flow: some View {
-        GeometryReader { geo in
-            // 卡片高度：坤哥 2026-11-11「图标别那么大，背景要多露一点」→ 250 降到 214。
-            // 这是一处纯视觉的数字，觉得还大/太小就改这一个值。
-            let h = min(geo.size.height, 214)
-            // 卡片就是游戏图标，正方形，和真机 Switch 主界面一样；刮来的 16:9 图只做背景，不上卡片。
-            // **滚动单元统一按最宽的那张算宽**：留白原来按"当前这张"算，滑动中 current 一变留白就跟着变，
-            // 整排内容平移 → 松手被拉回原来的位置（坤哥：第 2、第 3 个很难切）。
-            let unit = model.games.map { cellWidth($0, height: h) }.max() ?? h
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 22) {
-                    ForEach(model.games) { game in
-                        Button { artTapped(game) } label: {
-                            CoverCell(game: game, width: cellWidth(game, height: h), height: h, focused: game.tid == selected)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: unit)
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 10) {
+                ForEach(model.games) { game in
+                    let focused = game.tid == selected
+                    CoverCell(game: game, side: focused ? 92 : 58, focused: focused)
+                        .frame(width: 92)          // 单元宽固定：滑动中留白才不会跟着 current 变
                         .id(game.tid)
                         // 这张卡露出来了：玩家没挑过背景、也还没有刮来的图，就去网上问一次背景用图
                         .task(id: game.tid) { model.needBackdropArt(game) }
-                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                            content
-                                .scaleEffect(phase.isIdentity ? 1 : 0.78)
-                                .opacity(phase.isIdentity ? 1 : 0.62)
-                        }
+                        // 长按图标 = 给这个游戏换背景（相册里挑）。**单击不再换背景**：整屏滑动切游戏之后，
+                        // 误触一个 58pt 的小图标就弹相册太容易了（坤哥 2026-11-11）。
+                        .onLongPressGesture(minimumDuration: 0.4) { artTapped(game) }
                         .disabled(model.starting != nil && model.starting != game.tid)
-                    }
                 }
-                .scrollTargetLayout()
             }
-            .contentMargins(.horizontal, max(0, (geo.size.width - unit) / 2), for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $selected, anchor: .center)
-            .scrollIndicators(.hidden)
-            .frame(height: h + 18)
+            .scrollTargetLayout()
         }
-        .frame(maxHeight: 232)
-        .overlay(alignment: .center) {
+        .contentMargins(.horizontal, max(0, (UIScreen.main.bounds.width - 92) / 2 - 32), for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $selected, anchor: .center)
+        .scrollIndicators(.hidden)
+        .frame(height: 104)
+        .overlay {
             if model.games.isEmpty { emptyHint }
         }
+    }
+
+    /// 整屏横滑切上一个/下一个：滑动的落点在**背景上**（图标条以外的地方），不靠点小图标（坤哥 2026-11-11）。
+    private func step(_ delta: Int) {
+        guard let tid = current?.tid, let i = model.games.firstIndex(where: { $0.tid == tid }) else { return }
+        let j = i + delta
+        guard model.games.indices.contains(j) else { return }
+        withAnimation(.easeOut(duration: 0.22)) { selected = model.games[j].tid }
     }
 
     // MARK: the caption under the covers
@@ -571,9 +576,11 @@ private struct LibraryView: View {
         NavigationLink { if let g = current { CheatsPage(game: g) } } label: {
             HStack(spacing: 5) {
                 Image(systemName: "wand.and.stars")
-                Text(LibText.t("金手指", "CHEATS")).font(.footnote.weight(.semibold))
+                // 字号：坤哥 2026-11-11「几个字不能太小」—— footnote(13) → 15，窄了自动缩一点
+                Text(LibText.t("金手指", "CHEATS")).font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.85)
             }
-            .frame(width: 116, height: 40)
+            .frame(width: 96, height: 44)
             .background(.white.opacity(0.12), in: Capsule())
             .foregroundStyle(.white.opacity(0.9))
         }
@@ -585,9 +592,10 @@ private struct LibraryView: View {
         NavigationLink(value: current) {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3")
-                Text(LibText.t("设置", "SETTINGS")).font(.footnote.weight(.semibold))
+                Text(LibText.t("设置", "SETTINGS")).font(.system(size: 15, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.85)
             }
-            .frame(width: 116, height: 40)
+            .frame(width: 96, height: 44)
             .background(.white.opacity(0.12), in: Capsule())
             .foregroundStyle(.white.opacity(0.9))
         }
@@ -608,9 +616,11 @@ private struct LibraryView: View {
                 } else {
                     Image(systemName: "play.fill")
                 }
-                Text(LibText.t("开始游戏", "PLAY")).font(.subheadline.weight(.semibold))
+                Text(LibText.t("开始游戏", "PLAY")).font(.system(size: 16, weight: .semibold))
+                    .lineLimit(1).minimumScaleFactor(0.9)
             }
-            .frame(width: 210, height: 40)
+            // 原来 210 宽，坤哥 2026-11-11「太长了」→ 160；高度 40 → 44 好按
+            .frame(width: 160, height: 44)
             .background(
                 LinearGradient(colors: [Color(red: 0.29, green: 0.42, blue: 1.0), Color(red: 0.55, green: 0.30, blue: 0.95)],
                                startPoint: .leading, endPoint: .trailing),
@@ -632,23 +642,19 @@ private struct LibraryView: View {
                     .font(.caption2).foregroundStyle(c.dataOK ? .green.opacity(0.85) : .yellow.opacity(0.9))
             }
             Spacer(minLength: 0)
-            // 这个功能原来只有「点封面」一个入口，没有任何提示，用户会以为它不存在
+            // 长按图标换背景（单击不再触发 —— 整屏滑动切游戏后，单击小图标弹相册太容易误触）
             if current?.background == nil {
-                Text(LibText.t("点卡片可设置背景图", "Tap a card to set its background"))
+                Text(LibText.t("长按图标可设置背景图", "Press and hold an icon to set its background"))
                     .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
             } else if model.games.count > 1 {
-                Text(LibText.t("左右滑动切换", "Swipe to switch"))
+                Text(LibText.t("背景上左右滑动切换", "Swipe anywhere to switch"))
                     .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
             }
         }
         .frame(height: 20)
     }
 
-    /// 一个封面要多宽：横幅按 16:9，图标按正方形（ViewBuilder 里不能声明函数，放在这里）。
-    // 卡片就是游戏图标：正方形，和真机 Switch 的主界面一样。刮来的 16:9 图**不上卡片**（那是背景用的）。
-    private func cellWidth(_ game: LibraryGame, height: CGFloat) -> CGFloat { height }
-
-    /// 点大封面：给这个游戏设 16:9 背景，直接开相册。
+    /// 长按图标：给这个游戏设 16:9 背景，直接开相册。（单击不做事 —— 见 flow 里的说明）
     /// **不要**在 alert 的按钮里开相册：alert 的 action 是在转场开始前就调用的，那一刻宿主 VC 还 present 着
     /// UIAlertController，UIKit 会直接丢弃后面这次 present——而且 picking 从此停在 true，之后每次点击都是
     /// 「true → true」，SwiftUI 认为没变化，就再也不尝试了（2026-11-07 真机症状：点了完全没反应）。
@@ -719,27 +725,28 @@ private struct LibraryView: View {
     }
 }
 
-// MARK: - One cover in the flow
+// MARK: - One icon in the strip
 
+/// 图标条里的一个方块：就是游戏自己的 icon（framework/icon.png，180×180 的源图）。
+/// 当前那个 92pt、相邻 58pt —— 源图只有 180，再放大只是糊，所以不做更大的卡了（坤哥 2026-11-11）。
 private struct CoverCell: View {
     let game: LibraryGame
-    let width: CGFloat
-    let height: CGFloat
+    let side: CGFloat
     let focused: Bool
 
     var body: some View {
         ZStack {
             if let icon = game.icon {
-                // 封面就是游戏自己的 icon（坤哥 2026-11-11）。没有 icon 就等于没有封面，下面走占位。
-                Image(uiImage: icon).resizable().scaledToFill()
+                Image(uiImage: icon).resizable().scaledToFit()
             } else {
                 LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
-                Image(systemName: "gamecontroller.fill").font(.system(size: height * 0.24)).foregroundStyle(.white.opacity(0.3))
+                Image(systemName: "gamecontroller.fill").font(.system(size: side * 0.36)).foregroundStyle(.white.opacity(0.3))
             }
         }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(focused ? 0.6 : 0.3), radius: focused ? 26 : 8, y: focused ? 10 : 4)
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: side * 0.22, style: .continuous))
+        .shadow(color: .black.opacity(focused ? 0.55 : 0.25), radius: focused ? 14 : 6, y: focused ? 6 : 3)
+        .opacity(focused ? 1 : 0.72)
         .accessibilityLabel(game.name)
     }
 }
