@@ -49,6 +49,12 @@ func localizedName(_ names: [String: String], fallback: String) -> String {
         guard let cut = tag.lastIndex(of: "-") else { break }
         tag = String(tag[tag.startIndex..<cut])
     }
+    // 同一门语言的别的写法也算命中：中文系统里包里只有繁体/简体另一种时，仍显示中文，不退到英文
+    // （坤哥 2026-11-11：中文系统要中文；包里没有这门语言的名才退英文）
+    let base = preferred.split(separator: "-").first.map(String.init) ?? preferred
+    for key in table.keys.sorted() where key == base || key.hasPrefix(base + "-") {
+        if let hit = table[key] { return hit }
+    }
     for key in table.keys.sorted() where key == "en-us" || key == "en" || key.hasPrefix("en-") {
         if let hit = table[key] { return hit }
     }
@@ -419,6 +425,9 @@ private struct LibraryView: View {
     @State private var artError: String?          // 选图/写盘失败时显示在标题下面一行
     @State private var artNote: String?           // 「背景已更新」这种一次性提示，2.6 秒后自己消失
     @State private var artNoteSeq = 0
+    @State private var dragProgress: CGFloat = 0  // 跟手拖动进度，单位「格」，右滑为正（0 = 停在当前游戏）
+    @State private var stride: CGFloat = 320      // 一格的距离，由 strip 量出来给手势换算
+    @State private var lightArt = false           // 背景偏亮 → 所有文字用黑，否则白（只有这两种）
 
     private var current: LibraryGame? {
         model.games.first { $0.tid == selected } ?? model.games.first
@@ -427,28 +436,45 @@ private struct LibraryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Backdrop(game: model.games.first { $0.tid == shown } ?? current, animated: !reduceMotion)
-                // 整屏横滑切游戏：这一层透明、只收拖动手势 —— 落在**背景上**的滑动就能换上一个/下一个，
-                // 不必去点那一排小图标（坤哥 2026-11-11）。图标条与按钮在这层之上，各收自己的事件。
+                Backdrop(game: model.games.first { $0.tid == shown } ?? current, animated: !reduceMotion, light: lightArt)
+                // 整屏横向拖动：**跟手**——拖多少移多少，松手过阈值才换，没过就弹回来（坤哥 2026-11-11）。
+                // 这一层透明，落在背景上的拖动归它；图标条和按钮在它上面，各收自己的事件。
                 Color.clear
                     .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 30).onEnded { value in
-                        let dx = value.translation.width
-                        guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
-                        step(dx < 0 ? 1 : -1)
-                    })
-                VStack(spacing: 10) {
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                guard abs(value.translation.width) > abs(value.translation.height) else {
+                                    if dragProgress != 0 { dragProgress = 0 }
+                                    return
+                                }
+                                // 只用横位移；夹在 ±1.2 格内，免得一下拖飞好几个
+                                let p = value.translation.width / max(1, stride)
+                                dragProgress = max(-1.2, min(1.2, p))
+                            }
+                            .onEnded { value in
+                                let predicted = value.predictedEndTranslation.width / max(1, stride)
+                                var delta = 0
+                                if dragProgress > 0.32 || predicted > 0.55 { delta = -1 }
+                                else if dragProgress < -0.32 || predicted < -0.55 { delta = 1 }
+                                withAnimation(morph) {
+                                    dragProgress = 0
+                                    if delta != 0 { step(delta) }
+                                }
+                            }
+                    )
+                VStack(spacing: 8) {
+                    caption                 // 名字 + VERSION 顶到最上面（坤哥 2026-11-11）
                     topBar
-                    caption                 // 游戏名 + VERSION 放顶部（坤哥 2026-11-11）
                     Spacer(minLength: 0)
-                    footer                  // 「长按图标换背景」这类提示，紧贴图标条上面
                     strip                   // 只露三个：左/中/右
-                    playButton              // 三个按钮压到最底部
+                    playButton              // 三个按钮贴近底部
+                    footer                  // 「可以玩 / 缺少数据」+ 提示，压到最底
                 }
                 .padding(.horizontal, 32)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .animation(.spring(response: 0.34, dampingFraction: 0.86), value: selectedIndex)
+                .padding(.top, 2)
+                .padding(.bottom, 6)
+                .animation(morph, value: selectedIndex)
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LibraryGame.self) { game in GameDetail(model: model, game: game) }
@@ -465,6 +491,12 @@ private struct LibraryView: View {
             .task(id: selected) {
                 for game in visibleGames { model.needBackdropArt(game) }
             }
+            // 背景换好之后量一下亮不亮：亮的用黑字、暗的用白字（坤哥 2026-11-11，只这两种）。
+            // 键用「哪张图」而不是「哪个游戏」：换了背景（相册挑/刮回来）就得重新量一次。
+            .task(id: artKey) {
+                let light = Backdrop.isLight(Backdrop.artFor(model.games.first { $0.tid == shown } ?? current))
+                if light != lightArt { withAnimation(.easeInOut(duration: 0.3)) { lightArt = light } }
+            }
             .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
             .onChange(of: picked) { _, item in
                 guard let item, let game = artGame else { return }
@@ -474,23 +506,23 @@ private struct LibraryView: View {
         .preferredColorScheme(.dark)
     }
 
-    // MARK: top bar — weak on purpose, the covers own the screen
+    // MARK: top bar（一行小字：这是哪个 App、几款游戏、刷新）
 
     private var topBar: some View {
         HStack(spacing: 10) {
-            Text("ns2ios").font(.subheadline.weight(.bold)).foregroundStyle(.white)
+            Text("ns2ios").font(.subheadline.weight(.bold)).foregroundStyle(ink)
             Text(LibText.t("游戏库", "GAME LIBRARY"))
                 .font(.caption2.weight(.semibold)).tracking(2)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(ink.opacity(0.8))
             Spacer(minLength: 0)
             Text(LibText.t("\(model.games.count) 款游戏", "\(model.games.count) games"))
-                .font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                .font(.footnote.weight(.semibold)).foregroundStyle(ink)
             Button { model.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .semibold))
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(ink)
             .accessibilityLabel(LibText.t("刷新", "Refresh"))
         }
     }
@@ -503,32 +535,36 @@ private struct LibraryView: View {
         return model.games.firstIndex { $0.tid == tid } ?? 0
     }
 
-    /// 一屏只看三个：上一个在左、当前居中、下一个在右（坤哥 2026-11-11）。
-    /// 切换时整排**滑动过去**，不是换内容跳过去：切走的那个边滑边缩到 58，切过来的从边上边滑边长到 92，
-    /// 再外面那个 |offset|≥2 淡出到 0 —— 位置/尺寸/透明度都由 `selectedIndex` 驱动，
-    /// 外面那层 `.animation(…, value: selectedIndex)` 负责把它们串成一段动画。
-    /// 尺寸依据：framework/icon.png 只有 180×180，92pt@3x=276px 已经是放大 1.5 倍，再大只是糊。
+    /// 一屏三个：上一个贴左、当前居中、下一个贴右（坤哥 2026-11-11）。
+    /// **跟手**：`dragProgress` 是「格」为单位的拖动进度（右滑为正），焦点位置 = selectedIndex - dragProgress，
+    /// 所以手指慢慢拉它慢慢移、松手才由 step() 决定去下一个还是弹回来。
+    /// 切走的边滑边缩到 58、切来的边长到 92；|offset| 再往外淡出到 0。
+    /// 尺寸依据：framework/icon.png 只有 180×180，92pt@3x=276px 已放大 1.5 倍，再大只是糊。
     private var strip: some View {
         GeometryReader { geo in
             let mid = geo.size.width / 2
-            let edgeInset: CGFloat = 62                  // 左右两个图标的中心离屏幕边的距离
-            let stride = max(0, mid - edgeInset)
+            let edgeInset: CGFloat = 62                  // 左右两个图标中心离屏幕边的距离
+            let gap = max(1, mid - edgeInset)            // 一格的距离
+            let focus = CGFloat(selectedIndex) - dragProgress
             ZStack {
                 ForEach(Array(model.games.indices), id: \.self) { i in
                     let game = model.games[i]
-                    let offset = CGFloat(i - selectedIndex)
-                    let focused = offset == 0
-                    CoverCell(game: game, side: focused ? 92 : 58, focused: focused)
-                        .zIndex(focused ? 1 : 0)
-                        .position(x: mid + offset * stride, y: geo.size.height / 2)
-                        .opacity(abs(offset) <= 1 ? 1 : 0)
-                        // 长按图标 = 给这个游戏换背景（相册里挑）。单击不做事：整屏滑动切游戏之后，
-                        // 58pt 的小图标上单击就弹相册太容易误触（坤哥 2026-11-11）。
+                    let offset = CGFloat(i) - focus
+                    let near = min(1, abs(offset))       // 0 = 中间，1 = 边上（更远也是 1）
+                    CoverCell(game: game, side: 92 - near * 34, focused: abs(offset) < 0.5)
+                        .zIndex(Double(1 - near))
+                        .position(x: mid + offset * gap, y: geo.size.height / 2)
+                        .opacity(1 - max(0, abs(offset) - 1) * 1.6)
+                        // 点旁边的图标 = 切到它，跟滑动同一个结果（坤哥 2026-11-11）
+                        .onTapGesture { if abs(offset) > 0.5 { withAnimation(morph) { selected = game.tid } } }
+                        // 长按 = 给这个游戏换背景（相册里挑）；单击不再弹相册，免得误触
                         .onLongPressGesture(minimumDuration: 0.4) { artTapped(game) }
                         .disabled(model.starting != nil && model.starting != game.tid)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .onAppear { stride = gap }
+            .onChange(of: geo.size.width) { _, w in stride = max(1, w / 2 - edgeInset) }
         }
         .frame(height: 104)
         .overlay {
@@ -542,49 +578,51 @@ private struct LibraryView: View {
         return [i - 1, i, i + 1].filter { model.games.indices.contains($0) }.map { model.games[$0] }
     }
 
-    /// 整屏横滑切上一个/下一个：滑动的落点在**背景上**（图标条以外的地方），不靠点小图标（坤哥 2026-11-11）。
+    /// 切一个（+1 下一个，-1 上一个）。由拖动松手、点图标、整屏横滑三处调用。
     private func step(_ delta: Int) {
         let j = selectedIndex + delta
         guard model.games.indices.contains(j) else { return }
         selected = model.games[j].tid
     }
 
-    // MARK: the caption under the covers
+    private var morph: Animation { .spring(response: 0.34, dampingFraction: 0.88) }
+
+    // MARK: 名字 + VERSION（最上面，坤哥 2026-11-11：够到顶）
 
     private var caption: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text(current?.name ?? LibText.t("还没有游戏", "No games yet"))
-                .font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
+                .font(.system(size: 26, weight: .bold)).foregroundStyle(ink)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .id(current?.tid ?? "none")
-                // 名字在顶部：新名字从上面下来、旧名字往上走（原来在图标下面，方向是反的）
                 .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity),
                                         removal: .move(edge: .top).combined(with: .opacity)))
             if let v = current?.version, !v.isEmpty {
                 Text("VERSION " + v)
                     .font(.system(size: 10, weight: .medium)).tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(ink.opacity(0.6))
                     .id("v" + (current?.tid ?? "none") + v)
             }
             if let c = current, !c.chainOK {
                 Text(LibText.t("用旧版壳打包，建议重新打包", "Packed for an older shell — repack recommended"))
-                    .font(.caption2).foregroundStyle(.orange.opacity(0.9))
+                    .font(.caption2).foregroundStyle(.orange)
             }
             if let tid = current?.tid, let e = model.errors[tid] {
-                Text(e).font(.caption2).foregroundStyle(.red.opacity(0.95)).lineLimit(2)
+                Text(e).font(.caption2).foregroundStyle(.red).lineLimit(2)
             }
             if let artError {
-                Text(artError).font(.caption2).foregroundStyle(.orange.opacity(0.95)).lineLimit(2)
+                Text(artError).font(.caption2).foregroundStyle(.orange).lineLimit(2)
             }
             if let artNote {
                 Label(artNote, systemImage: "checkmark.circle.fill")
-                    .font(.caption2).foregroundStyle(.green.opacity(0.95)).lineLimit(2)
+                    .font(.caption2).foregroundStyle(.green).lineLimit(2)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.easeInOut(duration: 0.25), value: current?.tid)
-        .padding(.top, 6)
-        .frame(height: 74)
     }
+
+    // MARK: 三个按钮（最底部）
 
     private var playButton: some View {
         HStack(spacing: 10) { playAction; settingsLink; cheatsLink }
@@ -594,13 +632,12 @@ private struct LibraryView: View {
         NavigationLink { if let g = current { CheatsPage(game: g) } } label: {
             HStack(spacing: 5) {
                 Image(systemName: "wand.and.stars")
-                // 字号：坤哥 2026-11-11「几个字不能太小」—— footnote(13) → 15，窄了自动缩一点
                 Text(LibText.t("金手指", "CHEATS")).font(.system(size: 15, weight: .semibold))
                     .lineLimit(1).minimumScaleFactor(0.85)
             }
             .frame(width: 96, height: 44)
-            .background(.white.opacity(0.12), in: Capsule())
-            .foregroundStyle(.white.opacity(0.9))
+            .background(chipFill, in: Capsule())
+            .foregroundStyle(ink.opacity(0.92))
         }
         .buttonStyle(PressScaleStyle())
         .disabled(current == nil)
@@ -614,8 +651,8 @@ private struct LibraryView: View {
                     .lineLimit(1).minimumScaleFactor(0.85)
             }
             .frame(width: 96, height: 44)
-            .background(.white.opacity(0.12), in: Capsule())
-            .foregroundStyle(.white.opacity(0.9))
+            .background(chipFill, in: Capsule())
+            .foregroundStyle(ink.opacity(0.92))
         }
         .buttonStyle(PressScaleStyle())
         .disabled(current == nil)
@@ -652,24 +689,38 @@ private struct LibraryView: View {
         .opacity(current?.dataOK == false ? 0.45 : 1)
     }
 
+    // MARK: 最底一行：状态 + 提示（坤哥 2026-11-11：可游玩/缺少数据放到开始游戏下面）
+
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
             if let c = current {
                 Label(c.dataOK ? LibText.t("可以玩", "Ready") : LibText.t("缺少游戏数据", "Game data missing"),
                       systemImage: c.dataOK ? "checkmark.circle.fill" : "tray.and.arrow.down.fill")
-                    .font(.caption2).foregroundStyle(c.dataOK ? .green.opacity(0.85) : .yellow.opacity(0.9))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(c.dataOK ? Color.green : Color.yellow)
             }
             Spacer(minLength: 0)
-            // 长按图标换背景（单击不再触发 —— 整屏滑动切游戏后，单击小图标弹相册太容易误触）
             if current?.background == nil {
-                Text(LibText.t("长按图标可设置背景图", "Press and hold an icon to set its background"))
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+                Text(LibText.t("长按图标换背景", "Press and hold an icon for its background"))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(ink.opacity(0.85))
             } else if model.games.count > 1 {
                 Text(LibText.t("背景上左右滑动切换", "Swipe anywhere to switch"))
-                    .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
+                    .font(.footnote.weight(.semibold)).foregroundStyle(ink.opacity(0.85))
             }
         }
         .frame(height: 20)
+    }
+
+    // MARK: 文字自适应：背景偏亮就用黑字（坤哥 2026-11-11，只有黑白两种）
+
+    private var ink: Color { lightArt ? .black : .white }
+    private var chipFill: Color { ink.opacity(0.14) }
+
+    /// 背景身份：当前游戏 + 那张图本身（换了图就变），用来触发亮度重算。
+    private var artKey: String {
+        let own = current?.background.map { String(ObjectIdentifier($0).hashValue) } ?? "-"
+        let fetched = current?.fetchedArt.map { String(ObjectIdentifier($0).hashValue) } ?? "-"
+        return "\(current?.tid ?? "-")|\(own)|\(fetched)"
     }
 
     /// 长按图标：给这个游戏设 16:9 背景，直接开相册。（单击不做事 —— 见 flow 里的说明）
@@ -774,29 +825,55 @@ private struct CoverCell: View {
 private struct Backdrop: View {
     let game: LibraryGame?
     let animated: Bool
+    var light = false            // 背景偏亮：文字用黑、遮罩改提亮（由 LibraryView 量出来传进来）
 
     // 背景三层，按序取（坤哥 2026-11-11 原话：玩家自己挑的 > 网上缓存的 > 默认那张女孩插画）：
     //   ① 玩家用 PhotosPicker 挑的图：Documents/ns2ios/art/<tid>.jpg
     //   ② 刮来的 16:9 图（网络缓存）：Documents/ns2ios/fetched/<tid>.jpg
     //   ③ 包里自带的插画：dm/ios/tools/default-background.jpg（女孩趴在沙发上玩 Switch，shell_build.sh 拷进 dm/）
     // 只有这三层。**封面不参与**（封面是卡片上的 icon），也不拿正方形 icon 当背景。
-    private var art: UIImage? {
+    static func artFor(_ game: LibraryGame?) -> UIImage? {
         game?.background ?? game?.fetchedArt ?? LibraryArt.defaultBackground
+    }
+    private var art: UIImage? { Backdrop.artFor(game) }
+
+    /// 这张图整体偏亮吗：缩到 8×8 取平均亮度（感知权重），> 0.6 就当亮底。
+    /// 只用来在**白字 / 黑字**之间二选一（坤哥 2026-11-11），不做别的调色。
+    static func isLight(_ image: UIImage?) -> Bool {
+        guard let image, let cg = image.cgImage else { return false }
+        let w = 8, h = 8
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.interpolationQuality = .medium
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var sum = 0.0
+        for i in stride(from: 0, to: px.count, by: 4) {
+            let r = Double(px[i]) / 255, g = Double(px[i + 1]) / 255, b = Double(px[i + 2]) / 255
+            sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
+        }
+        return sum / Double(w * h) > 0.6
     }
 
     // 模糊半径（pt）。**0 = 原图直接铺满**：这是坤哥点名要的（2026-11-07「几乎看不到内容，不知道成功没有」）。
     // 想加磨砂感就往大调，下面的外扩量会跟着变。30 那种等于把画面抹平，别再设回去。
     private static let blur: CGFloat = 0
 
-    // 只在**有字的地方**压暗，中间整段留给插画：顶栏、标题/按钮带、页脚各一段，中间几乎不压。
-    // 原来是平铺 0.55 黑罩，图只剩 25% 亮度；现在是「哪里要读字哪里暗，别处保持原色」。
-    private static let scrim = LinearGradient(stops: [
-        .init(color: .black.opacity(0.30), location: 0.00),   // 顶栏：只压一点点，别再是一块黑
-        .init(color: .black.opacity(0.05), location: 0.16),   // 画面主体：几乎不压
-        .init(color: .black.opacity(0.05), location: 0.58),
-        .init(color: .black.opacity(0.22), location: 0.74),   // 标题
-        .init(color: .black.opacity(0.45), location: 1.00)    // 页脚
-    ], startPoint: .top, endPoint: .bottom)
+    // 只在**有字的地方**压：暗底压黑（白字更好读），亮底压白（黑字更好读）——中间那段基本不动。
+    private var scrim: LinearGradient {
+        let tint: Color = light ? .white : .black
+        let strong: Double = light ? 0.42 : 0.30, mid: Double = light ? 0.06 : 0.05,
+            low: Double = light ? 0.26 : 0.22, bottom: Double = light ? 0.5 : 0.45
+        return LinearGradient(stops: [
+            .init(color: tint.opacity(strong), location: 0.00),   // 名字/顶栏
+            .init(color: tint.opacity(mid), location: 0.16),      // 画面主体：几乎不压
+            .init(color: tint.opacity(mid), location: 0.58),
+            .init(color: tint.opacity(low), location: 0.74),      // 图标条
+            .init(color: tint.opacity(bottom), location: 1.00)    // 按钮/页脚
+        ], startPoint: .top, endPoint: .bottom)
+    }
 
     // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认插画时 id 不变，切过去就不会黑一下再亮。
     private var artID: String {
@@ -822,7 +899,7 @@ private struct Backdrop: View {
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
                 }
-                .overlay(Backdrop.scrim)
+                .overlay(scrim)
                 .transition(.opacity)
                 .id(artID)
             }
