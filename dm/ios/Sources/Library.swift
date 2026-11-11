@@ -437,18 +437,18 @@ private struct LibraryView: View {
                         guard abs(dx) > 50, abs(dx) > abs(value.translation.height) else { return }
                         step(dx < 0 ? 1 : -1)
                     })
-                VStack(spacing: 0) {
+                VStack(spacing: 10) {
                     topBar
+                    caption                 // 游戏名 + VERSION 放顶部（坤哥 2026-11-11）
                     Spacer(minLength: 0)
-                    flow
-                    caption
-                    playButton
-                    Spacer(minLength: 0)
-                    footer
+                    footer                  // 「长按图标换背景」这类提示，紧贴图标条上面
+                    strip                   // 只露三个：左/中/右
+                    playButton              // 三个按钮压到最底部
                 }
                 .padding(.horizontal, 32)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .animation(.spring(response: 0.34, dampingFraction: 0.86), value: selectedIndex)
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: LibraryGame.self) { game in GameDetail(model: model, game: game) }
@@ -461,6 +461,10 @@ private struct LibraryView: View {
                 }
             }
             .onAppear { if selected == nil { selected = model.games.first?.tid; shown = selected } }
+            // 只给看得见的三个（当前 + 左右）去网上问背景图，别的等滑过去再问
+            .task(id: selected) {
+                for game in visibleGames { model.needBackdropArt(game) }
+            }
             .photosPicker(isPresented: $picking, selection: $picked, matching: .images)
             .onChange(of: picked) { _, item in
                 guard let item, let game = artGame else { return }
@@ -491,45 +495,58 @@ private struct LibraryView: View {
         }
     }
 
-    // MARK: the flow
+    // MARK: the strip
 
-    // 底部图标条（坤哥 2026-11-11）：背景是主角，图标只当导航。
-    // **命名来源**：framework/icon.png 只有 180×180，所以当前图标 92pt（3x = 276px，放大约 1.5 倍）就够，
-    // 再大只是糊；相邻的 58pt 基本 1:1。想整体变大变小只改这三个数（side/neighbour/unit）。
-    private var flow: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 10) {
-                ForEach(model.games) { game in
-                    let focused = game.tid == selected
+    /// 当前是第几个（`selected` 为空时按 0 算）。
+    private var selectedIndex: Int {
+        guard let tid = current?.tid else { return 0 }
+        return model.games.firstIndex { $0.tid == tid } ?? 0
+    }
+
+    /// 一屏只看三个：上一个在左、当前居中、下一个在右（坤哥 2026-11-11）。
+    /// 切换时整排**滑动过去**，不是换内容跳过去：切走的那个边滑边缩到 58，切过来的从边上边滑边长到 92，
+    /// 再外面那个 |offset|≥2 淡出到 0 —— 位置/尺寸/透明度都由 `selectedIndex` 驱动，
+    /// 外面那层 `.animation(…, value: selectedIndex)` 负责把它们串成一段动画。
+    /// 尺寸依据：framework/icon.png 只有 180×180，92pt@3x=276px 已经是放大 1.5 倍，再大只是糊。
+    private var strip: some View {
+        GeometryReader { geo in
+            let mid = geo.size.width / 2
+            let edgeInset: CGFloat = 62                  // 左右两个图标的中心离屏幕边的距离
+            let stride = max(0, mid - edgeInset)
+            ZStack {
+                ForEach(Array(model.games.indices), id: \.self) { i in
+                    let game = model.games[i]
+                    let offset = CGFloat(i - selectedIndex)
+                    let focused = offset == 0
                     CoverCell(game: game, side: focused ? 92 : 58, focused: focused)
-                        .frame(width: 92)          // 单元宽固定：滑动中留白才不会跟着 current 变
-                        .id(game.tid)
-                        // 这张卡露出来了：玩家没挑过背景、也还没有刮来的图，就去网上问一次背景用图
-                        .task(id: game.tid) { model.needBackdropArt(game) }
-                        // 长按图标 = 给这个游戏换背景（相册里挑）。**单击不再换背景**：整屏滑动切游戏之后，
-                        // 误触一个 58pt 的小图标就弹相册太容易了（坤哥 2026-11-11）。
+                        .zIndex(focused ? 1 : 0)
+                        .position(x: mid + offset * stride, y: geo.size.height / 2)
+                        .opacity(abs(offset) <= 1 ? 1 : 0)
+                        // 长按图标 = 给这个游戏换背景（相册里挑）。单击不做事：整屏滑动切游戏之后，
+                        // 58pt 的小图标上单击就弹相册太容易误触（坤哥 2026-11-11）。
                         .onLongPressGesture(minimumDuration: 0.4) { artTapped(game) }
                         .disabled(model.starting != nil && model.starting != game.tid)
                 }
             }
-            .scrollTargetLayout()
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .contentMargins(.horizontal, max(0, (UIScreen.main.bounds.width - 92) / 2 - 32), for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: $selected, anchor: .center)
-        .scrollIndicators(.hidden)
         .frame(height: 104)
         .overlay {
             if model.games.isEmpty { emptyHint }
         }
     }
 
+    /// 当前这一屏看得见的三个（当前 + 左右各一个）：只给它们去网上问背景图，别的等滑过去再问。
+    private var visibleGames: [LibraryGame] {
+        let i = selectedIndex
+        return [i - 1, i, i + 1].filter { model.games.indices.contains($0) }.map { model.games[$0] }
+    }
+
     /// 整屏横滑切上一个/下一个：滑动的落点在**背景上**（图标条以外的地方），不靠点小图标（坤哥 2026-11-11）。
     private func step(_ delta: Int) {
-        guard let tid = current?.tid, let i = model.games.firstIndex(where: { $0.tid == tid }) else { return }
-        let j = i + delta
+        let j = selectedIndex + delta
         guard model.games.indices.contains(j) else { return }
-        withAnimation(.easeOut(duration: 0.22)) { selected = model.games[j].tid }
+        selected = model.games[j].tid
     }
 
     // MARK: the caption under the covers
@@ -540,7 +557,8 @@ private struct LibraryView: View {
                 .font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
                 .lineLimit(1).minimumScaleFactor(0.6)
                 .id(current?.tid ?? "none")
-                .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                // 名字在顶部：新名字从上面下来、旧名字往上走（原来在图标下面，方向是反的）
+                .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity),
                                         removal: .move(edge: .top).combined(with: .opacity)))
             if let v = current?.version, !v.isEmpty {
                 Text("VERSION " + v)
