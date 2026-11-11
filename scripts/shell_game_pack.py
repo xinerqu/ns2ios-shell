@@ -129,7 +129,6 @@ def main():
     ap.add_argument('--ipa', help='also write this .ipa: the shell plus every DmGame*.framework in the library')
     ap.add_argument('--shell', help='the shell zip (…/shell-<…>.zip); default: the one beside pack.cmd')
     ap.add_argument('--icon', help='the library icon (60x60@3x from the package is used otherwise)')
-    ap.add_argument('--cover', help='a 16:9 banner for the library (cover.jpg/png beside the game files is used otherwise)')
     a = ap.parse_args()
 
     if a.ipa_only:
@@ -179,20 +178,10 @@ def main():
         shutil.copyfile(src, fdm / src.name)
     say('tables: %d files' % len(list(fdm.iterdir())))
 
+    # The card in the library IS the game's own icon (NACP -> AppIcon -> here), as on the console's home screen; there is no
+    # separate cover picture (坤哥 2026-11-11: cover.jpg was never used -- dropped along with --cover).
     icon = Path(a.icon) if a.icon else app / 'AppIcon60x60@3x.png'
     if icon.is_file(): shutil.copyfile(icon, fwdir / 'icon.png')
-    # A 16:9 banner for the library, when one is there: cover.jpg/png beside the game files (or --cover). Without one the library draws
-    # the icon on a tile, so a game never looks broken -- the library checks for this file by name.
-    if a.cover:
-        cover = Path(a.cover)
-        if not cover.is_file(): die('no such cover: %s' % cover)
-    else:
-        # beside the game's files first (that is where the icon and the RomFS image are), then the work folder
-        cover = next((q for q in (app / 'cover.jpg', app / 'cover.png', work / 'cover.jpg', work / 'cover.png') if q.is_file()), None)
-    if cover:
-        # the library looks for exactly cover.jpg or cover.png
-        shutil.copyfile(cover, fwdir / ('cover.png' if cover.suffix.lower() == '.png' else 'cover.jpg'))
-        say('cover: %s' % cover.name)
 
     nacps = sorted(work.glob('extract/*/control.nacp')) or sorted(work.glob('extract/**/control.nacp'))
     names = nacp_names(nacps[-1]) if nacps else {}
