@@ -258,6 +258,9 @@ static inline const p_copy_strides *copy_strides(const void *a, uint32_t size) {
 }
 // NVN2's DLSS evaluation: the parameters at the time of the call, each texture snapped after the record (hle_nvn.c "NVN2's DLSS", nvn_mtl.m dlss_eval)
 enum { DLSS_COLOR, DLSS_DEPTH, DLSS_MOTION, DLSS_OUTPUT, DLSS_BIAS, DLSS_EXPOSURE, DLSS_TEXTURES };
+// NVN2's DLSS network as the host keeps it in the game's memory (hle_nvn.c): what it was built with, and the serial its evaluations carry (p_dlss.net), new at each Initialize
+typedef struct { int32_t w, h, method, preset; uint32_t flags; } dlss_builder_t;
+typedef struct { dlss_builder_t b; uint64_t serial; } dlss_net_t;
 typedef struct { const tex_t *tex[DLSS_TEXTURES]; uint64_t net; int32_t iw, ih, ow, oh, base[DLSS_TEXTURES][2]; float mv[2], jitter[2], pre_exposure; uint32_t flags, reset; } p_dlss;
 typedef struct { uint64_t addr, size; uint32_t value, _pad; } p_clear_buf;   // buffer filled with a 32-bit value (ClearBuffer)
 typedef struct { float rgba[4]; } p_blend_color;
@@ -272,8 +275,9 @@ void mtl_exec(const uint8_t *handle);
 void mtl_sub_fill(uint64_t dst, uint64_t n, uint32_t value);   // in-order buffer fill within the submission (OP_CLEAR_BUF)
 void mtl_exec_rest(const uint64_t *handles, int n);   // Tells which handles in this submission still follow the current handle (used by the pass lookahead across handles)
 // Present: draw the swapchain texture to the front-end CAMetalLayer (only counts when there is no window)
-uint64_t mtl_present(const tex_t *t, double period_s, const int crop[4]);   // Enqueue a present and return the ticket immediately; period_s: minimum time this image is displayed (= present period, 0 = unlimited)
+uint64_t mtl_present(const tex_t *t, double period_s, const int crop[4], uint64_t *copy);   // Enqueue a present and return the ticket immediately; period_s: minimum time this image is displayed (= present period, 0 = unlimited); *copy: its snapshot copy (0 = none), for mtl_present_wait_texture
 void mtl_present_wait(uint64_t ticket);                    // Wait until the present with this ticket has been processed (blit committed to the GPU queue)
+void mtl_present_wait_texture(uint64_t ticket, uint64_t copy);   // the next acquire of a presented texture, or a queue finish: with a snapshot (copy, from mtl_present) its copy has run on the GPU, else as mtl_present_wait
 void mtl_present_flush(void);                              // Wait until all enqueued presents have been processed
 void mtl_present_test_stall(uint64_t ns);                  // Unit test: extra pause in ns before each present on the present thread
 int mtl_display_hz(void);                                   // Maximum refresh rate of the screen (Hz) when there is a window, 0 without a window
@@ -287,7 +291,7 @@ void mtl_sub_index(const uint64_t *h, int n);   // Start of submission: build th
 void xv_test_counts(int *dc, int *viol);
 int mtl_gpu_span(uint64_t f, uint64_t *t0, uint64_t *t1);   // The frame's earliest GPUStart / latest GPUEnd (mach absolute time, ns); returns 0 if not all complete or there is no GPU time
 void mtl_stats(uint64_t *passes, uint64_t *draws);
-void mtl_args_stats(uint64_t *enc, uint64_t *reuse);
+void mtl_args_stats(uint64_t *enc, uint64_t *reuse, uint64_t *patch);
 void mtl_use_stats(uint64_t *call, uint64_t *skip);
 uint64_t mtl_ds_omit(void);   // Cumulative number of passes with no depth attachment because the lookahead proved depth-stencil unused
 uint64_t mtl_drawable_ns_take(void);   // Take and zero: cumulative ns spent waiting for nextDrawable in present   // Cumulative useResource calls actually issued / skipped by same-encoder dedup   // Cumulative argument buffer new-encode / reuse counts
@@ -314,7 +318,6 @@ void mtl_tex_unpin(uint64_t serial);
 void mtl_pkg_stats(uint64_t *uploads, uint64_t *reuploads);
 unsigned mtl_cpu_tex_count(void);   // live textures the CPU writes (retired snapshots are excluded)
 uint64_t mtl_pkg_edge_skips(void);   // packaged texture checks that found only writes beside the texture (pkg_edges_clean)
-uint64_t mtl_pkg_copy_absorbs(void);   // GPU copies into a packaged texture whose bytes, written into its storage too, were not taken as a change to upload (pkg_copy_absorb)
 uint64_t mtl_pkg_miss(void);
 uint64_t mtl_upload_ns_take(void);   // Take and zero: time spent uploading packaged textures on the submit thread since last time   // DM_NVN_DIRTYCHECK diagnostic: number of missed detections   // Packaged textures: number of first uploads, number of re-uploads due to pool content changes
 uint64_t mtl_upload_gpu_ns_take(void);   // Take and zero: GPU execution time of upload command buffers (sum of GPUEndTime − GPUStartTime)
@@ -331,13 +334,8 @@ void mtl_tex_gpu_written(const tex_t *t);   // a GPU write into the texture's st
 int mtl_tex_gpu_owned(uint64_t serial);                                  // its host texture is a render target or shader-writable: GPU content, never re-uploaded from guest memory
 enum { MTL_REWRITE_UPLOADED, MTL_REWRITE_GPU, MTL_REWRITE_GPU_NOW };     // mtl_tex_cpu_rewritten: uploaded from its storage / left to the GPU for good / until the CPU rewrites it
 int mtl_tex_cpu_rewritten(const tex_t *t);                               // nvn_ft_poll: the CPU wrote a registered texture's pages after its first use (MTL_REWRITE_*)
-// hle_nvn.c: a texture tex_flush_upload / tex_dirty_upload registered and has not resolved yet; GPU copies written into the destination texture's storage as well (see there)
+// hle_nvn.c: a texture tex_flush_upload / tex_dirty_upload registered and has not resolved yet; what the GPU writes into it is stored into its storage as well (nvn_mtl.m gsb_store)
 int nvn_ft_tracked(uint64_t serial);
-// The storage ranges a copy's mirror made writable and wrote, as addresses [lo, hi): the host's own write, which pkg_copy_absorb (nvn_mtl.m) excepts. The caller sets n = 0;
-// n = −1 when there were more than fit (that copy is then not absorbed)
-typedef struct { int n; uintptr_t r[64][2]; } mspan_t;
-int nvn_tex_mirror_b2t(const tex_t *t, unsigned level, unsigned layer0, const NVNcopyRegion *r, const uint8_t *src, size_t row, size_t img, mspan_t *ms);
-int nvn_tex_mirror_t2t(const tex_t *s, unsigned sl, unsigned ss, const NVNcopyRegion *sr, const tex_t *d, unsigned dl, unsigned ds, const NVNcopyRegion *dr, mspan_t *ms);
 int nvn_tex_level_range(const tex_t *t, unsigned level, unsigned layer, uint64_t *lo, uint64_t *hi);   // one level of one layer in the texture's storage, as offsets; −1 out of range
 // A program's per-stage shader key (hle_nvn.c): the first 8 bytes of sha256(first 0x880 bytes of the control section (its own length when shorter) + code area). Computed at SetShaders (NVN lets the caller free the control section once it returns, and Unity does);
 // a stage whose code area was not yet in any memory pool then is computed the first time it is asked for, from the host's copy of its control section. The keys belong to

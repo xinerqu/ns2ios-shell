@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**154 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**157 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -88,6 +88,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario Tennis Fever | `0400D4201C6EA000` | v327680 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
+| Metroid Prime 4: Beyond | `010019A01E2F2000` | 1.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
 | Minecraft Dungeons II | `0100A7C01B792000` | 1.1.3.0 | 60 fps |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
@@ -99,6 +100,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
 | Ori and the Blind Forest: Definitive Edition | `010061D00DB74000` | 1.0.2 |  |
+| Ori and the Will of the Wisps | `01008DD013200000` | 1.2.1 |  |
 | Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
 | Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 | 60 fps |
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
@@ -150,6 +152,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 |  |
 | Taiko Risshiden V DX | `0100346017304000` | 1.1.1 | handheld |
 | Team Sonic Racing | `010092B0091D0000` | 1.0.3 |  |
+| The Binding of Isaac: Rebirth | `01009BC00C38A000` | 1.0 |  |
 | The Great Ace Attorney Chronicles | `010036E00FB20000` | 1.0.0 |  |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 | 60 fps |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |

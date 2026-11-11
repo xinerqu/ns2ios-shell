@@ -1,7 +1,7 @@
 diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
 --- a/dm/host/hle_oe.c
 +++ b/dm/host/hle_oe.c
-@@ -278,7 +278,11 @@
+@@ -279,7 +279,11 @@
  // Profile perf_mode boost: Boost whatever the operation mode, a combination a Switch 1 never reports, so a profile choice and not a default. Rhythm Heaven Groove keeps one flag per mode
  //   (main+0xa764 / main+0xa784): console means a TV, which gets a latency calibration (main+0x20d0, scene script main+0x4c0820), and Boost alone picks its 1920x1080 draw size
  //   (table main+0xada6d0, else 1280x720). Handheld with Boost: no TV calibration on a phone, full-size drawing
@@ -14,3 +14,22 @@ diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
  // SDK 11 calls of Monster Hunter Rise: the CPU overclock query reads an apm session the host never opened (null read in sdk+0x35258 at the start of nnMain, main+0x6bc8650);
  // the default display resolution is the TV's (1080p docked) or the panel's (720p handheld) and only changes with the operation mode
  // Taiko Risshiden V DX (SDK 12.3.3) turns it on in nnMain (main+0x2e1e4c): the setter goes through the same apm session (null read at sdk+0x362b8). The host does not scale clocks;
+@@ -296,7 +300,17 @@
+ // adds to its GPU time (main+0x549614). Star Fox keeps only "tier 0" (byte +0xa of its event 5, main+0xba69970) and renders 0.8 times smaller below it: docked, 768x432 for
+ // its 1920x1080 window where tier 0 gives 960x540, its handheld size. Ocarina of Time draws 2048x1152 with tier 1 and 2560x1440 with 0. The host answered 1 docked until
+ // these were found. DM_GFX_SCALE sets a tier, to see what a game does with a reduced one
+-static int gfx_scale(void) { const char *e = getenv("DM_GFX_SCALE"); int v = e ? atoi(e) : 0; return v >= 0 && v <= 2 ? v : 0; }
++static int gfx_scale(void) {
++    const char *e = getenv("DM_GFX_SCALE");
++#ifdef DM_SHELL
++    // The shell answers tier 1 when nothing says otherwise: upstream's default (0) makes a Switch 2 game draw its full
++    // docked picture, which a phone's GPU does not budget for. Documents/env.txt, or the game's own dm/env.txt, still
++    // sets 0 or 2 -- this only picks the default for a game-free shell (坤哥 2026-11-11; measured on the device before
++    // the default moves again).
++    if (!e) return 1;
++#endif
++    int v = e ? atoi(e) : 0; return v >= 0 && v <= 2 ? v : 0;
++}
+ HLE_FORCE("_ZN2nn2oe23GetCurrentGraphicsScaleEv", "graphics scale (Switch 2, through am): 0, the whole GPU (DM_GFX_SCALE sets 1 or 2)", int, h_oe_GfxScale, void) { return gfx_scale(); }
+ HLE_FORCE("_ZN2nn2oe42SetGraphicsScaleChangedNotificationEnabledEb", "graphics scale change notification (Switch 2, through am); the host's scale never changes",
+           void, h_oe_GfxScaleNotify, unsigned on) { (void)on; }
