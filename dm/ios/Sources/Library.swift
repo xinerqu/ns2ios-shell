@@ -121,6 +121,42 @@ enum LibraryArt {
     }()
 }
 
+/// 上一次玩的是哪一款：真机的「最近玩过的排最前面」，不为它单开一行（坤哥 2026-11-11 定的）。
+/// 文件是 Documents/ns2ios/state.json，与金手指/存档同一层；读不出来就当没玩过（库页照名字排），写不进去只留一行日志。
+private enum LibraryState {
+    private static var url: URL {
+        let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return doc.appendingPathComponent("ns2ios/state.json")
+    }
+
+    /// tid -> 这次启动的时间（epoch 秒）。形如 {"games": {"0100…": 1762000000.0}}。
+    static func lastPlayed() -> [String: Double] {
+        guard let data = try? Data(contentsOf: url),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let games = root["games"] as? [String: Any]
+        else { return [:] }
+        var out: [String: Double] = [:]
+        for (tid, value) in games { if let n = value as? NSNumber { out[tid] = n.doubleValue } }
+        return out
+    }
+
+    /// 启动成功的那一刻记一次：库页下次启动（每次回库都是重启 App）按它把这游戏排到最前。
+    static func recordPlayed(_ tid: String) {
+        var games = lastPlayed()
+        games[tid] = Date().timeIntervalSince1970
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: ["games": games], options: [.sortedKeys])
+            try data.write(to: url, options: .atomic)
+            fputs("library: last played \(tid)\n", stderr)
+        } catch {
+            // 记不下来只是少个排序，不该拦住玩家进游戏
+            fputs("library: the last played game cannot be recorded (\(error))\n", stderr)
+        }
+    }
+}
+
 private enum GameLibrary {
     static func scan() -> [LibraryGame] {
         let fm = FileManager.default
@@ -151,7 +187,19 @@ private enum GameLibrary {
                                      background: loadImage(LibraryArt.backgroundURL(tid), maxSide: 1600),
                                      dmDir: item.appendingPathComponent("dm")))
         }
-        games.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        // 真机 Switch 的顺序：上次玩的那款排第一，其余按名字。没玩过的都在 0 上，排到有记录的游戏后面。
+        // Swift 的 sort 不稳定，所以时间相等时必须自己按名字收口，否则每次扫描顺序可能不同。
+        let lastPlayed = LibraryState.lastPlayed()
+        games.sort { a, b in
+            let ta = lastPlayed[a.tid] ?? 0, tb = lastPlayed[b.tid] ?? 0
+            if ta != tb { return ta > tb }
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+        if let first = games.first, let at = lastPlayed[first.tid], at > 0 {
+            fputs("library: the last played game is first (\(first.tid))\n", stderr)
+        } else {
+            fputs("library: no game played yet, the library is in name order\n", stderr)
+        }
         fputs("library: \(games.count) game(s), \(games.filter { $0.background != nil }.count) with a picture of their own\n", stderr)
         return games
     }
@@ -246,6 +294,8 @@ private final class LibraryModel: ObservableObject {
                 if let failure {
                     self.errors[tid] = failure.isEmpty ? LibText.t("启动失败", "Could not start the game") : failure
                 } else {
+                    // 宿主已经接过去了：这一款就是「上次玩的」，下次回库它排最前
+                    LibraryState.recordPlayed(tid)
                     self.launch(tid)
                 }
             }
