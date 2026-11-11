@@ -65,8 +65,8 @@ private struct LibraryGame: Identifiable, Hashable {
     let version: String?
     let dataOK: Bool          // Documents/ns2ios/games/<tid>/romfs.img 存在且非空
     let chainOK: Bool         // chain 为空、DMChain 缺失、或两者相等
-    let icon: UIImage?        // 游戏本身没有封面时拿它当卡片（我们自己画的那一张）；刮到真封面后就让位
-    var cover: UIImage?       // 刮来的缓存或包里带的 16:9 封面；nil = 还没有，库页会去网上问一次
+    let icon: UIImage?        // **卡片就是它**：游戏自己的封面。没有 icon 就没有封面（坤哥 2026-11-11）
+    var fetchedArt: UIImage?  // 从网上刮来的 16:9 图，只当**背景**的第二层用，不上卡片；nil = 还没刮到
     let background: UIImage?  // a 16:9 picture the player picked on the device (LibraryArt.backgroundURL), nil when none
     let dmDir: URL            // the framework's dm/: its launcher.json is the settings this game offers
     var id: String { tid }
@@ -105,16 +105,16 @@ enum LibraryArt {
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d.appendingPathComponent(tid + ".jpg")
     }
-    /// 从网上刮来的 16:9 封面（LibraryCovers 写）。framework 里的 cover.jpg 在签名的 IPA 内、写不了，
-    /// 所以刮下来的图只能落在 Documents 这边；读的时候它排在**包里的封面之后、玩家自选的背景之前**。
-    private static func coversDir() -> URL {
-        let d = ns2ios.appendingPathComponent("covers", isDirectory: true)
+    /// 从网上刮来的 16:9 图（LibraryArt 写）——**这是背景用的图，不是封面**（封面永远是游戏自己的 icon）。
+    /// framework 里的东西在签名的 IPA 内、写不了，所以只落 Documents；取的时候排玩家自选背景之后、默认插画之前。
+    private static func fetchedDir() -> URL {
+        let d = ns2ios.appendingPathComponent("fetched", isDirectory: true)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }
-    static func coverURL(_ tid: String) -> URL { coversDir().appendingPathComponent(tid + ".jpg") }
-    /// 这个 TID 在网上没有封面（404）的记号：每次启动都去问一次没有意义，见到它就不再请求。
-    static func coverMissingURL(_ tid: String) -> URL { coversDir().appendingPathComponent(tid + ".missing") }
+    static func fetchedArtURL(_ tid: String) -> URL { fetchedDir().appendingPathComponent(tid + ".jpg") }
+    /// 这个 TID 在网上没有图（404）的记号：每次启动都去问一次没有意义，见到它就不再请求。
+    static func fetchedMissingURL(_ tid: String) -> URL { fetchedDir().appendingPathComponent(tid + ".missing") }
     static func cheatsURL(_ tid: String) -> URL {
         let d = ns2ios.appendingPathComponent("cheats/\(tid)", isDirectory: true)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
@@ -137,24 +137,25 @@ enum LibraryArt {
     }()
 }
 
-// MARK: - Covers from the network
+// MARK: - The backdrop's picture from the network
 
-/// 16:9 封面的来源：nlib（`https://api.nlib.cc/nx/<TID>/banner` 直接给 1920×1080 JPEG；`/icon` 是方图，不用）。
-/// 只在库页看到这张卡、且它本身没有封面时才问一次；下到就缩到 1080 宽存进 `Documents/ns2ios/covers/<tid>.jpg`，
-/// 之后每次启动都读盘。404（Switch 2 的游戏那边没有）落一个 `.missing` 记号不再问；网络失败只落一行日志、下次再试。
-private enum LibraryCovers {
+/// 背景第二层的来源：nlib（`https://api.nlib.cc/nx/<TID>/banner` 直接给 1920×1080 JPEG；`/icon` 是方图，不用）。
+/// **刮的是背景，不是封面**（封面永远是游戏自己的 icon）。只在玩家没挑过背景、卡也还没有刮来的图时问一次；
+/// 下到就缩到 1080 宽存 `Documents/ns2ios/fetched/<tid>.jpg`，之后每次启动读盘。404（Switch 2 的游戏那边没有）
+/// 落一个 `.missing` 记号不再问；网络失败只落一行日志、下次再试。
+private enum LibraryBackdropArt {
     enum Outcome { case image(UIImage); case none; case failed(String) }
 
     static func fetch(_ tid: String, done: @escaping (Outcome) -> Void) {
         guard let url = URL(string: "https://api.nlib.cc/nx/\(tid)/banner") else { return done(.failed("bad title ID")) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 8
-        fputs("library: cover \(tid) asked from api.nlib.cc\n", stderr)
+        fputs("library: backdrop \(tid) asked from api.nlib.cc\n", stderr)
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error { return done(.failed(error.localizedDescription)) }
             guard let http = response as? HTTPURLResponse else { return done(.failed("no HTTP response")) }
             if http.statusCode == 404 {
-                try? Data().write(to: LibraryArt.coverMissingURL(tid), options: .atomic)
+                try? Data().write(to: LibraryArt.fetchedMissingURL(tid), options: .atomic)
                 return done(.none)
             }
             guard http.statusCode == 200, let data, data.count > 1024, let image = UIImage(data: data) else {
@@ -162,9 +163,9 @@ private enum LibraryCovers {
             }
             let small = scaled(image, maxSide: 1080)
             guard let jpeg = small.jpegData(compressionQuality: 0.86) else { return done(.failed("cannot encode the picture")) }
-            do { try jpeg.write(to: LibraryArt.coverURL(tid), options: .atomic) }
+            do { try jpeg.write(to: LibraryArt.fetchedArtURL(tid), options: .atomic) }
             catch { return done(.failed("cannot keep it: \(error.localizedDescription)")) }
-            fputs("library: cover \(tid) HTTP \(http.statusCode) \(data.count) bytes -> \(jpeg.count) bytes "
+            fputs("library: backdrop \(tid) HTTP \(http.statusCode) \(data.count) bytes -> \(jpeg.count) bytes "
                   + "(\(Int(small.size.width))x\(Int(small.size.height)))\n", stderr)
             done(.image(small))
         }.resume()
@@ -232,11 +233,8 @@ private enum GameLibrary {
                                      dataOK: hasGameData(tid),
                                      chainOK: chainMatches(manifest.chain, shellChain),
                                      icon: loadIcon(item.appendingPathComponent("icon.png")),
-                                     // 包里带的 cover.jpg/png（玩家自己放的、或打包时 --cover）优先于网上刮的缓存：
-                                     // 明确的图不该被刮来的顶掉。两个都没有就是 nil，库页见到它会去网上问一次。
-                                     cover: loadImage(item.appendingPathComponent("cover.jpg"), maxSide: 1080)
-                                         ?? loadImage(item.appendingPathComponent("cover.png"), maxSide: 1080)
-                                         ?? loadImage(LibraryArt.coverURL(tid), maxSide: 1080),
+                                     // 刮来的 16:9 图只喂背景；卡片用的是上面的 icon
+                                     fetchedArt: loadImage(LibraryArt.fetchedArtURL(tid), maxSide: 1080),
                                      background: loadImage(LibraryArt.backgroundURL(tid), maxSide: 1600),
                                      dmDir: item.appendingPathComponent("dm")))
         }
@@ -312,7 +310,7 @@ private final class LibraryModel: ObservableObject {
     private let cancelled: @convention(c) () -> Void
     weak var host: UIViewController?
     private var fetching: Set<String> = []   // 正在问的 TID：同一张卡反复出现（滚动、刷新）也只问一次
-    private var noCover: Set<String> = []    // 这次启动里已经确定没有的（404 或失败过），不再重复问
+    private var noArt: Set<String> = []      // 这次启动里已经确定没图的（404 或问过），不再重复问
 
     init(picked: @escaping @convention(c) (UnsafePointer<CChar>?) -> Void,
          cancelled: @escaping @convention(c) () -> Void) {
@@ -327,29 +325,30 @@ private final class LibraryModel: ObservableObject {
         errors = errors.filter { tid, _ in games.contains { $0.tid == tid } }
     }
 
-    /// 库页看到一张没有封面的卡时调一次：先看盘上有没有缓存（scan 已经读过，这里只处理 nil），
-    /// 再看这个 TID 有没有被记过「网上没有」，最后才去问一次。下回来就写进 `covers/<tid>.jpg` 并更新这一张卡。
-    func needCover(_ game: LibraryGame) {
+    /// 库页看到一张卡时调一次：**只有背景的第二层需要它** —— 玩家已经挑了背景、或者盘上已有刮来的图，
+    /// 都不发请求。取到就给这张卡补上背景用的图（`fetched/` 缓存由 LibraryBackdropArt 写盘）。
+    func needBackdropArt(_ game: LibraryGame) {
         let tid = game.tid
-        guard game.cover == nil, !fetching.contains(tid), !noCover.contains(tid) else { return }
-        if FileManager.default.fileExists(atPath: LibraryArt.coverMissingURL(tid).path) {
-            noCover.insert(tid)
-            fputs("library: cover \(tid) none (asked before), the small icon stays\n", stderr)
+        guard game.background == nil, game.fetchedArt == nil,
+              !fetching.contains(tid), !noArt.contains(tid) else { return }
+        if FileManager.default.fileExists(atPath: LibraryArt.fetchedMissingURL(tid).path) {
+            noArt.insert(tid)
+            fputs("library: backdrop \(tid) none (asked before), the default illustration is used\n", stderr)
             return
         }
         fetching.insert(tid)
-        LibraryCovers.fetch(tid) { [weak self] outcome in
+        LibraryBackdropArt.fetch(tid) { [weak self] outcome in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.fetching.remove(tid)
                 switch outcome {
                 case .image(let picture):
-                    if let i = self.games.firstIndex(where: { $0.tid == tid }) { self.games[i].cover = picture }
+                    if let i = self.games.firstIndex(where: { $0.tid == tid }) { self.games[i].fetchedArt = picture }
                 case .none:
-                    self.noCover.insert(tid)
+                    self.noArt.insert(tid)
                 case .failed(let why):
                     // 网络抖动不记成「没有」：下次启动／下次刷新再试
-                    fputs("library: cover \(tid) not fetched (\(why)); the small icon stays\n", stderr)
+                    fputs("library: backdrop \(tid) not fetched (\(why)); the default illustration is used\n", stderr)
                 }
             }
         }
@@ -488,11 +487,11 @@ private struct LibraryView: View {
     private var flow: some View {
         GeometryReader { geo in
             // 卡片高度：坤哥 2026-11-11「图标别那么大，背景要多露一点」→ 250 降到 214。
-            // 这是一处纯视觉的数字，觉得还大/太小就改这一个值（16:9 的横幅宽度会跟着 h 走）。
+            // 这是一处纯视觉的数字，觉得还大/太小就改这一个值。
             let h = min(geo.size.height, 214)
-            // 每个封面用自己的比例：横幅 16:9，图标是正方形。ViewBuilder 里不能写 func，所以用到 LibraryView 的方法。
+            // 卡片就是游戏图标，正方形，和真机 Switch 主界面一样；刮来的 16:9 图只做背景，不上卡片。
             // **滚动单元统一按最宽的那张算宽**：留白原来按"当前这张"算，滑动中 current 一变留白就跟着变，
-            // 整排内容平移 → 松手被拉回原来的位置（坤哥：第 2、第 3 个很难切）。卡片本身还是自己的比例，居中放在单元里。
+            // 整排内容平移 → 松手被拉回原来的位置（坤哥：第 2、第 3 个很难切）。
             let unit = model.games.map { cellWidth($0, height: h) }.max() ?? h
 
             ScrollView(.horizontal) {
@@ -504,8 +503,8 @@ private struct LibraryView: View {
                         .buttonStyle(.plain)
                         .frame(width: unit)
                         .id(game.tid)
-                        // 这张卡露出来了：还没有封面就去网上问一次（有缓存/有包内封面/记过 404 的都不发请求）
-                        .task(id: game.tid) { model.needCover(game) }
+                        // 这张卡露出来了：玩家没挑过背景、也还没有刮来的图，就去网上问一次背景用图
+                        .task(id: game.tid) { model.needBackdropArt(game) }
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
                             content
                                 .scaleEffect(phase.isIdentity ? 1 : 0.78)
@@ -635,7 +634,7 @@ private struct LibraryView: View {
             Spacer(minLength: 0)
             // 这个功能原来只有「点封面」一个入口，没有任何提示，用户会以为它不存在
             if current?.background == nil {
-                Text(LibText.t("点封面可设置背景图", "Tap a cover to set its background"))
+                Text(LibText.t("点卡片可设置背景图", "Tap a card to set its background"))
                     .font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.9))
             } else if model.games.count > 1 {
                 Text(LibText.t("左右滑动切换", "Swipe to switch"))
@@ -646,9 +645,8 @@ private struct LibraryView: View {
     }
 
     /// 一个封面要多宽：横幅按 16:9，图标按正方形（ViewBuilder 里不能声明函数，放在这里）。
-    private func cellWidth(_ game: LibraryGame, height: CGFloat) -> CGFloat {
-        game.cover == nil ? height : height * 16 / 9
-    }
+    // 卡片就是游戏图标：正方形，和真机 Switch 的主界面一样。刮来的 16:9 图**不上卡片**（那是背景用的）。
+    private func cellWidth(_ game: LibraryGame, height: CGFloat) -> CGFloat { height }
 
     /// 点大封面：给这个游戏设 16:9 背景，直接开相册。
     /// **不要**在 alert 的按钮里开相册：alert 的 action 是在转场开始前就调用的，那一刻宿主 VC 还 present 着
@@ -731,11 +729,8 @@ private struct CoverCell: View {
 
     var body: some View {
         ZStack {
-            if let cover = game.cover {
-                Image(uiImage: cover).resizable().scaledToFill()
-            } else if let icon = game.icon {
-                // 游戏本身没有封面：用它的图标当卡片 —— 这就是「我们自己画的一张」（坤哥 2026-11-11 认可）。
-                // 刮到真封面之后这里就换成 16:9 的横幅。
+            if let icon = game.icon {
+                // 封面就是游戏自己的 icon（坤哥 2026-11-11）。没有 icon 就等于没有封面，下面走占位。
                 Image(uiImage: icon).resizable().scaledToFill()
             } else {
                 LinearGradient(colors: [Color(white: 0.14), Color(white: 0.07)], startPoint: .top, endPoint: .bottom)
@@ -755,13 +750,13 @@ private struct Backdrop: View {
     let game: LibraryGame?
     let animated: Bool
 
-    // 背景三种，按这个顺序取（坤哥 2026-11-11 原话：玩家自己挑的 > 网上缓存的 > 默认那张女孩插画）：
+    // 背景三层，按序取（坤哥 2026-11-11 原话：玩家自己挑的 > 网上缓存的 > 默认那张女孩插画）：
     //   ① 玩家用 PhotosPicker 挑的图：Documents/ns2ios/art/<tid>.jpg
-    //   ② 缓存下来的 16:9 图（刮来的、或包里带的 cover.jpg）：Documents/ns2ios/covers/<tid>.jpg
+    //   ② 刮来的 16:9 图（网络缓存）：Documents/ns2ios/fetched/<tid>.jpg
     //   ③ 包里自带的插画：dm/ios/tools/default-background.jpg（女孩趴在沙发上玩 Switch，shell_build.sh 拷进 dm/）
-    // 只有这三层。不拿正方形 icon 当背景（放大铺满只剩一团色块），也不存在「我们自己画一张背景」。
+    // 只有这三层。**封面不参与**（封面是卡片上的 icon），也不拿正方形 icon 当背景。
     private var art: UIImage? {
-        game?.background ?? game?.cover ?? LibraryArt.defaultBackground
+        game?.background ?? game?.fetchedArt ?? LibraryArt.defaultBackground
     }
 
     // 模糊半径（pt）。**0 = 原图直接铺满**：这是坤哥点名要的（2026-11-07「几乎看不到内容，不知道成功没有」）。
@@ -778,12 +773,11 @@ private struct Backdrop: View {
         .init(color: .black.opacity(0.45), location: 1.00)    // 页脚
     ], startPoint: .top, endPoint: .bottom)
 
-    // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认背景时 id 不变，切过去就不会黑一下再亮。
-    // 三层背景各算各的：玩家挑的（每个游戏不同）、某游戏的缓存图、默认插画（所有没图的共用一张）。
+    // 图层的身份按"用的是哪张图"算，不按游戏算：两个游戏都用默认插画时 id 不变，切过去就不会黑一下再亮。
     private var artID: String {
         guard let game else { return "none" }
         if game.background != nil { return game.tid + "/own" }
-        if game.cover != nil { return game.tid + "/cover" }
+        if game.fetchedArt != nil { return game.tid + "/fetched" }
         return "default"
     }
 
@@ -930,8 +924,8 @@ private struct GameDetail: View {
     private var left: some View {
         VStack(alignment: .leading, spacing: 14) {
             Group {
-                // 和库页的卡片同一套规矩：玩家挑的图 > 封面（包里带的或刮来的）> 图标当卡片。
-                if let art = game.background ?? game.cover ?? game.icon {
+                // 和库页同一套规矩：玩家挑的背景 > 刮来的背景图 > 游戏 icon（当封面用）。
+                if let art = game.background ?? game.fetchedArt ?? game.icon {
                     Image(uiImage: art).resizable().scaledToFill()
                 } else {
                     Color(white: 0.1).overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 44)).foregroundStyle(.white.opacity(0.3)))
