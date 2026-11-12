@@ -10,7 +10,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
  sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../tools'))
  from romfs import os, open
  sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-@@ -79,13 +79,16 @@
+@@ -80,13 +80,16 @@
      if not add: return words
      return words[:at] + [w for t, s in add.items() for w in ((4 << 16) | OP_DECORATE, t, DEC_ARRAY_STRIDE, s)] + words[at:]
  
@@ -28,7 +28,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      eps = refl.get('entryPoints', [])
      if len(eps) != 1: red(f'{path}: entry points {eps} are not exactly one')
      stage = eps[0]['mode']
-@@ -119,7 +122,7 @@
+@@ -120,7 +123,7 @@
      open(spv, 'wb').write(struct.pack(f'<{len(words)}I', *words))
      cmd = [SPIRV_CROSS, spv, '--msl', '--msl-version', '20300', '--msl-decoration-binding', '--rename-entry-point', 'main', f'vk_{key}', stage, '--output', msl]
      if stage == 'vert': cmd.append('--flip-vert-y')
@@ -37,10 +37,10 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if r.returncode: red(f'{path}: spirv-cross failed: {r.stderr.strip()[:300]}')
      # The reflection lists every declared resource; the Metal entry point only takes the ones the shader uses (Hades' ShadowMap.frag declares a buffer it never reads,
      # which the game's own pipeline layout leaves out): keep the rows whose slot is an argument of the entry point, so the host only binds, and only reports, real ones
-@@ -148,7 +151,9 @@
+@@ -149,7 +152,9 @@
      def comp(m):
          a = m[:-6] + f'.{sdk}.air'
-         # -fwrapv: signed integer overflow wraps, as SPIR-V's integer arithmetic does; in MSL it is undefined and the compiler folds around it (dmsh_build.py MAC_METAL)
+         # -fwrapv: signed integer overflow wraps, as SPIR-V's integer arithmetic does; in MSL it is undefined and the compiler folds around it (dmsh_chain.py MAC_METAL)
 -        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', '-fwrapv', *extra, m, '-o', a], capture_output=True, text=True)
 +        # stdin=DEVNULL: the fork's, so a shim that waits on input cannot hang the build on Windows.
 +        r = subprocess.run(['xcrun', '-sdk', sdk, 'metal', '-c', '-fpreserve-invariance', '-fwrapv', *extra, m, '-o', a],
@@ -48,7 +48,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
          if r.returncode: red(f'{m}: metal compile failed: {r.stderr.strip()[:400]}')
          return a
      with cf.ThreadPoolExecutor(os.cpu_count()) as ex: airs = list(ex.map(comp, msls))
-@@ -161,6 +166,10 @@
+@@ -162,6 +167,10 @@
  def main():
      a = sys.argv[1:]
      ios = None
@@ -59,7 +59,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if '--ios' in a: i = a.index('--ios'); ios = a[i + 1]; del a[i:i + 2]
      if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]')
      roots, out = a[:-1], a[-1]
-@@ -177,15 +186,20 @@
+@@ -178,15 +187,20 @@
          if skipped: print('[RED] skipped shader stages Metal does not have: ' + ', '.join(f'{k} {v}' for k, v in sorted(skipped.items())))
          msls = [m for v in seen.values() for m in v[2]]
          tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; resources kind:set.binding=slot (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)',
@@ -69,7 +69,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
          dirs = [(os.path.join(out, 'vk'), 'macosx', [MAC_MIN_FLAG])]   # the Mac host's minimum macOS, as the NVN chain's libraries (dmsh_chain.py MAC_MIN)
          # The iPhone library is compiled with -fmetal-math-mode=relaxed, as the NVN chain's (dm/ios/tools/ios_metal.py): the default fast mode lets the GPU compiler assume there is
          # no NaN / Inf, which would let it drop the NaN handling of the precise:: functions above
-         if ios: dirs.append((os.path.join(ios, 'vk'), 'iphoneos', ['-mios-version-min=18.0', '-fmetal-math-mode=relaxed']))
+         if ios: dirs.append((os.path.join(ios, 'vk'), 'iphoneos', list(IOS_FLAGS)))
          for d, sdk, extra in dirs:
 -            lib = metallib(msls, d, sdk, extra)
 -            open(os.path.join(d, 'vk_shaders.tsv'), 'w').write('\n'.join(tsv) + '\n')

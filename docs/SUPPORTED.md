@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**157 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**161 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -48,6 +48,8 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
 | DAVE THE DIVER | `010097F018538000` | v1.0.6.1267 |  |
 | Dead Cells | `0100646009FBE000` | 1.25.0 |  |
+| Diablo II: Resurrected | `0100726014352000` | 1.0.34.0 |  |
+| Diablo III: Eternal Collection | `01001B300B9BE000` | 2.7.7.92380 |  |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
@@ -96,6 +98,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `0100B8E016F76000` | 1.0.3 | 60 fps |
+| Nintendo Switch Sports Resort | `04008E001F098000` | ? |  |
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
@@ -117,6 +120,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Pokémon Violet | `01008F6008C5E000` | 1.0.0 |  |
 | Portal | `01007BB017812000` | 1.0.3 |  |
 | Portal 2 | `0100ABD01785C000` | 1.0.3 |  |
+| PRAGMATA | `0400C76024710000` | v196608 |  |
 | Princess Peach: Showtime! | `01007A3009184000` | 1.0.0 | 60 fps |
 | Raging Loop | `010020400E1C2000` | 1.0.0 |  |
 | Red Dead Redemption | `01007820196A6000` | 1.0.7（也可 1.0.0 / 1.0.4） | 60 fps |

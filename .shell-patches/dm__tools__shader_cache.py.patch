@@ -1,7 +1,23 @@
 diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 --- a/dm/tools/shader_cache.py
 +++ b/dm/tools/shader_cache.py
-@@ -14,6 +14,18 @@
+@@ -7,7 +7,14 @@
+ # It only saves work: a damaged file costs the work it held and is made anew, and a full drive is one [RED] line. An entry is written and read whole, so its file is never seen half written.
+ # Names, as in the folder this replaces: metallib/<target>/<digest>[_x].metallib (dmsh_mtlcache.py), shader/<digest>/<mac|ios>/<output>, index/<key>.json, variant/<digest>/<file> (dmsh_build.py).
+ # Not part of the translation chain: it decides no output (dmsh_chain.py), like dmsh_mtlcache.py.
+-import contextlib, fcntl, hashlib, json, multiprocessing, os, re, shutil, sqlite3, tarfile, threading, time
++import contextlib, hashlib, json, multiprocessing, os, re, shutil, sqlite3, tarfile, threading, time
++try: import fcntl   # not on Windows: the packing machine runs one build per folder, so the advisory locks below
++except ImportError:  # only ever take a lock another process of the same machine already holds
++    class _NoFcntl:
++        LOCK_SH = LOCK_EX = LOCK_UN = LOCK_NB = 0
++        @staticmethod
++        def flock(f, how): pass
++    fcntl = _NoFcntl()
+ from pathlib import Path
+ 
+ SCHEMA = ('CREATE TABLE IF NOT EXISTS blob(id INTEGER PRIMARY KEY, hash BLOB UNIQUE NOT NULL, data BLOB NOT NULL)',
+@@ -15,6 +22,18 @@
  SHADER_ENTRY = re.compile(r'shader/([0-9a-f]{64})/')
  WAIT = 600   # seconds another process's write may hold this one up
  _DAMAGED = ('malformed', 'not a database', 'disk image')
@@ -17,10 +33,10 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 +            try: os.unlink(dst)
 +            except OSError: pass
 +            time.sleep(0.05)
+ READ_ONLY = None   # set only by --run: the harness supplies this module to older SQLite-based builders too
  
  
- class Store:
-@@ -89,7 +101,7 @@
+@@ -67,7 +86,7 @@
          if data is None: return False
          tmp = f'{path}.tmp-{os.getpid()}-{threading.get_ident()}'
          with open(tmp, 'wb') as f: f.write(data)
@@ -28,4 +44,4 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 +        _replace(tmp, path)
          return True
  
-     @contextlib.contextmanager
+ 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # The rewrites dmsh_build.py makes in a translated shader's MSL before it compiles it, where Metal or the translator falls short of what the Switch code does: precise
-# arithmetic (precise), 64-bit products (mul_extended), Ampere's HMMA as simdgroup matrices (hmma_msl), first stores and shared-memory stores (first_store,
-# shared_store_msl), threadgroup memory past Metal's limit (tg_spill), texture gathers with offsets (gather_offsets), border colours Metal has no sampler state for
-# (border_emu) and a pixel shader's depth snapped to its position (frag_z_snap). Functions of the MSL text and the library ABI only, with no build state, so tests import
-# them. Part of the translation chain (dmsh_chain.FILES) and of every shader's cache key (dmsh_build.py CODE_FP).
+# arithmetic (precise), memory barriers as fences (membar_fence, tg_fence), 64-bit products (mul_extended), uniform words tested against constants, which the front end would
+# fold into switches (uniform_tests), Ampere's HMMA as simdgroup matrices (hmma_msl), first stores and shared-memory stores (first_store, shared_store_msl), threadgroup memory
+# past Metal's limit (tg_spill), texture gathers with offsets (gather_offsets), border colours Metal has no sampler state for (border_emu) and a pixel shader's depth snapped to
+# its position (frag_z_snap). Functions of the MSL text and the library ABI only, with no build state, so tests import them. Part of the translation chain (dmsh_chain.FILES)
+# and of every shader's cache key (dmsh_build.py CODE_FP).
 import bisect, collections, itertools, re
 import dmsh_abi as abi, dmsh_side
 
@@ -11,6 +12,36 @@ import dmsh_abi as abi, dmsh_side
 # and its saturation gives 0, as Metal's precise:: functions (IEEE fmin / fmax) do on every GPU. The M4 Pro's fast ones happen to agree, an A20 Pro's do not: Super Mario Galaxy 2's
 # GX lighting takes max(0, NaN) from light directions left at zero, and the half of Mario its fill light faces came out white on the iPhone (GitHub issue 72; vk_shaders.py PRECISE)
 def precise(msl): return re.sub(r'\bfast::(min|max|clamp)\(', r'precise::\1(', msl)
+_MEMBAR = 'threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture);'
+def membar_fence(msl):
+    """MEMBAR as a fence, not a barrier. The translator turns BAR.SYNC into OpControlBarrier (workgroup scope; SPIRV-Cross prints threadgroup_barrier(mem_flags::mem_threadgroup)) and
+    MEMBAR.GPU / .SYS into OpMemoryBarrier at device scope (Ryujinx CodeGen/Spirv/Instructions.cs GenerateMemoryBarrier), which SPIRV-Cross prints as a threadgroup_barrier with device,
+    threadgroup and texture memory: an execution barrier the Switch code does not have. Where the threads of a group are not converged it waits for threads that never come.
+    PRAGMATA's GPU culling queue 12a52b683eec95c1 has no BAR.SYNC at all, only MEMBAR.SC.GPU; ERRBAR inside its persistent work loop. Each becomes the fence it is,
+    atomic_thread_fence at device scope, sequentially consistent; two in a row (MEMBAR.SC and ERRBAR) become one. From uncraftablexd's PRAGMATA bring-up (PR #1407)"""
+    if _MEMBAR not in msl: return msl
+    fence = 'atomic_thread_fence(mem_flags::mem_device | mem_flags::mem_threadgroup | mem_flags::mem_texture, memory_order_seq_cst, thread_scope_device);   // MEMBAR (membar_fence)'
+    msl = re.sub(r'^([ \t]*)' + re.escape(_MEMBAR) + r'\n\1' + re.escape(_MEMBAR) + r'$', lambda m: m[1] + _MEMBAR, msl, flags=re.M)
+    return msl.replace(_MEMBAR, fence)
+
+TG_FENCE_DECL = re.compile(r'\bthreadgroup\s+(?:spvUnsafeArray<[^;&]*?>|[A-Za-z_][\w<>, ]*?)\s*&?\s*(\w+)\s*(?:\[[^\]]*\])?\s*[;,)]')
+TG_FENCE = 'atomic_thread_fence(mem_flags::mem_threadgroup, memory_order_seq_cst, thread_scope_simdgroup);'
+def tg_fence(src):
+    """A store to threadgroup memory followed by a load of another lane's word, with no barrier between them (Ampere compilers rely on lockstep warps for small
+    scans, e.g. Unreal's GPU radix sort downsweep d032ce5090303e01 at 0x2eb0: STS / LDS [x-4] / STS / LDS [x-8]): for one thread the load and the earlier store do not
+    alias, so Metal moves the load above the store and reads another lane's old value (Orbitals: Niagara's sorted index list wrong every frame, beams and particles broken).
+    A simdgroup-scope memory fence after each threadgroup store keeps the order; it is not an execution barrier, so it is safe in divergent code. Only kernels with a
+    threadgroup array are touched. A plain or compound assignment (SPIRV-Cross folds a load, an operation and a store of the same element into `_46[i] += 1u;`), also to a
+    member or component (`_39[i].x = v;`). From uncraftablexd's Orbitals bring-up (PR #1775)"""
+    names = {m.group(1) for m in TG_FENCE_DECL.finditer(src) if m.group(1) not in ('operator',)}
+    if not names: return src
+    store = re.compile(r'^(\s*)(?:%s)\s*\[[^\n;]*\](?:\.\w+)?\s*(?:[-+*/%%&|^]|<<|>>)?=(?!=)[^\n]*;\s*$' % '|'.join(map(re.escape, sorted(names))))
+    out = []
+    for ln in src.split('\n'):
+        out.append(ln)
+        m = store.match(ln)
+        if m: out.append(m.group(1) + TG_FENCE)
+    return '\n'.join(out)
 
 # spirv-cross writes OpUMulExtended / OpSMulExtended as calls of an optnone template, spvMulExtended, as Metal's compiler may fail on an inlined mulhi (spirv_msl.cpp,
 # SPVFuncImplMulExtended). The barrier keeps every product a call that is never folded: Switch 2 shaders divide by constants through the high word of a product (Ocarina of Time
@@ -23,6 +54,39 @@ def mul_extended(msl):
     scalar = ''.join(f'template<typename T, typename U> static inline __attribute__((always_inline)) T spvMulExtended({t} l, {t} r) {{ {w} p = {w}(l) * {w}(r); return T{{U(p), U(p >> 32)}}; }}\n'
                      for t, w in (('uint', 'ulong'), ('int', 'long')))
     return msl[:found[0].end()] + scalar + msl[found[0].end():]
+
+# A game uniform word tested against integer constants, as the translator writes a GLSL switch (Ryujinx's structurizer: one test of the word per case, flags for the fall-throughs,
+# the cases nested in each other): bool _5 = as_type<int>((*spvDescriptorSet0.fp_c5)._m0[16].w) != 102. The Metal front end's SimplifyCFG (at -O1 too) folds a chain of blocks
+# that each hold only such a test of one value into a switch, whose cases jump into the nested blocks past their joins. Apple's GPU compiler then takes a pixel shader with dozens of
+# such switches for hours and tens of gigabytes (applegpu-nt, metal-tt 32023.922): Nintendo Switch Sports Resort's material pixel shader 692008b305ce264f (42 switches) ran past
+# 10 minutes and 13 GB alone where it had taken 7 s, and the Mac app's pipeline archive spent 15 hours on four pipelines. The reads were plain since the host pads a short binding
+# (dmsh_fetch.select_guards): before that, each read's bounds test sat in the test's block and nothing was folded. Each tested read becomes a volatile load of its word
+# (dm_uword), which the front end can neither merge with the next test's nor move out of its block, so no chain is folded; a uniform load per test is less than the bounds test
+# each read had then. Only words of the game's uniform slots (c3 and up) tested against a constant more than once: a single test is no chain, and the driver's banks (c0 to c2)
+# are left as written, since later rewrites look for their reads (dmsh_entry.vs_base_instance) and the host fills them. Returns the shader unchanged when there are none
+_UTEST_READ = r'as_type<(u?int)>\((\(\*spvDescriptorSet0\.[a-z]+_c(?:[3-9]|\d\d)\)\._m0\[\d+\])\.([xyzw])\)'   # game slots c3 and up, not the driver's banks
+_UTEST = re.compile(r'(?<![\w.])%s(?= [!=]= -?\d+u?(?![\w.]))|(?<=[!=]= )%s' % (_UTEST_READ, _UTEST_READ.replace('(u?int)', '(?P<t2>u?int)').replace(r'(\(\*', r'(?P<r2>\(\*').replace('([xyzw])', '(?P<c2>[xyzw])')))
+_UTEST_LEFT = re.compile(r'(?<![\w.])-?\d+u? [!=]= $')
+UWORD = ('#ifndef DM_UWORD\n#define DM_UWORD\ntemplate<typename T, int N> static inline __attribute__((always_inline)) T dm_uword(const constant vec<T, N>& v, int i) '
+         '{ return ((const volatile constant T*)&v)[i]; }\n#endif\n')
+def uniform_tests(msl):
+    if 'spvDescriptorSet0' not in msl or 'as_type<' not in msl: return msl
+    def parts(m):
+        if m.group(1): return m.group(1), m.group(2), m.group(3)
+        if not _UTEST_LEFT.search(msl, max(0, m.start() - 16), m.start()): return None   # [!=]= after something other than a constant
+        return m.group('t2'), m.group('r2'), m.group('c2')
+    found = [(m, p) for m in _UTEST.finditer(msl) for p in [parts(m)] if p]
+    tested = collections.Counter(r + c for _, (_, r, c) in found)
+    chains = {w for w, n in tested.items() if n > 1}
+    if not chains: return msl
+    out, at = [], 0
+    for m, (t, r, c) in found:
+        if r + c not in chains: continue
+        out += [msl[at:m.start()], 'as_type<%s>(dm_uword(%s, %d))' % (t, r, 'xyzw'.index(c))]; at = m.end()
+    body = ''.join(out) + msl[at:]
+    head = re.search(r'^using namespace metal;\n', body, re.M)
+    if not head: raise ValueError('uniform tests: no "using namespace metal;" to put dm_uword after')
+    return body[:head.end()] + UWORD + body[head.end():]
 
 # Ampere HMMA.16816 with an f16 accumulator (agl's upscaler networks, the NDVE video networks) reaches the MSL as calls of dmsh_hmma16816_f16(lane, block, A0..A3, B0, B1, C0, C1,
 # flags, A's LDSM address, A0..A3's offsets, A's row stride, out D1) → D0, the subgroup's 256-word block of the scratch shared memory as the last argument (InstEmitAmpereTensor.AHmma,

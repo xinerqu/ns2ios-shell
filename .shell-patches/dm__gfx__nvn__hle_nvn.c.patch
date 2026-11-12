@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
 --- a/dm/gfx/nvn/hle_nvn.c
 +++ b/dm/gfx/nvn/hle_nvn.c
-@@ -380,6 +380,23 @@
+@@ -388,6 +388,20 @@
  NVN(nvnTextureBuilderGetSparseTileLayout, void, const NVNtextureBuilder *b, NVNtextureSparseTileLayout *o) { sparse_layout(&((const tex_builder_t *)b)->d, o); }
  #define TX(t) ((tex_t *)(t))
  #define CTX(t) ((const tex_t *)(t))
@@ -10,9 +10,6 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
 +// host parses (atoi != 0, so the profile's "on" arrives as 1). Read once and kept, as cs_on below does for its own switch.
 +static int tex_flush_upload(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TEX_FLUSH_UPLOAD"); v = e ? atoi(e) != 0 : DM_GAME_TEX_FLUSH_UPLOAD; } return v; }
 +static int tex_dirty_upload(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_TEX_DIRTY_UPLOAD"); v = e ? atoi(e) != 0 : DM_GAME_TEX_DIRTY_UPLOAD; } return v; }
-+// Profile render_cond, same arrangement (DM_RENDER_COND): recorded here, evaluated at replay in nvn_mtl.m (OP_RENDER_COND), which reads the
-+// same switch -- both ends have to agree, or the records are made and never acted on.
-+static int render_cond_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_RENDER_COND"); v = e ? atoi(e) != 0 : DM_GAME_RENDER_COND; } return v; }
 +// Profile key shader_key_skip, "<offset>+<length>": overridable at run time for the same reason as the three above -- the shell compiles the
 +// placeholder profile's 0+0, so a packed game that sets it would hash its control sections unmasked and ask for shaders its map does not have
 +static void shader_key_skip(uint32_t *off, uint32_t *len) {
@@ -25,7 +22,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
  // Textures the CPU fills in place (profile tex_flush_upload): Tears of the Kingdom streams its textures (TexToGo, already in the GPU's block-linear layout) straight into
  // CPU-cached memory pools and publishes each with nvnMemoryPoolFlushMappedRange (9,436 calls at boot), without a packaged layout or WriteTexels. They stayed GPU-only
  // textures with content 0, and the G-buffer's base colour came out black. Textures that can hold such data (not render targets, not linear, no packaged layout, in a pool
-@@ -431,19 +448,19 @@
+@@ -439,19 +453,19 @@
      // background never appeared). A CPU_NO_ACCESS pool keeps the exclusion: there the compression tags may really be there.
      // A sparse pool's addresses are no memory the CPU writes or flushes, and no range nvn_dirty tracks, so they read as dirty at once: every texture in one, a render target too, came out CPU-written at its first
      // use in a profile with tex_dirty_upload. What the CPU wrote into the physical pages behind one is seen through the page table instead (tex_from_storage, sparse_look)
@@ -49,7 +46,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      pthread_mutex_lock(&g_ft_mu);
      for (size_t i = 0; i < g_nft; i++) if (g_ft[i].t.serial == serial) { g_ft[i] = g_ft[--g_nft]; break; }
      pthread_mutex_unlock(&g_ft_mu);
-@@ -452,7 +469,7 @@
+@@ -460,7 +474,7 @@
  // natively; its 121-layer ASTC terrain material arrays, 42 MB each). They stayed GPU-only textures with content 0, which ASTC decodes as the error colour, and the cave came out magenta.
  // ft_add write-protects a registered texture's pages, and on its first resolution (tex_mtl, submit thread) a write since then makes it CPU-written like a flushed one
  int nvn_ft_written(const tex_t *t) {
@@ -58,7 +55,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      int r = 0; pthread_mutex_lock(&g_ft_mu);
      for (size_t i = 0; i < g_nft; i++) if (g_ft[i].t.serial == t->serial) {
          if (ft_written(&g_ft[i])) { r = 1; g_ft[i] = g_ft[--g_nft]; }
-@@ -462,7 +479,7 @@
+@@ -470,7 +484,7 @@
      return r;
  }
  int nvn_ft_tracked(uint64_t serial) {   // registered and not resolved yet: its storage holds whatever the CPU has written, and the GPU's writes (nvn_mtl.m gsb_store)
@@ -67,7 +64,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      int r = 0; pthread_mutex_lock(&g_ft_mu);
      for (size_t i = 0; i < g_nft; i++) if (g_ft[i].t.serial == serial) { r = 1; break; }
      pthread_mutex_unlock(&g_ft_mu);
-@@ -479,7 +496,7 @@
+@@ -487,7 +501,7 @@
  // Checking every texture at every submission cost TOTK 0.4 ms of submit CPU per frame on the Mac; this way a texture is picked up a few submissions later at most
  enum { FT_POLL_BYTES = 128 << 20 };
  void nvn_ft_poll(void) {
@@ -76,7 +73,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      static uint64_t gen; static size_t cur, left;
      static struct { tex_t t; size_t at; int how; } *hit; static size_t chit; size_t nhit = 0;
      uint64_t now = nvn_dirty_now(), scanned = 0;
-@@ -521,7 +538,7 @@
+@@ -529,7 +543,7 @@
      pthread_mutex_unlock(&g_ft_mu);
  }
  static void ft_flush(const uint8_t *a, uint64_t n) {
@@ -85,7 +82,7 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      pthread_mutex_lock(&g_ft_mu);
      for (size_t i = 0; i < g_nft;)
          if (g_ft[i].mem < a + n && a < g_ft[i].mem + g_ft[i].size) { mtl_tex_cpu_written(&g_ft[i].t); g_ft[i] = g_ft[--g_nft]; } else i++;
-@@ -769,13 +786,19 @@
+@@ -777,13 +791,19 @@
      uint8_t md[CC_SHA256_DIGEST_LENGTH]; CC_SHA256_CTX hc; CC_SHA256_Init(&hc);
      // Profile key shader_key_skip: bytes of the control section hashed as zeros (shader_split.py key_ctl). Batman: Arkham Knight's engine shares one control section among shaders whose
      // sections differ only in GLSLC's compile information (+0x778..+0x791, +0x7d0..+0x7e7): it hands a program the section of an earlier shader with the same rest, so the bytes there name another shader
@@ -109,17 +106,3 @@ diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
      if (code) CC_SHA256_Update(&hc, (const void *)(uintptr_t)sd->data, ncode);
      CC_SHA256_Final(md, &hc); memcpy(out, md, 8);
      return 1;
-@@ -3267,11 +3290,11 @@
- // State the replay layer does not have yet: logged once (conditional rendering is treated as "always draw")
- // Render enable (profile render_cond, see OP_RENDER_COND in nvn_mtl.m): recorded and evaluated at replay; without the key everything draws, as before
- NVN(nvnCommandBufferSetRenderEnable, void, NVNcommandBuffer *c, uint32_t en) {
--    if (DM_GAME_RENDER_COND) *REC(c, OP_RENDER_COND, p_render_cond) = (p_render_cond){(en & 0xff) ? 2 : 3, 0, 0};
-+    if (render_cond_on()) *REC(c, OP_RENDER_COND, p_render_cond) = (p_render_cond){(en & 0xff) ? 2 : 3, 0, 0};
-     else if (!(en & 0xff)) ONCE_LOG("[RED] SetRenderEnable(false): the host draws anyway for now");
- }
- NVN(nvnCommandBufferSetRenderEnableConditional, void, NVNcommandBuffer *c, NVNconditionalRenderMode m, NVNbufferAddress a) {
--    if (DM_GAME_RENDER_COND) *REC(c, OP_RENDER_COND, p_render_cond) = (p_render_cond){(int)m & 1, 0, a};
-+    if (render_cond_on()) *REC(c, OP_RENDER_COND, p_render_cond) = (p_render_cond){(int)m & 1, 0, a};
-     else ONCE_LOG("[RED] SetRenderEnableConditional: the host draws anyway for now");
- }
- // Fire Emblem: Three Houses turns depth clamp on for its scenes; ignored, the ground right under its close-up battle cameras was clipped away and the lighting pass painted the sky's fog colour there

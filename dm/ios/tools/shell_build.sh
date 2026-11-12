@@ -91,6 +91,29 @@ cp -R "$APP" "$A" || die "copy the app"; A=$O/app
 # What must not be in the shell. The packer writes all of these into the app it produces.
 for p in romfs msl aoc Frameworks; do [ -e "$A/$p" ] && die "the shell must not carry $p/"; done
 rm -rf "$A/_CodeSignature" "$A/embedded.mobileprovision"
+# Which build this is. host/main.c logs Info.plist's DMCommit at boot, and before this stamp every shell's log said "build:
+# commit not recorded" -- a crash in a player's log could not be traced to a release at all. Upstream's build_ipa.sh writes
+# the same key for a game build, from the checkout it builds in; a shell is a CI checkout of this fork rebased on one
+# upstream commit, so the stamp carries both (and nothing else: no tag, which does not exist until the release).
+COMMIT=${GITHUB_SHA:-}
+if [ -n "$COMMIT" ]; then
+  COMMIT=$(printf '%s' "$COMMIT" | cut -c1-12)   # CI: the fork's commit, exact
+else
+  COMMIT=$(git -C "$DM/.." rev-parse HEAD 2>/dev/null || true)
+  if [ -n "$COMMIT" ]; then COMMIT=$(printf '%s' "$COMMIT" | cut -c1-12)
+    [ -z "$(git -C "$DM/.." status --porcelain --untracked-files=no 2>/dev/null)" ] || COMMIT="$COMMIT+dirty"
+  else COMMIT=local; t "WARNING: no GITHUB_SHA and no git here: the shell will log its commit as 'local'"; fi
+fi
+# The upstream this fork sits on: .shell-base.txt in a fork checkout; in CI the tree is the upstream checkout itself, whose
+# HEAD is that commit (.shell-base.txt lives in the fork checkout, not in the tree being built).
+BASE=$(cut -c1-8 "$DM/../.shell-base.txt" 2>/dev/null || true)
+[ -n "$BASE" ] || BASE=$(git -C "$DM/.." rev-parse HEAD 2>/dev/null | cut -c1-8)
+[ -n "$BASE" ] || BASE=nobase
+STAMP="$COMMIT+base-$BASE"
+/usr/libexec/PlistBuddy -c "Delete :DMCommit" "$A/Info.plist" > /dev/null 2>&1 || true
+/usr/libexec/PlistBuddy -c "Add :DMCommit string $STAMP" "$A/Info.plist" > /dev/null \
+  || die "DMCommit into $A/Info.plist: the log's 'build: commit ...' line would say 'not recorded' and the build could not be traced"
+t "source: $STAMP"
 # The memory limit is part of the package, not of the phone: iOS gives an app without com.apple.developer.kernel.increased-
 # memory-limit about 3,375 MB, which the bigger games fill (Tears of the Kingdom was killed entering the overworld with 33 MB
 # of headroom left). An unsigned binary has no signature for an install tool to read entitlements from, so put one there: sign

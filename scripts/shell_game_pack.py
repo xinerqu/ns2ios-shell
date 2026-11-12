@@ -20,7 +20,7 @@ sideloading tool signs it, as it signs every package we ship).
 Stage 1 of the several-games work: it reads a work folder scripts/nxn_pack.py already made (stage/Payload/<App>.app has every
 piece) so the device test needs no repack of a 5 GB game. The same layout is what nxn_pack.py --framework will write.
 """
-import argparse, json, os, plistlib, shutil, sys, zipfile
+import argparse, json, os, plistlib, re, shutil, sys, zipfile
 from pathlib import Path
 
 NXN = Path(__file__).resolve().parent.parent
@@ -86,22 +86,53 @@ def chain_of(app):
     return ''
 
 
+def shell_sha(shell):
+    """The commit the shell was built from: dm/shell_info.txt inside the shell zip (written by dm/ios/tools/shell_build.sh).
+    '' for a shell from before that stamp grew the key, which is unknown rather than wrong."""
+    with zipfile.ZipFile(shell) as z:
+        for n in z.namelist():
+            if n.startswith('Payload/') and n.endswith('/dm/shell_info.txt'):
+                for line in z.read(n).decode('utf-8', 'replace').splitlines():
+                    k, _, v = line.partition('=')
+                    if k.strip() == 'SOURCE_SHA': return v.strip()
+    return ''
+
+
+def stamp_commit(plist_bytes, sha):
+    """Give the package's Info.plist the DMCommit the host prints in its first log line (dm/host/main.c: "build: commit
+    %s"). A single-game package gets it from scripts/nxn_pack.py's step_assemble; a library package is the shell's own app
+    plus Frameworks, so nothing of the staged app comes along -- until this, every phone log from a library build said
+    "commit not recorded", and a player's crash could not be traced to a release. A plist that already carries the shell's
+    own stamp is left alone: it names the upstream base too."""
+    if not re.fullmatch(r'[0-9a-f]{40}', sha or ''): return plist_bytes
+    pl = plistlib.loads(plist_bytes)
+    if pl.get('DMCommit'): return plist_bytes
+    pl['DMCommit'] = sha
+    return plistlib.dumps(pl, fmt=plistlib.FMT_BINARY)
+
+
 def write_ipa(shell, lib, ipa):
     """The shell package plus every framework in the library. Adding a game = pack it into the same library and run this
     again; the phone reinstalls the app and its data and saves stay. --ipa-only comes straight here."""
+    sha = shell_sha(shell)
     with zipfile.ZipFile(shell) as z:
         apps = sorted({n_.split('/')[1] for n_ in z.namelist() if n_.startswith('Payload/') and n_.split('/')[1].endswith('.app')})
         if len(apps) != 1: die('the shell holds %d apps, expected 1: %s' % (len(apps), apps))
         appname = apps[0]
+        plist_name = 'Payload/%s/Info.plist' % appname
         have = sorted(p for p in lib.glob('DmGame*.framework') if p.is_dir())
         if not have: die('the library holds no DmGame*.framework: %s' % lib)
         with zipfile.ZipFile(ipa, 'w', zipfile.ZIP_DEFLATED) as o:
             for it in z.infolist():
-                o.writestr(it, z.read(it.filename))
+                data = z.read(it.filename)
+                if it.filename == plist_name: data = stamp_commit(data, sha)
+                o.writestr(it, data)
             for fw in have:
                 for src in sorted(fw.rglob('*')):
                     if src.is_file():
                         o.write(src, 'Payload/%s/Frameworks/%s/%s' % (appname, fw.name, src.relative_to(fw).as_posix()))
+    if sha: say('Info.plist: DMCommit %s (the shell this package was built from)' % sha[:12])
+    else: say('Info.plist: the shell carries no SOURCE_SHA, so log.txt says "commit not recorded"')
     say('package %s (%s + %d game(s): %s)' % (ipa, shell.name, len(have), ', '.join(p.name for p in have)))
 
 

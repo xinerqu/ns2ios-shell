@@ -8,7 +8,7 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 -import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections
 +import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
  sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools'))
- import romfs, shader_lib   # the libraries of an earlier build may be one file (shader_lib.py), read in place
+ import romfs, shader_cache, shader_lib   # the libraries of an earlier build may be one file (shader_lib.py), read in place
  STAMPS = 'metallib/filled.json'   # the earlier builds' folders already read
  
  FORMAT = b'dmsh_mtlcache 2'   # earlier prefill could misclassify an unsampled library from another compiler
