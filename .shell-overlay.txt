@@ -88,6 +88,7 @@
 # This fork's own tools and pages. They run from this checkout (the workflow calls `fork/scripts/...`), never from the tree
 # the shell is built in, so the overlay has no business copying them.
 ! scripts/annotate_build_errors.py
+! scripts/check_mesh_libs.py                 # counts a package's mesh libraries, which a geo_mesh game cannot play without (issue #14)
 ! scripts/check_release_notes.py
 ! scripts/check_reference_calls.py
 ! scripts/check_workflow_shell.py
