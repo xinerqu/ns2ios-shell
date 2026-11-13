@@ -4588,6 +4588,25 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
 #endif
     MLOG("memory up to frame %llu: resident %llu MB, GPU allocated %llu MB, deferred-release queue %lu, residency set %lu, serial objects %u, memory pools %d (resident %d; peak %d / tracking table capacity %d; freed but alive %lu, %llu MB), shared textures %u (%u of them unreferenced; evicted with pools %llu, on storage takeover %llu in total), texture re-uploads %llu in total, per-frame arena blocks created %llu in total, finalized textures still referenced %u (small table, %llu put in total), retired but held by a serial %u, recycled texture heaps made %llu, reused %llu, freed %llu, waiting %u (%llu MB); headroom to the system memory limit %s", frame, rss_mb, gpu, nd, nr, ns, live, pres, peak, cap, dead_n, dead_mb, ashared, aorph, (unsigned long long)as.evicted, (unsigned long long)as.taken, (unsigned long long)g_pkg_reuploads, (unsigned long long)g_arena_made, nghost, (unsigned long long)ghost_puts, nwait,
          (unsigned long long)g_rh_made, (unsigned long long)g_rh_reused, (unsigned long long)g_rh_trimmed, rh_n, (unsigned long long)(rh_bytes >> 20), avail);
+    // How the residency set is spent, by kind, on every readout (res_top prints this only at the first out-of-memory error): a set that climbs by the region, with the guest's pool wrappers
+    // in it, is the question this line answers. Which bucket grows decides which one to go after; it prints only, it never refuses anything
+    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; int npools = 0, nbig = 0;
+        @autoreleasepool {
+            pthread_mutex_lock(&g_res_mu);
+            for (id<MTLAllocation> o in g_res_objects.allObjects) { uint64_t z = o.allocatedSize;
+                int k = [(id)o conformsToProtocol:@protocol(MTLTexture)] ? 0 : [(id)o conformsToProtocol:@protocol(MTLHeap)] ? 1 : ((id<MTLBuffer>)o).storageMode == MTLStorageModeShared ? 2 : 3;
+                kb[k] += z; kn[k]++; }
+            pthread_mutex_unlock(&g_res_mu);
+            pthread_mutex_lock(&g_mu);
+            npools = g_npool; nbig = g_nbig;
+            for (int i = 0; i < g_npool; i++) if (g_pools[i].buf) pool_b += g_pools[i].buf.length;
+            for (int j = 0; j < g_nbig; j++) {   // a large pool's chunks are entries of their own (big_new), keyed by the pool's memory
+                for (int i = 0; i < g_npool; i++) if (g_pools[i].key == g_big[j].mem && g_pools[i].buf) { chunk_n++; chunk_b += g_pools[i].buf.length; }
+                for (id<MTLBuffer> b in g_big[j].old) { old_n++; old_b += b.length; } }
+            pthread_mutex_unlock(&g_mu);
+        }
+        MLOG("residency set by kind: textures %llu, %llu MB; heaps %llu, %llu MB; shared buffers %llu, %llu MB; private buffers %llu, %llu MB; pool buffers %d, %llu MB; large pools %d, chunks %llu, %llu MB, chunks a longer one replaced %llu, %llu MB",
+             kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20); }
     { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
       mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
       MLOG("texture views by texture (vc_get): %u textures hold cached views; %llu views reused, %llu made in total; texture buffers bound as 2D rows for wrapped 1D fetches %llu times, %llu made, %llu failed, %llu copied into aligned rows (%llu MB) "
