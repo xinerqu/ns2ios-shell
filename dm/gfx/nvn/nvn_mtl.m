@@ -1015,6 +1015,14 @@ static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
     int i = b->chunk[k] - 1;
     uintptr_t have = i >= 0 ? g_pools[i].end : 0;
     if (i >= 0 && (have >= b->hi || have >= addr + want)) return i;
+    // A chunk made for an earlier stride may already run past this one: its buffer reaches the end of what that lookup asked (rounded up, plus a stride), so it can hold this range too.
+    // Take it rather than make a second window over the same pages -- Metal charges each buffer it is handed whole, so overlapping windows count their shared pages once per window
+    // (issue #14: one 5 GB pool held 38 chunks, 3028 MB, for strides that came to 608 MB, on a device whose whole working set is 5461 MB). What the GPU may reach is unchanged:
+    // the reuse only happens when the older buffer already holds every byte of [addr, addr + want)
+    for (unsigned m = 1; m <= BIG_UNKNOWN / BIG_S && m <= k; m++) {
+        int p = b->chunk[k - m] - 1;
+        if (p >= 0 && g_pools[p].base <= addr && (g_pools[p].end >= b->hi || g_pools[p].end >= addr + want)) { b->chunk[k] = p + 1; return p; }
+    }
     int n = big_new(b, lo, lo + BIG_S, end, end >= b->b ? 1 : BIG_UNKNOWN); if (n < 0) return -1;
     if (i >= 0) {   // lengthened: what is encoded with the shorter chunk keeps it, resident, until the pool goes
         [b->old addObject:g_pools[i].buf]; [g_keep removeObject:g_pools[i].buf]; g_pools[n].res = 0; if (g_pools[i].res) g_pool_res_n--;
