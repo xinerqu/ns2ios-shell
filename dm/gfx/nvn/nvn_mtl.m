@@ -1023,6 +1023,10 @@ static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
         int p = b->chunk[k - m] - 1;
         if (p >= 0 && g_pools[p].base <= addr && (g_pools[p].end >= b->hi || g_pools[p].end >= addr + want)) { b->chunk[k] = p + 1; return p; }
     }
+    // A chunk this stride borrowed from an earlier one keeps that one's base, so lengthening it in place would move it off the stride that owns it: that stride's lookups then
+    // subtract a base past their own address and read somewhere else entirely (texture corruption late in a session, issue #14). A stride holding a borrowed chunk gets one of
+    // its own instead, and the borrowed one stays where its owner can still find it
+    if (i >= 0 && g_pools[i].base != lo) i = -1;
     int n = big_new(b, lo, lo + BIG_S, end, end >= b->b ? 1 : BIG_UNKNOWN); if (n < 0) return -1;
     if (i >= 0) {   // lengthened: what is encoded with the shorter chunk keeps it, resident, until the pool goes
         [b->old addObject:g_pools[i].buf]; [g_keep removeObject:g_pools[i].buf]; g_pools[n].res = 0; if (g_pools[i].res) g_pool_res_n--;
