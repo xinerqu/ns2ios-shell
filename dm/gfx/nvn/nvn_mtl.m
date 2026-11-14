@@ -328,6 +328,7 @@ static _Atomic unsigned g_image_heap_n, g_big_n;   // g_big_n: large pools in ch
 // so this count is the number that says whether reclaiming is worth writing. Print only.
 #define USED_MAX 8192u
 static _Atomic uint64_t g_used[USED_MAX / 64]; static _Atomic unsigned g_used_n;
+static _Atomic uint64_t g_up_src_b;   // bytes borrowed by up_big_src since the last readout: the uploads that made a temporary instead of using the pool's own buffer
 static inline MTL4VisibilityOptions resource_vis(void) { return MTL4VisibilityOptionDevice | (g_image_heap_n || g_big_n ? MTL4VisibilityOptionResourceAlias : 0); }
 // Residency churn by call site (the power line every 300 frames, mtl_res_stats): each commit with changes is a kernel call whose cost grows with what was added or removed
 enum { RS_SITES = 16 }; static struct { int line; uint64_t n, bytes; } g_rs_site[RS_SITES]; static uint64_t g_rs_rm, g_rs_commits, g_rs_commit_ns;
@@ -3405,14 +3406,18 @@ static void rb_swap_rows(uint8_t *p, size_t wb, size_t rows, size_t nz, size_t r
 static uint64_t g_up_src_made;   // source buffers made (t_upload_src)
 static id<MTLBuffer> up_big_src(uint64_t addr, uint64_t len, uint64_t *off) {
     // Not once the raw memory table holds the whole pool (big_full): the lookup finds that buffer. Ocarina of Time's first scene made 4,664 of these in one batch, 2.1 GB counted against the working set for pages already wired
-    pthread_mutex_lock(&g_mu); int k = big_of(addr), in = k >= 0 && !g_big[k].full;
-    if (k < 0 && len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
+    // A windowed pool: borrow only while that stride's memory is not resident yet (a chunk not made, or made and not in the set). Once it is, its own buffer is
+    // what the GPU reads, and the upload goes through mtl_addr as it always did for the pools under BIG_MIN - a temporary per upload over pages the batch then
+    // re-protects was what the 4 MB threshold multiplied: 64,982 re-uploads and a black block in Nier's picture (issue #14)
+    pthread_mutex_lock(&g_mu); int k = big_of(addr), in = 0;
+    if (k >= 0) { if (!g_big[k].full) { int p = g_big[k].chunk[(addr - g_big[k].a) >> BIG_IDX] - 1; in = p < 0 || !g_pools[p].res; } }
+    else if (len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
     pthread_mutex_unlock(&g_mu);
     if (!in || !len) return nil;
     uintptr_t pg = (uintptr_t)getpagesize(), a = (uintptr_t)addr & ~(pg - 1), b = ((uintptr_t)addr + len + pg - 1) & ~(pg - 1);
     id<MTLBuffer> buf = [g_dev newBufferWithBytesNoCopy:(void *)a length:b - a options:MTLResourceStorageModeShared deallocator:nil];
     if (!buf) return nil;
-    g_up_src_made++;
+    g_up_src_made++; atomic_fetch_add(&g_up_src_b, b - a);
     res_add(buf); [g_up_keep addObject:buf]; *off = (uint64_t)addr - a;
     return buf;
 }
@@ -4806,7 +4811,7 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
          (unsigned long long)g_rh_made, (unsigned long long)g_rh_reused, (unsigned long long)g_rh_trimmed, rh_n, (unsigned long long)(rh_bytes >> 20), avail);
     // How the residency set is spent, by kind, on every readout (res_top prints this only at the first out-of-memory error): a set that climbs by the region, with the guest's pool wrappers
     // in it, is the question this line answers. Which bucket grows decides which one to go after; it prints only, it never refuses anything
-    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, used_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; int npools = 0, nbig = 0;
+    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, used_b = 0, borrow_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; unsigned used_n = 0; int npools = 0, nbig = 0;
         @autoreleasepool {
             pthread_mutex_lock(&g_res_mu);
             for (id<MTLAllocation> o in g_res_objects.allObjects) { uint64_t z = o.allocatedSize;
@@ -4817,7 +4822,8 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
             npools = g_npool; nbig = g_nbig;
             for (int i = 0; i < g_npool; i++) if (g_pools[i].buf) pool_b += g_pools[i].buf.length;
             for (unsigned w = 0; w < USED_MAX / 64; w++) { uint64_t m = atomic_load(&g_used[w]); while (m) { unsigned b = (unsigned)__builtin_ctzll(m); m &= m - 1; unsigned i = w * 64 + b; if (i < (unsigned)g_npool && g_pools[i].buf) used_b += g_pools[i].buf.length; } atomic_store(&g_used[w], 0); }
-            atomic_store(&g_used_n, 0);
+            used_n = atomic_load(&g_used_n);   // read it before the reset: printing afterwards is what made this read 0 on every line
+            atomic_store(&g_used_n, 0); borrow_b = atomic_exchange(&g_up_src_b, 0);
             for (int j = 0; j < g_nbig; j++) {   // a large pool's chunks are entries of their own (big_new), keyed by the pool's memory
                 for (int i = 0; i < g_npool; i++) if (g_pools[i].key == g_big[j].mem && g_pools[i].buf) { chunk_n++; chunk_b += g_pools[i].buf.length; }
                 for (id<MTLBuffer> b in g_big[j].old) { old_n++; old_b += b.length; } }
@@ -4826,8 +4832,8 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
         MLOG("residency set by kind: textures %llu, %llu MB; heaps %llu, %llu MB; shared buffers %llu, %llu MB; private buffers %llu, %llu MB; pool buffers %d, %llu MB; large pools %d, chunks %llu, %llu MB, chunks a longer one replaced %llu, %llu MB",
              kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20);
         // What the last interval's lookups reached, and what the device says its own budget is: a set mostly of windows nothing reached again is one reclaiming would shrink
-        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB",
-             atomic_load(&g_used_n), npools, used_b >> 20, (unsigned long long)(g_dev.recommendedMaxWorkingSetSize >> 20),
+        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; uploads that borrowed a temporary instead of the pool's buffer: %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB",
+             used_n, npools, used_b >> 20, borrow_b >> 20, (unsigned long long)(g_dev.recommendedMaxWorkingSetSize >> 20),
              (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20)); }
     { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
       mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
