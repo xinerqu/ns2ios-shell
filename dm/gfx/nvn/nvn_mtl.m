@@ -1051,11 +1051,29 @@ static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, uint6
     return g_npool - 1;
 }
 // The entry of a large pool for [addr, addr + len): the chunk of its stride, made or lengthened to reach as far as asked; -1 past the pool's end
+// How far past its address a lookup that does not say how far it reads may reach (DM_NVN_POOL_WIN, MB): 0 keeps BIG_UNKNOWN, the 64 MB every build before
+// this knob used. A smaller window is what issue #14 asks for - one 5 GB pool's chunks came to 3606 MB over ranges that come to 608 MB - and another port of
+// the same guest memory windows its host mapping at 4 MB, stepping it at 2 MB. A set knob also drops the spare stride the default adds, so the window is the
+// asked length rounded up to a stride and no more. A shader that reads past the window it was handed is a GPU page fault: this is an experiment, per game
+static uint64_t pool_win(void) {
+    static uint64_t v; static int read;
+    if (read) return v;
+    read = 1;
+    const char *e = getenv("DM_NVN_POOL_WIN"); long mb = e && *e ? atol(e) : 0;
+    if (mb >= 1) { if (mb > 1024) mb = 1024; v = (uint64_t)mb << 20;
+        MLOG("pool windows: a lookup that does not say how far it reads takes %.1f MB past the address, rounded up to a stride (DM_NVN_POOL_WIN)", (double)mb); }
+    return v;
+}
 static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
     if (addr + len > b->hi) return -1;
     if (b->full) return b->full - 1;
     uintptr_t k = (addr - b->a) >> 24, lo = b->a + (k << 24);
-    uint64_t want = len > 1 ? len : BIG_UNKNOWN; uintptr_t end = (addr + want + BIG_S - 1) & ~(uintptr_t)(BIG_S - 1); end += BIG_S; if (end > b->b || end < lo) end = b->b;
+    uint64_t win = pool_win();
+    uint64_t want = len > 1 ? len : (win ? win : BIG_UNKNOWN);
+    uintptr_t end = (addr + want + BIG_S - 1) & ~(uintptr_t)(BIG_S - 1);
+    if (!win) end += BIG_S;   // the default's spare stride; a set window ends at the stride its ask reaches
+    if (end < lo + BIG_S) end = lo + BIG_S;
+    if (end > b->b || end < lo) end = b->b;
     int i = b->chunk[k] - 1;
     uintptr_t have = i >= 0 ? g_pools[i].end : 0;
     if (i >= 0 && (have >= b->hi || have >= addr + want)) return i;
