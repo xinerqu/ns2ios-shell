@@ -180,20 +180,18 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return pool_held(addr, 1);
  }
  // Whether [addr, addr + len) lies in a pool, with no side effect: mtl_addr makes the pool resident, for a GPU use to follow. A large pool is answered from its range, since its lookup
-@@ -3328,14 +3406,18 @@
+@@ -3328,6 +3406,10 @@
  static uint64_t g_up_src_made;   // source buffers made (t_upload_src)
  static id<MTLBuffer> up_big_src(uint64_t addr, uint64_t len, uint64_t *off) {
      // Not once the raw memory table holds the whole pool (big_full): the lookup finds that buffer. Ocarina of Time's first scene made 4,664 of these in one batch, 2.1 GB counted against the working set for pages already wired
--    pthread_mutex_lock(&g_mu); int k = big_of(addr), in = k >= 0 && !g_big[k].full;
--    if (k < 0 && len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
-+    // A windowed pool: borrow only while that stride's memory is not resident yet (a chunk not made, or made and not in the set). Once it is, its own buffer is
-+    // what the GPU reads, and the upload goes through mtl_addr as it always did for the pools under BIG_MIN - a temporary per upload over pages the batch then
-+    // re-protects was what the 4 MB threshold multiplied: 64,982 re-uploads and a black block in Nier's picture (issue #14)
-+    pthread_mutex_lock(&g_mu); int k = big_of(addr), in = 0;
-+    if (k >= 0) { if (!g_big[k].full) { int p = g_big[k].chunk[(addr - g_big[k].a) >> BIG_IDX] - 1; in = p < 0 || !g_pools[p].res; } }
-+    else if (len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
++    // Back as it was (fa3e5db tried to borrow only while the stride is not resident; that made it worse: an upload whose range a window cannot serve then went
++    // through mtl_addr, failed, and the texture stayed black for good - Nier, issue #14). The temporary is load-bearing for a windowed pool: a window is BIG_WIN
++    // past the address, not the upload's length, and the batch's own pages are what it must read. The cost is the re-uploads, and the chain's MetalStorageBounds
++    // (upstream e0cf2ac7) is the way to stop guessing instead of this.
+     pthread_mutex_lock(&g_mu); int k = big_of(addr), in = k >= 0 && !g_big[k].full;
+     if (k < 0 && len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
      pthread_mutex_unlock(&g_mu);
-     if (!in || !len) return nil;
+@@ -3335,7 +3417,7 @@
      uintptr_t pg = (uintptr_t)getpagesize(), a = (uintptr_t)addr & ~(pg - 1), b = ((uintptr_t)addr + len + pg - 1) & ~(pg - 1);
      id<MTLBuffer> buf = [g_dev newBufferWithBytesNoCopy:(void *)a length:b - a options:MTLResourceStorageModeShared deallocator:nil];
      if (!buf) return nil;
