@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**161 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**167 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -43,6 +43,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Castlevania: Belmont's Curse | `0100BA4026E94000` | 1.1.0 |  |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a |  |
 | Celeste | `01002B30028F6000` | 1.4.1.1 |  |
+| Chained Echoes | `0100C510166F0000` | 1.1.1 |  |
 | Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
 | Cuphead | `0100A5C00D162000` | 1.3.7 |  |
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
@@ -84,6 +85,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario & Luigi: Brothership | `01006D0017F7A000` | 1.0.0 | 60 fps |
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
 | Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 |  |
+| Mario Golf: Super Rush | `0100C9C00E25C000` | 4.0.0 |  |
 | Mario Kart 8 Deluxe | `0100152000022000` | 4.0.1（也可 4.0.0） |  |
 | Mario Kart World | `0400C3F00006E000` | v0 | 60 fps |
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
@@ -102,6 +104,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
+| Orbitals | `040032B023CA4000` | 1.1.2.0 |  |
 | Ori and the Blind Forest: Definitive Edition | `010061D00DB74000` | 1.0.2 |  |
 | Ori and the Will of the Wisps | `01008DD013200000` | 1.2.1 |  |
 | Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
@@ -124,6 +127,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Princess Peach: Showtime! | `01007A3009184000` | 1.0.0 | 60 fps |
 | Raging Loop | `010020400E1C2000` | 1.0.0 |  |
 | Red Dead Redemption | `01007820196A6000` | 1.0.7（也可 1.0.0 / 1.0.4） | 60 fps |
+| Resident Evil 4 | `0400569027BF4000` | v131072 |  |
 | Return of the Obra Dinn | `010032E00E6E2000` | 1.0.1 |  |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 1.0.0 | handheld |
 | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 |  |
@@ -131,6 +135,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
+| Sonic Frontiers Definitive Edition | `0400921025B32000` | 1.0.0 |  |
 | Sonic Superstars | `01008F701C074000` | 1.1.8 |  |
 | Splatoon Raiders | `0400380020056000` | v65536 |  |
 | Star Fox | `0400E88025B1A000` | v131072 |  |
@@ -165,6 +170,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Skyward Sword HD | `01002DA013484000` | 1.0.1 |  |
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
 | The Rogue Prince of Persia | `01008D9022462000` | 1.1.0 | 60 fps |
+| Trails in the Sky 2nd Chapter | `01007A2027548000` | 1.0.4 |  |
 | TRIANGLE STRATEGY | `0100CC80140F8000` | 1.1.1 | 60 fps |
 | TUNIC | `0100DA801624E000` | 1.0.3 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |

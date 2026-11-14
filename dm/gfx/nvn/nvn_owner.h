@@ -71,6 +71,7 @@ static inline id tex_get(uint64_t k) { return (__bridge id)own_resolve_ref(k); }
 // Changes (each takes g_smu)
 void serial_put(uint64_t k, id o);   // a live serial's object; the one it replaces is dropped
 void serial_del(uint64_t k);         // a live serial's entry goes (a finalize, a program's release); a ghost entry of the serial stays, as a replayed record may still resolve it
+id own_ext_take(uint64_t k);         // an external texture's live entry (2^62 and up) goes and its object comes back to the caller, unretired (nil: none)
 void tex_put(uint64_t k, id o);      // a texture serial's object: live table for a live texture object or an external texture, else the ghost table (its use stamped)
 void own_ghost_trim(void);           // a submission's commit: idle ghost entries past NGHOST go, GHOST_TRIM at most
 
@@ -103,6 +104,11 @@ uint32_t own_alias_unref_locked(void);                        // entries no live
 int own_retire_locked(id o);    // a retired resource whose fence has passed: 1, it may leave the residency set; 0, an entry holds it: the owner keeps it (the caller drops only its reference)
 int own_keeps_locked(id o);     // o stays resident whatever its entries do: pinned or shared
 int own_object_free(id o);      // takes g_smu: no entry, pin or view's entry holds o (the replay layer may write it over: a package's spare texture)
+int own_holds_locked(const void *o);   // an entry, a pin or the sharing table holds the object at o (or a view of it); by address alone. Caller holds g_smu
+// The objects that left their last holder (entry, pin, view's entry or the sharing table) since the last take, for the replay layer's texture view cache, which keeps views of an
+// object while the owner holds it (vc_commit). An object may be listed again or held again since: the caller checks own_holds_locked. → 1 when more went than the list holds (the
+// caller checks all it keeps); *n the count, *list valid while g_smu stays held. Caller holds g_smu
+int own_gone_take_locked(const void *const **list, unsigned *n);
 
 // Live texture objects. Caller holds g_smu
 void own_tex_live_put_locked(const tex_t *t);   // mtl_tex_init

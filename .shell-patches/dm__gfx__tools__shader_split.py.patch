@@ -25,7 +25,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return zstd
  
  NVN2_KEY_CTL = 0x48
-@@ -2827,11 +2835,17 @@
+@@ -2881,11 +2889,17 @@
      return zstd.decompress(d, zstd_dict=_ZD[did])
  
  def unzs(path):
@@ -46,7 +46,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return unzs_dict(d, did, path)
  
  def frame_size(f):
-@@ -3401,7 +3415,10 @@
+@@ -3488,7 +3502,10 @@
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''
@@ -58,9 +58,9 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
          img = nso_image(mainnso)
          if not i:
              import unityfs
-@@ -3437,7 +3454,7 @@
+@@ -3523,7 +3540,7 @@
+         files += sorted((os.path.join(dp, f), tag + '/' + os.path.relpath(os.path.join(dp, f), romfs)) for dp, _, fs in os.walk(romfs) for f in fs)
      zdicts = {k: v for r in romfs_v + dlc_v for k, v in zs_dicts(r).items()}   # Tears of the Kingdom's zstd dictionaries (zs_dicts)
-     keys = {}
      # First pass: every file; Unity bundles carry type trees, and the Shader trees are collected on the way. Second pass: Unity serialized files without type trees are scanned again with the borrowed trees
 -    J = int(os.environ.get('J', '8'))
 +    J = int(os.environ.get('J', str(min(os.cpu_count() or 8, 16))))   # the machine's own count: a scan waits on the image more than it computes

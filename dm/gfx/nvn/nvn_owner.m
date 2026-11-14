@@ -68,6 +68,27 @@ int serial_table_holds(const void *o) { uintptr_t k = (uintptr_t)o; return nvn_h
 int entry_holds(const void *o) { uintptr_t k = (uintptr_t)o; return serial_table_holds(o) || (g_ghost_held.n && nvn_hm_get(&g_ghost_held, &k)); }
 int tex_object_pinned(id o) { uintptr_t key = (uintptr_t)(__bridge void *)o; return o && nvn_hm_get(&g_tex_pin_objects, &key) != NULL; }
 int own_object_free(id o) { pthread_mutex_lock(&g_smu); int r = !entry_holds((__bridge void *)o); pthread_mutex_unlock(&g_smu); return r; }
+static CFMutableSetRef g_alias_set;   // the sharing table's textures (below)
+// By address alone (no message to the object: gone_note may ask after the last reference went)
+int own_holds_locked(const void *o) { uintptr_t k = (uintptr_t)o; return o && (entry_holds(o) || nvn_hm_get(&g_tex_pin_objects, &k) || (g_alias_set && CFSetContainsValue(g_alias_set, o))); }
+// The objects that left their last holder, for the replay layer's view cache (own_gone_take_locked): noted where a count reaches zero (count_one) and where an object leaves the
+// sharing table (alias_del, own_rename_locked). Past GONE_MAX the list stops and says so, and the taker checks everything it keeps. Under g_smu
+enum { GONE_MAX = 65536 };
+static const void **g_gone; static unsigned g_gone_n, g_gone_cap; static int g_gone_over;
+static void gone_note(const void *o) {
+    if (!o || g_gone_over || own_holds_locked(o)) return;
+    if (g_gone_n == GONE_MAX) { g_gone_over = 1; return; }
+    if (g_gone_n == g_gone_cap) {
+        unsigned cap = g_gone_cap ? 2 * g_gone_cap : 256; const void **p = realloc(g_gone, cap * sizeof *p);
+        if (!p) ODIE("the owner's released-object list");
+        g_gone = p; g_gone_cap = cap;
+    }
+    g_gone[g_gone_n++] = o;
+}
+int own_gone_take_locked(const void *const **list, unsigned *n) {
+    int over = g_gone_over; *list = g_gone; *n = g_gone_n; g_gone_n = 0; g_gone_over = 0;
+    return over;
+}
 
 // Retirement eligibility. The replay layer retires a resource through its deferred-release queue (own_hook_drop(o, 0): out of the residency set once the submissions encoded up to
 // then have completed), and asks here, once that completion has come, whether it may really leave (own_retire_locked): GPU completion says the work encoded before the retirement is
@@ -97,7 +118,7 @@ static void count_one(nvn_hmap *m, const void *o, int d) {
     uintptr_t k = (uintptr_t)o, n = (uintptr_t)nvn_hm_get(m, &k);
     if (d > 0) nvn_hm_put(m, &k, (void *)(n + 1));
     else if (n > 1) nvn_hm_put(m, &k, (void *)(n - 1));
-    else if (n) { nvn_hm_del(m, &k); retire_resume(o); }   // a slot written past these helpers (a test's table) was never counted: nothing to take away
+    else if (n) { nvn_hm_del(m, &k); retire_resume(o); gone_note(o); }   // a slot written past these helpers (a test's table) was never counted: nothing to take away
 }
 // An entry that holds a view holds the textures the view is of as well, and they are counted with it: an sRGB / linear twin's serial holds a view of the shared texture
 // (tex_mtl_), so that texture is in use as long as the twin's entry is. Counted alone, the view left its parent looking unheld: a takeover evicted it under a live twin
@@ -158,6 +179,7 @@ static int alias_del(const alias_key *k) {
     alias_index(k, 0); nvn_hm_del(&g_alias_seen, k);
     id o = CFBridgingRelease(old);
     if (g_alias_set) CFSetRemoveValue(g_alias_set, (__bridge const void *)o);
+    gone_note((__bridge const void *)o);
     own_hook_drop(o, 0);
     return 1;
 }
@@ -240,6 +262,13 @@ const void *own_live_ref(uint64_t k) { pthread_mutex_lock(&g_smu); const void *o
 void serial_put(uint64_t k, id o) { pthread_mutex_lock(&g_smu); id old = hm_get_id(&g_by_serial, &k); if (old) { held_add((__bridge void *)old, -1); obj_drop(old); } hm_put_id(&g_by_serial, &k, o); held_add((__bridge void *)o, 1); own_note(k); pthread_mutex_unlock(&g_smu); }
 static void live_del_locked(uint64_t k) { id old = hm_get_id(&g_by_serial, &k); if (old) { held_add((__bridge void *)old, -1); obj_drop(old); hm_del_id(&g_by_serial, &k); own_note(k); } }   // nothing to drop: the texture
 void serial_del(uint64_t k) { pthread_mutex_lock(&g_smu); live_del_locked(k); pthread_mutex_unlock(&g_smu); }
+id own_ext_take(uint64_t k) {   // not retired through the deferred-release queue, which only NVN submissions drain: the present path retires it (mtl_ext_tex_release)
+    pthread_mutex_lock(&g_smu);
+    void *v = nvn_hm_del(&g_by_serial, &k); id o = v ? CFBridgingRelease(v) : nil;
+    if (o) { held_add((__bridge void *)o, -1); own_note(k); }
+    pthread_mutex_unlock(&g_smu);
+    return o;
+}
 
 void own_tex_live_put_locked(const tex_t *t) { nvn_hm_put(&g_tex_live, &t->serial, (void *)t); }
 int own_tex_live_locked(uint64_t serial) { return nvn_hm_get(&g_tex_live, &serial) != NULL; }
@@ -385,6 +414,7 @@ int own_rename_locked(id from, id to, uint64_t serial) {
         void *old = g_alias.vals[i]; g_alias.vals[i] = (void *)CFBridgingRetain(to); CFRelease(old); shared = 1;
     }
     if (shared) { CFSetRemoveValue(g_alias_set, (__bridge const void *)from); CFSetAddValue(g_alias_set, (__bridge const void *)to); }
+    gone_note((__bridge const void *)from);   // its counts went to `to` above while it was still shared
     return named;
 }
 // The rename and the asking serial's new object in one hold: published after g_smu was let go (as the upgrade did), a reader in between found the serial's old view, of a parent no

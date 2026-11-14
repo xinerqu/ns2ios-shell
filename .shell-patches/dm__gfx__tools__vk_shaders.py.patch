@@ -28,16 +28,16 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      eps = refl.get('entryPoints', [])
      if len(eps) != 1: red(f'{path}: entry points {eps} are not exactly one')
      stage = eps[0]['mode']
-@@ -120,7 +123,7 @@
-     open(spv, 'wb').write(struct.pack(f'<{len(words)}I', *words))
-     cmd = [SPIRV_CROSS, spv, '--msl', '--msl-version', '20300', '--msl-decoration-binding', '--rename-entry-point', 'main', f'vk_{key}', stage, '--output', msl]
+@@ -122,7 +125,7 @@
+     # the row's centre (float2(x, 0.5)) and reads it at (x, 0)
+     cmd = [SPIRV_CROSS, spv, '--msl', '--msl-version', '20300', '--msl-decoration-binding', '--msl-texture-1d-as-2d', '--rename-entry-point', 'main', f'vk_{key}', stage, '--output', msl]
      if stage == 'vert': cmd.append('--flip-vert-y')
 -    r = subprocess.run(cmd, capture_output=True, text=True)
 +    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
      if r.returncode: red(f'{path}: spirv-cross failed: {r.stderr.strip()[:300]}')
      # The reflection lists every declared resource; the Metal entry point only takes the ones the shader uses (Hades' ShadowMap.frag declares a buffer it never reads,
      # which the game's own pipeline layout leaves out): keep the rows whose slot is an argument of the entry point, so the host only binds, and only reports, real ones
-@@ -149,7 +152,9 @@
+@@ -151,7 +154,9 @@
      def comp(m):
          a = m[:-6] + f'.{sdk}.air'
          # -fwrapv: signed integer overflow wraps, as SPIR-V's integer arithmetic does; in MSL it is undefined and the compiler folds around it (dmsh_chain.py MAC_METAL)
@@ -48,7 +48,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
          if r.returncode: red(f'{m}: metal compile failed: {r.stderr.strip()[:400]}')
          return a
      with cf.ThreadPoolExecutor(os.cpu_count()) as ex: airs = list(ex.map(comp, msls))
-@@ -162,6 +167,10 @@
+@@ -164,6 +169,10 @@
  def main():
      a = sys.argv[1:]
      ios = None
@@ -59,7 +59,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
      if '--ios' in a: i = a.index('--ios'); ios = a[i + 1]; del a[i:i + 2]
      if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]')
      roots, out = a[:-1], a[-1]
-@@ -178,15 +187,20 @@
+@@ -180,15 +189,20 @@
          if skipped: print('[RED] skipped shader stages Metal does not have: ' + ', '.join(f'{k} {v}' for k, v in sorted(skipped.items())))
          msls = [m for v in seen.values() for m in v[2]]
          tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; resources kind:set.binding=slot (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)',

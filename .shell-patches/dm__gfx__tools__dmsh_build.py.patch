@@ -32,7 +32,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  
  def source_without_rule_bodies():   # this file's code form (dmsh_chain.code_form): no comments, docstrings or formatting, and the rule functions' bodies blanked
      return dmsh_chain.code_form(open(__file__, 'r').read(), {f.__name__ for f, _ in RULES})
-@@ -243,6 +251,7 @@
+@@ -246,6 +254,7 @@
          atomic_json(os.path.join(d, key + '_b.json'), MTL.with_compiler(target, refl))
  
  VIN_STATS = collections.Counter()
@@ -40,7 +40,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  PULL_STATS = collections.Counter()
  SIDE_STATS = collections.Counter()
  BF_STATS = collections.Counter()
-@@ -329,8 +338,17 @@
+@@ -332,8 +341,17 @@
          try:
              for t, d in targets: MTL.compile_split(t, u, [os.path.join(d, key + n + '.metallib') for n in names], lambda lib, groups=groups: dmsh_side.cut(lib, *groups))
          except (subprocess.CalledProcessError, ValueError) as e:
@@ -60,7 +60,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              continue
          finally:
              try: os.unlink(u)
-@@ -749,7 +767,7 @@
+@@ -754,7 +772,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
@@ -69,7 +69,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              spv_single_lane(os.path.join(w, key + '.spv'))
              r = subprocess.run([SPIRV_CROSS, *dmsh_atomic.cross_args(XC, os.path.join(w, key + '.spv')), os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
-@@ -853,6 +871,12 @@
+@@ -872,6 +890,12 @@
  if want: want = set(keys)   # dependency outputs are cleaned too, so a failed pixel build cannot leave old MSL for padding
  NJ = int(os.environ.get('J', '8'))
  PROCS = int(os.environ.get('DMSH_PROCS', NJ))   # processes that finish shaders (fin_worker); 0: NJ threads of this one
@@ -82,7 +82,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  BATCH = 4 * NJ   # shaders translated and finished together: the next batch is translated while this one is finished, and a shader's working files go when it is (fin).
  # Minecraft Dungeons II, 15,826 shaders: at most 3,279 files under the build folder with batches of 256 removed whole, 68,230 before batches (Octopath Traveler 0's stopped build)
  # A full build starts from no shader outputs, a partial one from none of the keys it builds, so what a run leaves is what it built: every output is restored from the cache anyway.
-@@ -931,7 +955,7 @@
+@@ -950,7 +974,7 @@
          sys.exit(f'[RED] {name} holds no record of shader {key}, which the shader map names: the package and the map come from different shader_split.py runs{old}; '
                   f'split the shaders again (the NSP script does when {dm_dir} is removed)')
      o, e = recs[key]
@@ -91,7 +91,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  for key in keys: digests[key] = shader_key(key, *rec_of(key))
  def plain_digest(k):   # a paired pixel shader's key, also when it is not built this time
      if k in digests: return digests[k]
-@@ -974,7 +998,12 @@
+@@ -993,7 +1017,12 @@
      try:
          if key in cache_hits and restored(key, wb):
              refl = json.loads(output_of('mac', key + '_b.json'))
@@ -105,7 +105,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              if refl['stage'] == 'vs': write_refl(key, pull_finish(key, src, vin_finish(key, src, refl)))
              if refl['stage'] == 'ps': refl.update(ps_libraries(key, os.path.join(out, key + '_b.metal'), src, refl['bindings'])); write_refl(key, refl)   # stored without them (publish_cache)
              return key, 'ok', '', refl
-@@ -1064,7 +1093,13 @@
+@@ -1083,7 +1112,13 @@
      name = f'{vk}_{gk}_m3.metallib'
      libs = [os.path.join(out, name)] + ([os.path.join(IOSOUT, name)] if IOSOUT else [])
      if vs is None or gs is None or gj is None: MESH_STATS['missing a library'] += 1; return
@@ -120,7 +120,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
      except ValueError as e: MESH_STATS['not composed'] += 1; print(f'[RED] mesh {vk} {gk}: {e}', flush=True); return
      path = os.path.join(w, f'{vk}_{gk}_m3.metal'); open(path, 'w').write(msl)
      try:
-@@ -1079,6 +1114,10 @@
+@@ -1098,6 +1133,10 @@
  _mesh = GAME.table('geo_mesh.tsv')
  if _mesh.exists():
      with cf.ThreadPoolExecutor(NJ) as ex: list(ex.map(mesh_finish, [tuple(ln.split()[:2]) for ln in _mesh.read_text().splitlines() if ln.strip() and not ln.startswith('#')]))
@@ -131,7 +131,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  shutil.rmtree(w, ignore_errors=True)
  st = collections.Counter(r[1] for r in res)
  print(f'shaders {len(res)}: ok {st["ok"]}, ' + ', '.join(f'{k} {v}' for k, v in st.items() if k != 'ok'))
-@@ -1091,6 +1130,8 @@
+@@ -1110,6 +1149,8 @@
  print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
  print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
        f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')

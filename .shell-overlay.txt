@@ -60,7 +60,6 @@
 ~ dm/host/hle_cheats.c          # DM_CHEATS_ON carries 64 entries, not 16: the launcher's own list is the switch (no Mac panel)
 ~ dm/host/hle_fpslock.c         # profile ue_fps_cvar overridable at run time (DM_UE_FPS_CVAR): the shell compiles the placeholder's t.MaxFPS
 ~ dm/gfx/nvn/nvn_mtl.m          # compile MSL source on the device; chain version read from the msl directory name; render_cond / tex_dyn_slots / tex_dirty_upload read from the environment
-~ dm/gfx/nvn/nvn_rec.h          # the encode thread's queue commit holds g_res_commit_mu: apart from the residency set's commit (upstream 0c078130, PR #2379)
 ~ dm/gfx/nvn/hle_nvn.c          # profile tex_flush_upload / tex_dirty_upload / render_cond overridable at run time: the shell compiles the placeholder's 0
 ~ dm/gfx/gl/hle_gl.m            # a shader library the packing computer could not compile is compiled on the device instead
 ~ dm/gfx/vk/hle_vk.m            # same for Vulkan: vk_shaders.py --source-only writes MSL, the device compiles it

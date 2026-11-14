@@ -33,10 +33,10 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 +            try: os.unlink(dst)
 +            except OSError: pass
 +            time.sleep(0.05)
+ DBMOVED = 1032   # SQLITE_READONLY_DBMOVED, an error's sqlite_errorcode (Python 3.11+)
  READ_ONLY = None   # set only by --run: the harness supplies this module to older SQLite-based builders too
  
- 
-@@ -67,7 +86,7 @@
+@@ -68,7 +87,7 @@
          if data is None: return False
          tmp = f'{path}.tmp-{os.getpid()}-{threading.get_ident()}'
          with open(tmp, 'wb') as f: f.write(data)
