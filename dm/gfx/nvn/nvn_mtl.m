@@ -324,6 +324,10 @@ static void ws_report(uint64_t frame, uint64_t frames) {
 #include "nvn_rec.h"   // deferred encoding (DM_NVN_ENC_THREAD)
 static NSHashTable *g_res_objects;
 static _Atomic unsigned g_image_heap_n, g_big_n;   // g_big_n: large pools in chunks, whose buffers overlap (BIG_MIN)
+// Which pool entries lookups reached since the last readout (one bit each, set in pool_res): a window nothing reaches again is one an eviction could take back,
+// so this count is the number that says whether reclaiming is worth writing. Print only.
+#define USED_MAX 8192u
+static _Atomic uint64_t g_used[USED_MAX / 64]; static _Atomic unsigned g_used_n;
 static inline MTL4VisibilityOptions resource_vis(void) { return MTL4VisibilityOptionDevice | (g_image_heap_n || g_big_n ? MTL4VisibilityOptionResourceAlias : 0); }
 // Residency churn by call site (the power line every 300 frames, mtl_res_stats): each commit with changes is a kernel call whose cost grows with what was added or removed
 enum { RS_SITES = 16 }; static struct { int line; uint64_t n, bytes; } g_rs_site[RS_SITES]; static uint64_t g_rs_rm, g_rs_commits, g_rs_commit_ns;
@@ -897,7 +901,9 @@ void mtl_pool_addressed(const void *mem, uint64_t size) {
 // (they measured on a 17 Pro Max a 512 MB render-target pool addressed 0 times in a run, with about 530 MB more device wired memory; a 4 GB A14 was ended by the system within seconds of launch because of it).
 // So a pool is not put into the residency set when created; it is put in, and the residency set committed on the spot, the first time the GPU gets its address through mtl_addr / mtl_gpu_addr -- these are the only two ways the GPU gets pool addresses,
 // and committing on the spot is earlier than any command buffer commit that uses it. CPU-side reads of pool contents through mtl_addr trigger it too (conservative, never misses). Caller holds g_mu
+static void used_mark(int i) { if ((unsigned)i < USED_MAX) { uint64_t m = 1ull << ((unsigned)i & 63); if (!(atomic_load(&g_used[(unsigned)i >> 6]) & m)) atomic_fetch_add(&g_used_n, 1); atomic_fetch_or(&g_used[(unsigned)i >> 6], m); } }
 static void pool_res(int i) {
+    used_mark(i);
     if (g_pools[i].res) return;
     res_add(g_pools[i].buf); res_commit(); g_pools[i].res = 1; g_pool_res_n++;
 }
@@ -907,11 +913,21 @@ static void pool_res(int i) {
 // stride holding its address and on up to the end of what it asked (rounded up to the stride, plus a stride), made when first asked for. Only what lookups reach is wired. The chunks overlap, as adjacent
 // pools' buffers do at shared pages; GPU addresses are not contiguous across them, so a lookup must say how far it reads. One that does not know (length 1: an indirect draw's index buffer, a raw storage
 // address) gets BIG_UNKNOWN past its address. Raw global memory, whose pool table the shader walks by itself, takes the whole pool: big_full
-enum { BIG_MIN = 512u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 4u << 20, BIG_UNKNOWN = 64u << 20, BIG_MAX = 32 };
+// S2Arm's numbers, taken whole (its gal_buf.m: WIN_LEN 4 MB over WIN_STEP 2 MB, and every host mapping over 4 MB windowed rather than pinned whole): a pool of
+// BIG_MIN or more is windowed, a lookup gets a 4 MB window at its 2 MB stride, and a lookup that does not say how far it reads takes BIG_WIN past its address
+enum { BIG_MIN = 4u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 4u << 20, BIG_UNKNOWN = 64u << 20, BIG_MAX = 256 };
 typedef struct { uintptr_t lo, hi, a, b; const void *mem; int *chunk, full; NSMutableArray *old; } big_pool;   // chunk: stride → g_pools index + 1; full: the whole pool's entry + 1; old: buffers a longer chunk replaced, alive with the pool
 static big_pool g_big[BIG_MAX]; static int g_nbig;
 static id<MTLBuffer> pool_buf(uintptr_t a, uintptr_t b);   // a pool's zero-copy buffer over [a, b), made over writable pages (below)
-static int big_of(uint64_t addr) { for (int i = 0; i < g_nbig; i++) if (addr >= g_big[i].lo && addr < g_big[i].hi) return i; return -1; }
+static int g_bidx[BIG_MAX], g_bidx_ok;   // g_big's indices by lo, for big_of: every pool over BIG_MIN is in here now, and a lookup must not walk them
+static int big_cmp(const void *x, const void *y) { uintptr_t a = g_big[*(const int *)x].lo, b = g_big[*(const int *)y].lo; return a < b ? -1 : a > b; }
+static int big_of(uint64_t addr) {   // caller holds g_mu
+    if (!g_bidx_ok) { for (int i = 0; i < g_nbig; i++) g_bidx[i] = i; qsort(g_bidx, (size_t)g_nbig, sizeof g_bidx[0], big_cmp); g_bidx_ok = 1; }
+    int lo = 0, hi = g_nbig - 1, hit = -1;
+    while (lo <= hi) { int m = (lo + hi) / 2; if (g_big[g_bidx[m]].lo <= addr) { hit = m; lo = m + 1; } else hi = m - 1; }
+    if (hit >= 0) { int i = g_bidx[hit]; if (addr < g_big[i].hi) return i; }
+    return -1;   // pools do not overlap
+}
 // A pool to put into the table: its zero-copy buffer is made first, outside g_mu (pool_new_prep; it may retry for seconds), and the entry goes in under g_mu (pool_new_put), so a change
 // of several pools can be one step for every lookup (mtl_pool_replace)
 typedef struct { const void *mem; uint64_t size; uintptr_t lo, hi, a, b; __strong id<MTLBuffer> buf; } pool_new;   // buf nil: in chunks (a large pool)
@@ -947,7 +963,7 @@ static void pool_new_put(pool_new *n) {   // caller holds g_mu
     if (!n->buf) {
         int *ch = calloc(((n->b - n->a) >> BIG_IDX) + 1, sizeof *ch); if (!ch) MDIE("pool chunk table");
         g_big[g_nbig++] = (big_pool){n->lo, n->hi, n->a, n->b, n->mem, ch, 0, [NSMutableArray array]};
-        g_pidx_ok = 0; g_plast = -1; atomic_fetch_add(&g_pool_gen, 1); g_pool_adds++; atomic_fetch_add(&g_big_n, 1);
+        g_pidx_ok = 0; g_plast = -1; g_bidx_ok = 0; atomic_fetch_add(&g_pool_gen, 1); g_pool_adds++; atomic_fetch_add(&g_big_n, 1);
         static int nl; if (nl++ < 8) MLOG("memory pool %p+%llu MB: in chunks, wired as far as lookups reach", n->mem, (unsigned long long)(n->size >> 20));
         return;
     }
@@ -985,7 +1001,7 @@ static void pool_take_out(const void *mem, NSMutableArray<id<MTLBuffer>> *gone) 
             i--; }
     if (bg >= 0) {
         [gone addObjectsFromArray:g_big[bg].old];
-        free(g_big[bg].chunk); g_big[bg] = g_big[--g_nbig]; g_pidx_ok = 0; g_plast = -1; atomic_fetch_add(&g_pool_gen, 1); atomic_fetch_sub(&g_big_n, 1);
+        free(g_big[bg].chunk); g_big[bg] = g_big[--g_nbig]; g_pidx_ok = 0; g_plast = -1; g_bidx_ok = 0; atomic_fetch_add(&g_pool_gen, 1); atomic_fetch_sub(&g_big_n, 1);
     }
 }
 // Once out of the table and with g_pool_gen bumped, a buffer is reached only by what a submission already encoded: so with none open it waits for the last committed fence, not the
@@ -4790,7 +4806,7 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
          (unsigned long long)g_rh_made, (unsigned long long)g_rh_reused, (unsigned long long)g_rh_trimmed, rh_n, (unsigned long long)(rh_bytes >> 20), avail);
     // How the residency set is spent, by kind, on every readout (res_top prints this only at the first out-of-memory error): a set that climbs by the region, with the guest's pool wrappers
     // in it, is the question this line answers. Which bucket grows decides which one to go after; it prints only, it never refuses anything
-    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; int npools = 0, nbig = 0;
+    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, used_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; int npools = 0, nbig = 0;
         @autoreleasepool {
             pthread_mutex_lock(&g_res_mu);
             for (id<MTLAllocation> o in g_res_objects.allObjects) { uint64_t z = o.allocatedSize;
@@ -4800,13 +4816,19 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
             pthread_mutex_lock(&g_mu);
             npools = g_npool; nbig = g_nbig;
             for (int i = 0; i < g_npool; i++) if (g_pools[i].buf) pool_b += g_pools[i].buf.length;
+            for (unsigned w = 0; w < USED_MAX / 64; w++) { uint64_t m = atomic_load(&g_used[w]); while (m) { unsigned b = (unsigned)__builtin_ctzll(m); m &= m - 1; unsigned i = w * 64 + b; if (i < (unsigned)g_npool && g_pools[i].buf) used_b += g_pools[i].buf.length; } atomic_store(&g_used[w], 0); }
+            atomic_store(&g_used_n, 0);
             for (int j = 0; j < g_nbig; j++) {   // a large pool's chunks are entries of their own (big_new), keyed by the pool's memory
                 for (int i = 0; i < g_npool; i++) if (g_pools[i].key == g_big[j].mem && g_pools[i].buf) { chunk_n++; chunk_b += g_pools[i].buf.length; }
                 for (id<MTLBuffer> b in g_big[j].old) { old_n++; old_b += b.length; } }
             pthread_mutex_unlock(&g_mu);
         }
         MLOG("residency set by kind: textures %llu, %llu MB; heaps %llu, %llu MB; shared buffers %llu, %llu MB; private buffers %llu, %llu MB; pool buffers %d, %llu MB; large pools %d, chunks %llu, %llu MB, chunks a longer one replaced %llu, %llu MB",
-             kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20); }
+             kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20);
+        // What the last interval's lookups reached, and what the device says its own budget is: a set mostly of windows nothing reached again is one reclaiming would shrink
+        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB",
+             atomic_load(&g_used_n), npools, used_b >> 20, (unsigned long long)(g_dev.recommendedMaxWorkingSetSize >> 20),
+             (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20)); }
     { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
       mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
       MLOG("texture views by Metal texture (vc_get): %u textures hold cached views; %llu views reused, %llu made in total; texture buffers bound as 2D rows for wrapped 1D fetches %llu times, %llu made, %llu failed, %llu copied into aligned rows (%llu MB) "
