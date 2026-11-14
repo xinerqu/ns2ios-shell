@@ -907,7 +907,7 @@ static void pool_res(int i) {
 // stride holding its address and on up to the end of what it asked (rounded up to the stride, plus a stride), made when first asked for. Only what lookups reach is wired. The chunks overlap, as adjacent
 // pools' buffers do at shared pages; GPU addresses are not contiguous across them, so a lookup must say how far it reads. One that does not know (length 1: an indirect draw's index buffer, a raw storage
 // address) gets BIG_UNKNOWN past its address. Raw global memory, whose pool table the shader walks by itself, takes the whole pool: big_full
-enum { BIG_MIN = 512u << 20, BIG_S = 16u << 20, BIG_UNKNOWN = 64u << 20, BIG_MAX = 32 };
+enum { BIG_MIN = 512u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 4u << 20, BIG_UNKNOWN = 64u << 20, BIG_MAX = 32 };
 typedef struct { uintptr_t lo, hi, a, b; const void *mem; int *chunk, full; NSMutableArray *old; } big_pool;   // chunk: stride → g_pools index + 1; full: the whole pool's entry + 1; old: buffers a longer chunk replaced, alive with the pool
 static big_pool g_big[BIG_MAX]; static int g_nbig;
 static id<MTLBuffer> pool_buf(uintptr_t a, uintptr_t b);   // a pool's zero-copy buffer over [a, b), made over writable pages (below)
@@ -945,7 +945,7 @@ static void pool_new_prep(pool_new *n, const void *mem, uint64_t size) {
 static void pool_new_put(pool_new *n) {   // caller holds g_mu
     if (!n->buf && g_nbig == BIG_MAX) n->buf = pool_buf_made(n->mem, n->size, n->a, n->b);   // the chunk table filled since pool_new_prep looked
     if (!n->buf) {
-        int *ch = calloc(((n->b - n->a) >> 24) + 1, sizeof *ch); if (!ch) MDIE("pool chunk table");
+        int *ch = calloc(((n->b - n->a) >> BIG_IDX) + 1, sizeof *ch); if (!ch) MDIE("pool chunk table");
         g_big[g_nbig++] = (big_pool){n->lo, n->hi, n->a, n->b, n->mem, ch, 0, [NSMutableArray array]};
         g_pidx_ok = 0; g_plast = -1; atomic_fetch_add(&g_pool_gen, 1); g_pool_adds++; atomic_fetch_add(&g_big_n, 1);
         static int nl; if (nl++ < 8) MLOG("memory pool %p+%llu MB: in chunks, wired as far as lookups reach", n->mem, (unsigned long long)(n->size >> 20));
@@ -967,7 +967,7 @@ void mtl_pool_add(const void *mem, uint64_t size) {
 static void big_moved(int i) {   // caller holds g_mu: entry i has a new index
     const pool_ent *e = &g_pools[i];
     for (int k = 0; k < g_nbig; k++) { big_pool *b = &g_big[k]; if (b->mem != e->key) continue;
-        if (e->unk == 0) b->full = i + 1; else b->chunk[(e->lo - b->a) >> 24] = i + 1;
+        if (e->unk == 0) b->full = i + 1; else b->chunk[(e->lo - b->a) >> BIG_IDX] = i + 1;
         return; }
 }
 // The no-copy buffer goes through deferred release (out of the residency set and unreferenced after submitted commands complete). It used to be removed only from g_keep while the residency set still held a strong reference: after the pool was freed the buffer stayed alive wrapping that guest memory,
@@ -1060,28 +1060,29 @@ static uint64_t pool_win(void) {
     if (read) return v;
     read = 1;
     const char *e = getenv("DM_NVN_POOL_WIN"); long mb = e && *e ? atol(e) : 0;
-    if (mb >= 1) { if (mb > 1024) mb = 1024; v = (uint64_t)mb << 20;
-        MLOG("pool windows: a lookup that does not say how far it reads takes %.1f MB past the address, rounded up to a stride (DM_NVN_POOL_WIN)", (double)mb); }
+    if (mb < 1) mb = BIG_WIN >> 20;
+    if (mb > 1024) mb = 1024;
+    v = (uint64_t)mb << 20;
+    MLOG("pool windows: a lookup that does not say how far it reads takes %ld MB past the address, over a %d MB stride%s", mb, (int)(BIG_S >> 20), e && *e ? " (DM_NVN_POOL_WIN)" : " (default)");
     return v;
 }
 static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
     if (addr + len > b->hi) return -1;
     if (b->full) return b->full - 1;
-    uintptr_t k = (addr - b->a) >> 24, lo = b->a + (k << 24);
+    uintptr_t k = (addr - b->a) >> BIG_IDX, lo = b->a + (k << BIG_IDX);
     uint64_t win = pool_win();
-    uint64_t want = len > 1 ? len : (win ? win : BIG_UNKNOWN);
+    uint64_t want = len > 1 ? len : win;
     uintptr_t end = (addr + want + BIG_S - 1) & ~(uintptr_t)(BIG_S - 1);
-    if (!win) end += BIG_S;   // the default's spare stride; a set window ends at the stride its ask reaches
     if (end < lo + BIG_S) end = lo + BIG_S;
     if (end > b->b || end < lo) end = b->b;
     int i = b->chunk[k] - 1;
     uintptr_t have = i >= 0 ? g_pools[i].end : 0;
     if (i >= 0 && (have >= b->hi || have >= addr + want)) return i;
-    // A chunk made for an earlier stride may already run past this one: its buffer reaches the end of what that lookup asked (rounded up, plus a stride), so it can hold this range too.
+    // A chunk made for an earlier stride may already run past this one: its buffer reaches the end of what that lookup asked (rounded up to a stride), so it can hold this range too.
     // Take it rather than make a second window over the same pages -- Metal charges each buffer it is handed whole, so overlapping windows count their shared pages once per window
     // (issue #14: one 5 GB pool held 38 chunks, 3028 MB, for strides that came to 608 MB, on a device whose whole working set is 5461 MB). What the GPU may reach is unchanged:
     // the reuse only happens when the older buffer already holds every byte of [addr, addr + want)
-    for (unsigned m = 1; m <= BIG_UNKNOWN / BIG_S && m <= k; m++) {
+    for (unsigned m = 1; m <= win / BIG_S && m <= k; m++) {
         int p = b->chunk[k - m] - 1;
         if (p >= 0 && g_pools[p].base <= addr && (g_pools[p].end >= b->hi || g_pools[p].end >= addr + want)) { b->chunk[k] = p + 1; return p; }
     }
@@ -1089,7 +1090,7 @@ static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
     // subtract a base past their own address and read somewhere else entirely (texture corruption late in a session, issue #14). A stride holding a borrowed chunk gets one of
     // its own instead, and the borrowed one stays where its owner can still find it
     if (i >= 0 && g_pools[i].base != lo) i = -1;
-    int n = big_new(b, lo, lo + BIG_S, end, end >= b->b ? 1 : BIG_UNKNOWN); if (n < 0) return -1;
+    int n = big_new(b, lo, lo + win, end, end >= b->b ? 1 : win); if (n < 0) return -1;   // the entry's range is the whole window (pc_get's hits, and pool_peek)
     if (i >= 0) {   // lengthened: what is encoded with the shorter chunk keeps it, resident, until the pool goes
         [b->old addObject:g_pools[i].buf]; [g_keep removeObject:g_pools[i].buf]; g_pools[n].res = 0; if (g_pools[i].res) g_pool_res_n--;
         g_pools[i] = g_pools[n]; g_npool--; n = i;
@@ -1115,7 +1116,7 @@ static int pool_find(uint64_t addr, uint64_t len) {
 // asked about every texture's storage and made a chunk of 80 MB and more for each stride (BIG_UNKNOWN past the address), or lengthened its chunk to that, 77 of them, 6.7 GB counted
 // by Metal, in Ocarina of Time's first area load. Caller holds g_mu
 static int pool_peek(uint64_t addr) {
-    if (g_nbig) { int b = big_of(addr); if (b >= 0) { const big_pool *bp = &g_big[b]; return bp->full ? bp->full - 1 : bp->chunk[(addr - bp->a) >> 24] - 1; } }
+    if (g_nbig) { int b = big_of(addr); if (b >= 0) { const big_pool *bp = &g_big[b]; return bp->full ? bp->full - 1 : bp->chunk[(addr - bp->a) >> BIG_IDX] - 1; } }
     return pool_held(addr, 1);
 }
 // Whether [addr, addr + len) lies in a pool, with no side effect: mtl_addr makes the pool resident, for a GPU use to follow. A large pool is answered from its range, since its lookup
