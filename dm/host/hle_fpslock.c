@@ -189,7 +189,7 @@ static void fb_tick(int target, const char *src) {
 // (SHIN MEGAMI TENSEI V: Vengeance: Project.FrameRateLimit) would otherwise be left with the frame limit it sets itself.
 static const char *ue_fps_cvar(void) {
     static const char *v; static int once;
-    if (!once) { once = 1; const char *e = getenv("DM_UE_FPS_CVAR"); v = e && *e ? e : ue_fps_cvar(); }
+    if (!once) { once = 1; const char *e = getenv("DM_UE_FPS_CVAR"); v = e && *e ? e : DM_GAME_UE_FPS_CVAR; }
     return v;
 }
 
