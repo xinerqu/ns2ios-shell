@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
 --- a/dm/gfx/vk/hle_vk.m
 +++ b/dm/gfx/vk/hle_vk.m
-@@ -137,6 +137,8 @@
+@@ -140,6 +140,8 @@
  typedef struct { char key[17]; int frag, nres; shres res[24]; } shinfo;
  static shinfo *g_sh; static int g_nsh;
  static id<MTLLibrary> g_lib;
@@ -10,7 +10,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
  static int sh_cmp(const void *a, const void *b) { return memcmp(((const shinfo *)a)->key, ((const shinfo *)b)->key, 16); }
  static void sh_load(void) {
      const char *d = getenv("DM_MSL_DIR"); char p[1024];
-@@ -161,11 +163,48 @@
+@@ -164,11 +166,48 @@
      fclose(f);
      qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);   // looked up by key (Super Mario Galaxy creates over 3,000 modules at boot)
      snprintf(p, sizeof p, "%s/vk/vk_shaders.metallib", d);
@@ -62,7 +62,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
  
  static void dev_init_once(void) {
      @autoreleasepool {
-@@ -907,8 +946,12 @@
+@@ -911,8 +950,12 @@
      for (int i = 0; i < 8; i++) snprintf(m->key + 2 * i, 3, "%02x", h[i]);
      sh_capture(m->key, ci->pCode, ci->codeSize);
      m->si = sh_find(m->key);
@@ -77,7 +77,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
      else OLOG("CreateShaderModule %s", m->key);
      *out = m; return VK_SUCCESS;
  }
-@@ -982,7 +1025,7 @@
+@@ -986,7 +1029,7 @@
              else if (st->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
                  if (dual && m->fn) {   // pipelines may be built on several threads
                      static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER; pthread_mutex_lock(&mu);

@@ -1,7 +1,7 @@
 diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 --- a/dm/tools/shader_cache.py
 +++ b/dm/tools/shader_cache.py
-@@ -7,7 +7,14 @@
+@@ -11,7 +11,14 @@
  # It only saves work: a damaged file costs the work it held and is made anew, and a full drive is one [RED] line. An entry is written and read whole, so its file is never seen half written.
  # Names, as in the folder this replaces: metallib/<target>/<digest>[_x].metallib (dmsh_mtlcache.py), shader/<digest>/<mac|ios>/<output>, index/<key>.json, variant/<digest>/<file> (dmsh_build.py).
  # Not part of the translation chain: it decides no output (dmsh_chain.py), like dmsh_mtlcache.py.
@@ -17,7 +17,7 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
  from pathlib import Path
  
  SCHEMA = ('CREATE TABLE IF NOT EXISTS blob(id INTEGER PRIMARY KEY, hash BLOB UNIQUE NOT NULL, data BLOB NOT NULL)',
-@@ -15,6 +22,18 @@
+@@ -19,6 +26,18 @@
  SHADER_ENTRY = re.compile(r'shader/([0-9a-f]{64})/')
  WAIT = 600   # seconds another process's write may hold this one up
  _DAMAGED = ('malformed', 'not a database', 'disk image')
@@ -35,8 +35,8 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
 +            time.sleep(0.05)
  DBMOVED = 1032   # SQLITE_READONLY_DBMOVED, an error's sqlite_errorcode (Python 3.11+)
  READ_ONLY = None   # set only by --run: the harness supplies this module to older SQLite-based builders too
- 
-@@ -68,7 +87,7 @@
+ GENERATION = re.compile(r'cas-([0-9a-f]{12})\.db')   # a chain's file in a cache folder
+@@ -93,7 +112,7 @@
          if data is None: return False
          tmp = f'{path}.tmp-{os.getpid()}-{threading.get_ident()}'
          with open(tmp, 'wb') as f: f.write(data)

@@ -1,7 +1,7 @@
 diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSettings.swift
 --- a/dm/ios/Sources/LauncherSettings.swift
 +++ b/dm/ios/Sources/LauncherSettings.swift
-@@ -42,9 +42,12 @@
+@@ -55,9 +55,12 @@
      @Published var values: [String: String] = [:]
  
      private let defaults: UserDefaults
@@ -15,7 +15,7 @@ diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSett
          self.settings = settings
          let env = ProcessInfo.processInfo.environment
          fromLaunch = Set((env["DM_ENV_LAUNCH_KEYS"] ?? "").split(separator: " ").map(String.init))
-@@ -53,7 +56,7 @@
+@@ -66,7 +69,7 @@
          if ignoreSaved { fputs("launcher: saved choices ignored (DM_SAVED_CHOICES=0)\n", stderr) }
          for s in settings {
              if fixed.contains(s.env), let v = env[s.env] { values[s.env] = v; continue }
@@ -24,7 +24,7 @@ diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSett
              values[s.env] = saved.flatMap { s.accepts($0) ? $0 : nil } ?? s.def   // a saved choice the game no longer offers: its default
          }
      }
-@@ -95,6 +98,12 @@
+@@ -108,6 +111,12 @@
  
      // Before the game starts: every setting not set by an env file goes into the environment (DM_LANG replaces the packed language main.m set as a default). Only a choice that
      // differs from the game's default is stored: a setting the player left at its default follows the defaults of a later build (the settings it was tested with)
@@ -37,7 +37,7 @@ diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSett
      func apply() {
          for s in settings {
              let v = values[s.env] ?? s.def
-@@ -103,8 +112,10 @@
+@@ -116,8 +125,10 @@
              setenv(s.env, v, 1); fputs("launcher: \(s.env)=\(v)\(s.isDefault(v) ? "" : " (changed)")\n", stderr)
          }
      }

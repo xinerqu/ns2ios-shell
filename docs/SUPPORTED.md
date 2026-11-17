@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**168 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**184 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -39,11 +39,13 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Blasphemous | `0100698009C6E000` | 1.0.8 |  |
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
 | Brain Memory Training Academy | `0100F5D01DA3A000` | 1.0.0 |  |
+| Burnout Paradise Remastered | `0100DBF01000A000` | 1.0.0 |  |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 | handheld |
 | Castlevania: Belmont's Curse | `0100BA4026E94000` | 1.1.0 |  |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a |  |
 | Celeste | `01002B30028F6000` | 1.4.1.1 |  |
 | Chained Echoes | `0100C510166F0000` | 1.1.1 |  |
+| Cozy Land | `0100777022394000` | 1.0.0 |  |
 | Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
 | Cuphead | `0100A5C00D162000` | 1.3.7 |  |
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
@@ -52,9 +54,11 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Diablo II: Resurrected | `0100726014352000` | 1.0.34.0 |  |
 | Diablo III: Eternal Collection | `01001B300B9BE000` | 2.7.7.92380 |  |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
+| Divinity: Original Sin 2 - Definitive Edition | `010027400CDC6000` | 1.0.12 | 60 fps |
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
 | Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 |  |
+| DOOM 3 | `010029D00E740000` | 1.0.5 |  |
 | DRAGON BALL: Sparking! ZERO | `010035F022078000` | 2.0.76 | 60 fps |
 | DRAGON QUEST BUILDERS 2 | `010042000A986000` | 1.7.3d |  |
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
@@ -67,7 +71,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps · 暂不支持 |
 | FINAL FANTASY RESONANCE (Asian release) | `0100B8A026F14000` | 1.0.1 | 60 fps |
 | FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 1.4.0 |  |
+| FINAL FANTASY V | `0100AA201415C000` | 1.2.0_5 |  |
+| FINAL FANTASY VI | `0100AA001415E000` | 1.2.1_5 |  |
 | FINAL FANTASY X/X-2 HD Remaster | `0100BC300CB48000` | 1.0.0 |  |
+| FINAL FANTASY XII THE ZODIAC AGE | `0100EB100AB42000` | 1.1.0 |  |
 | Fire Emblem Engage | `0100A6301214E000` | 2.0.0 | 60 fps |
 | Fire Emblem Fortune's Weave | `04007EF01F8AE000` | v131072 | 60 fps |
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 |  |
@@ -92,6 +99,8 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
 | Mario Tennis Fever | `0400D4201C6EA000` | v327680 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
+| Mega Man Legacy Collection | `01002D4007AE0000` | 1.0.3 |  |
+| Metro 2033 Redux | `0100D4900E82C000` | 1.0.0 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
 | Metroid Prime 4: Beyond | `010019A01E2F2000` | 1.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
@@ -101,6 +110,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `0100B8E016F76000` | 1.0.3 | 60 fps |
+| Nintendo Switch 2 Welcome Tour | `040057C02159A000` | ? |  |
 | Nintendo Switch Sports Resort | `04008E001F098000` | ? |  |
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
@@ -108,6 +118,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Orbitals | `040032B023CA4000` | 1.1.2.0 |  |
 | Ori and the Blind Forest: Definitive Edition | `010061D00DB74000` | 1.0.2 |  |
 | Ori and the Will of the Wisps | `01008DD013200000` | 1.2.1 |  |
+| Overcooked! All You Can Eat | `0100F28011892000` | 1.0.12 | 60 fps |
 | Paper Mario: The Origami King | `0100A3900C3E2000` | 1.0.1 |  |
 | Paper Mario: The Thousand-Year Door | `0100ECD018EBE000` | 1.0.1 | 60 fps |
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
@@ -127,6 +138,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | PRAGMATA | `0400C76024710000` | v196608 |  |
 | Princess Peach: Showtime! | `01007A3009184000` | 1.0.0 | 60 fps |
 | Raging Loop | `010020400E1C2000` | 1.0.0 |  |
+| Rayman Legends: Definitive Edition | `01005FF002E2A000` | 1.2 |  |
 | Red Dead Redemption | `01007820196A6000` | 1.0.7（也可 1.0.0 / 1.0.4） | 60 fps |
 | Resident Evil 4 | `0400569027BF4000` | v131072 |  |
 | Return of the Obra Dinn | `010032E00E6E2000` | 1.0.1 |  |
@@ -135,6 +147,8 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | ROMANCE OF THE THREE KINGDOMS XIV: Diplomacy and Strategy Expansion Pack | `0100ED7012DB2000` | 1.0.10 |  |
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
+| Sid Meier's Civilization VI | `010044500C182000` | 1.2.19 |  |
+| Sid Meier's Civilization VII | `0100C3601518C000` | 1.5.0.1 |  |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
 | Sonic Frontiers Definitive Edition | `0400921025B32000` | 1.0.0 |  |
 | Sonic Superstars | `01008F701C074000` | 1.1.8 |  |
@@ -176,9 +190,11 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | TUNIC | `0100DA801624E000` | 1.0.3 | 60 fps |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
+| Warhammer Survivors | `0100CAA026246000` | 1.0.0 |  |
 | Well Dweller | `0100217023F6C000` | 1.0.0 |  |
 | Xenoblade Chronicles 2 | `0100E95004038000` | 2.1.0 |  |
 | Xenoblade Chronicles 3 | `010074F013262000` | 2.2.1 |  |
+| Xenoblade Chronicles X: Definitive Edition | `0100453019AA8000` | 1.0.1 | 60 fps |
 | Xenoblade Chronicles: Definitive Edition | `0100FF500E34A000` | 1.1.2 |  |
 | Yoshi and the Mysterious Book | `0400245021D2C000` | 1.0.2 |  |
 | Yoshi's Crafted World | `01006000040C2000` | 1.0.1 |  |
