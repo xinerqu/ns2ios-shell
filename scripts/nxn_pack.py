@@ -1654,8 +1654,9 @@ def oodle_archives(game, mods, tid):
     Oodle Kraken entries (oodle_packs), and Unreal legacy paks with the shaders inline (ue_legacy, LZ5). Until now they
     were only met at the shader step, after the extraction and a rewrite of main and sdk -- minutes of work for an answer
     the file headers already hold. The scan is upstream's own (checked against every profile), reads headers only, and
-    costs one walk of the RomFS. The other answers are left to their own messages: ue_decode wants the game booted on a
-    Mac, and the three captures are what docs/CAPTURE.md answers.
+    costs one walk of the RomFS. The other answers are left to their own messages: ue_decode is handled by
+    step_ue_shaders, which decodes the LZ4 archives here and refuses the Oodle and IoStore ones; the three captures are
+    what docs/CAPTURE.md answers.
 
     Its answer is kept beside the shader cache: the walk is the whole of `rewrite main`'s 44 s on Tears of the Kingdom, and
     it answers the same thing for the same files every time.
@@ -1692,6 +1693,187 @@ def oodle_archives(game, mods, tid):
                 warn('could not store the Oodle scan (%s): this pack is fine, the next one scans again' % e)
         return found
     return hit.get('archives') or {}
+
+
+def layer_only_keys(keys, read):
+    """The keys of `keys` whose library is a layer-only geometry shader.
+
+    dmsh_build.py's finish writes only <key>_b.json for a gs_slice shader -- no .metal, no .metallib -- because the host
+    draws it with the vertex shader's layer entry points (dmsh_entry.py, gs_slice). Counting those as missing refused a
+    correct build after an hour of translation, and told the user to delete and repack a deterministic step (issue #16).
+    `read(key)` returns that key's _b.json text.
+    """
+    out = set()
+    for k in keys:
+        try: text = read(k)
+        except (OSError, ValueError): continue
+        if text and '"gs_slice"' in text: out.add(k)
+    return out
+
+
+def shader_map_keys(smap):
+    """The 16-hex shader keys shader_map.tsv lists.
+
+    The file opens with a column-title row ("package index stage dm_ctl_sha16 source") that is not a comment, so the key
+    column has to look like one.
+    """
+    want = set()
+    if smap.is_file():
+        for line in smap.read_text(errors='replace').splitlines():
+            c = line.split('\t')
+            if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
+    return want
+
+
+def library_presence(msl_out):
+    """(the keys with a base library, the keys complete without one) in a b-<chain> folder or in its .img.
+
+    A layer-only geometry shader is the one key that is whole without a library: dmsh_build.py writes only <key>_b.json for
+    a gs_slice shader (issue #16). Both routes go through here so they cannot drift apart again -- the .img one was added
+    later and copied only the library count.
+    """
+    if msl_out.is_file():
+        sys.path.insert(0, str(TOOLS))
+        import romfs
+        with romfs.scandir(str(msl_out)) as it: names = [e.name for e in it]
+        have = {n[:-len('_b.metallib')] for n in names if n.endswith('_b.metallib')}
+        no_lib = {n[:-len('_b.json')] for n in names if n.endswith('_b.json')} - have
+        read = lambda k: romfs.open('%s/%s_b.json' % (msl_out, k), 'rb').read().decode('utf-8', 'replace')
+    else:
+        have = {p.name[:-len('_b.metallib')] for p in msl_out.glob('*_b.metallib')}
+        no_lib = {p.stem[:-len('_b')] for p in msl_out.glob('*_b.json') if not p.with_suffix('.metallib').exists()}
+        read = lambda k: (msl_out / (k + '_b.json')).read_text(encoding='utf-8', errors='replace')
+    return have, layer_only_keys(no_lib, read)
+
+
+def ue_files(root, depth=4):
+    """The .pak and .utoc files of one version's game files, as (path, path relative to the RomFS, size).
+
+    Read through dm/tools/romfs.py, so the RomFS image the pack keeps answers like the folder an older nx_extract left.
+    Unreal puts its paks at the RomFS root or under <Project>/Content/Paks, so the walk stops at four levels: a
+    300,000-entry RomFS otherwise costs a full walk for a game that has none.
+    """
+    sys.path.insert(0, str(TOOLS))
+    import romfs
+    top, out = str(root), []
+
+    def visit(path, left):
+        try: entries = list(romfs.scandir(path))
+        except OSError: return
+        for e in entries:
+            if e.is_dir():
+                if left > 1: visit(e.path, left - 1)
+            elif e.name.endswith(('.pak', '.utoc')):
+                try: size = romfs.stat(e.path).st_size
+                except OSError: continue
+                out.append((e.path, os.path.relpath(e.path, top), size))
+
+    visit(top, depth)
+    return sorted(out, key=lambda t: t[1])
+
+
+def ue_paks_out(rom, files, dest):
+    """The paks and containers of a version's game files as files under dest.
+
+    uepak.py opens a pak and walks for paks with os.walk, which the RomFS image the pack keeps does not answer (the
+    dm/tools/romfs.py readers do). Copied once per stamp; what a repack reuses is ue_shaders/, not this.
+    """
+    sys.path.insert(0, str(TOOLS))
+    import romfs
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    total = sum(size for _, _, size in files)
+    say('copying %d game file(s) (%.0f MB) out of the RomFS image for uepak.py' % (len(files), total / 1048576))
+    for path, rel, _ in files:
+        dst = dest / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with romfs.open(path, 'rb') as r, open(dst, 'wb') as w: shutil.copyfileobj(r, w, 1 << 20)
+    return dest
+
+
+def ue_shader_dirs(dirs):
+    """The version dirs whose game files hold Unreal paks, with the RomFS and its paks and containers.
+
+    shader_split.py takes an Unreal game's shaders from ue_shaders/ beside the RomFS, which decode_ue_shaders in
+    build_ipa_from_nsp.py writes -- and this route never called it (issue #15).
+    """
+    out = {}
+    for v, d in dirs.items():
+        try: rom = romfs_source(d)
+        except (OSError, ValueError): continue
+        files = ue_files(rom)
+        if any(rel.endswith('.pak') for _, rel, _ in files): out[v] = (d, rom, files)
+    return out
+
+
+# Why an Unreal game's shaders cannot be decoded here, in the words the rest of this route uses for Oodle.
+UE_MAC_WHY = ('    Its decoder is the copy linked into the game\'s own code, which this packer runs inside the Mac host\n'
+              '    (dm/host/hle_oodle.c) -- and that needs a Mac with Apple silicon, since it executes the game\'s ARM64\n'
+              '    modules. This route drives the Windows executables in tools/ and has no such host to borrow it from.\n'
+              '    --skip-oodle-check packs on and stops at the shader step as before, so a ue_shaders/ folder already\n'
+              '    decoded by such a run is used without being made again.')
+
+
+def step_ue_shaders(dirs, work, skip_check):
+    """An Unreal game's shader code archives into ue_shaders/, for the games this route can decode.
+
+    Unreal Engine 4.26 and later compress the shaders in those archives with LZ4, and uepak.py decodes that itself (the
+    docstring of decode_ue_shaders says so: "such a game needs no host run"), so the Windows route can do it too -- it just
+    never did, and an LZ4 title stopped at shader_split with "there are no decoded shader code archives" (issue #15,
+    Pikmin 4). Oodle-compressed shaders and Unreal Engine 5's IoStore shader libraries do need the game's own decoder in the
+    Mac host: those are refused here, before the rewrite and the translation rather than after them.
+
+    A folder whose stamp matches its paks and containers is reused, with decode_ue_shaders' own stamp format, so archives
+    decoded by an earlier run (or on a Mac) are never made twice.
+    """
+    want = ue_shader_dirs(dirs)
+    if not want: return
+    sys.path.insert(0, str(GFX))
+    import uepak
+    for v, (d, rom, files) in want.items():
+        out = d / 'ue_shaders'
+        stamp = ''.join('%s\t%d\n' % (rel, size) for _, rel, size in files)
+        if (out / 'stamp').is_file() and (out / 'stamp').read_text() == stamp:
+            say('%s: reusing the decoded shader archives' % v)
+            continue
+        src = rom
+        if rom.is_file():
+            src = work / 'tmp' / ('ue_paks_' + str(v))
+            if not (src / 'stamp').is_file() or (src / 'stamp').read_text() != stamp:
+                ue_paks_out(rom, files, src)
+                (src / 'stamp').write_text(stamp)
+        if uepak.io_shader_tocs(str(src)):
+            if skip_check: continue
+            die('%s: its Unreal Engine 5 shader libraries are in IoStore containers, whose two layers of Oodle the game\'s\n'
+                '    own decoder unpacks.\n' % v + UE_MAC_WHY)
+        jd = work / 'tmp' / ('ue_job_' + str(v))
+        shutil.rmtree(jd, ignore_errors=True); jd.mkdir(parents=True, exist_ok=True)
+        say('%s: taking the shader code archives out of %d pak(s)'
+            % (v, sum(1 for _, rel, _ in files if rel.endswith('.pak'))))
+        try:
+            listing, n = uepak.job(str(src), str(d / 'ExeFS' / 'main'), str(jd), decode=None)
+        except ValueError as e:
+            if 'IoStore shader libraries' not in str(e): die('%s: %s' % (v, e))
+            if skip_check: continue
+            die('%s: %s\n' % (v, e) + UE_MAC_WHY)
+        if not listing:
+            die('%s: the RomFS has Unreal paks, but none of them holds a shader code archive: this game keeps its shaders\n'
+                '    where the profile does not say yet.' % v)
+        say('%s: ' % v + '; '.join('%s %s shaders%s' % (x['name'], format(x['shaders'], ','),
+                                                       ' (%s)' % x['compression'] if x.get('compression') else '')
+                                   for x in listing))
+        if n:
+            if skip_check: continue
+            die('%s: %s of its %s shaders are Oodle-compressed, and only the game\'s own decoder unpacks those.\n'
+                % (v, format(n, ','), format(sum(x['shaders'] for x in listing), ',')) + UE_MAC_WHY)
+        tmp = d / 'ue_shaders.partial'
+        shutil.rmtree(tmp, ignore_errors=True)
+        made = uepak.finish(str(jd), str(tmp))          # no Oodle record: writes the archives as uepak decoded them
+        (tmp / 'stamp').write_text(stamp)
+        shutil.rmtree(out, ignore_errors=True)
+        tmp.rename(out)
+        shutil.rmtree(jd, ignore_errors=True)
+        say('%s: %d decoded shader archive(s) -> %s' % (v, len(made), out))
 
 
 def prune_shader_cache(work):
@@ -2952,6 +3134,9 @@ def main():
                 '    to borrow the decoder from, so this title cannot be packed by this route, on any machine.\n'
                 '    Games that pack straight from Windows: docs/SUPPORTED.md.\n'
                 '    --skip-oodle-check packs on and stops at the shader step as before.')
+    # An Unreal game's shaders: the LZ4 kind this route can decode itself (issue #15), before the rewrite and the
+    # translation rather than after them.
+    step_ue_shaders(dirs, work, a.skip_oodle_check)
     derived_dir = None
     reg = gdir
     bad, had_row = check_build_ids(game, rows, pkg, mods)
@@ -3148,27 +3333,26 @@ def main():
         imgs = sorted((p for p in iosout.glob('b-*.img') if p.is_file()), key=lambda d: (d.stat().st_mtime, d.name)) \
             if iosout.is_dir() else []
         if not libs and not imgs: die('no shader library under %s' % iosout)
+        # What the app's shader map will name, for both routes below.
+        smap = gdir / 'shader_map.tsv'
+        if not smap.is_file(): smap = work / 'shader' / 'tables' / 'shader_map.tsv'
+        want = shader_map_keys(smap)
         if not libs:
             # 上游这一版只写一个 b-<链号>.img：库里已经有打包好的镜像，直接用它，不再从目录现做。
             # 校验照样要做：镜像里少了着色器，手机上就是一片黑，只有一行 [RED]。
             # Upstream writes a single b-<链号>.img now: the library is already packed, so ship it as it is. The
             # completeness check still runs -- a shader the image lacks draws nothing on the phone.
             msl_out = imgs[-1]
-            sys.path.insert(0, str(TOOLS))
-            import romfs
-            with romfs.scandir(str(msl_out)) as it:
-                names = [e.name for e in it]
-            have = sum(1 for n in names if n.endswith('_b.metallib'))
-            want = set()
-            smap = gdir / 'shader_map.tsv'
-            if not smap.is_file(): smap = work / 'shader' / 'tables' / 'shader_map.tsv'
-            if smap.is_file():
-                for line in smap.read_text(errors='replace').splitlines():
-                    c = line.split('\t')
-                    if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
-            if want and have < len(want):
-                die('%s holds %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the '
-                    'phone' % (msl_out.name, have, len(want), len(want) - have))
+            have_keys, slice_only = library_presence(msl_out)
+            have = len(have_keys) + len(slice_only)
+            short = sorted(want - have_keys - slice_only)
+            if short:
+                die('%s holds %d shader libraries but shader_map.tsv lists %d shaders: %d have no library and are not '
+                    'layer-only geometry shaders, so they would draw nothing on the phone: %s%s. Making them is '
+                    'deterministic, so deleting %s and packing again gives the same answer -- logs/shaders.log says what '
+                    'the build made of each'
+                    % (msl_out.name, have, len(want), len(short), ', '.join(short[:8]),
+                       ' and more' if len(short) > 8 else '', work))
             say('shader library image: %s (%d of %d shaders, %d bytes)'
                 % (msl_out.name, have, len(want) or have, msl_out.stat().st_size))
             msl_out_is_image = True
@@ -3187,21 +3371,17 @@ def main():
                  % (iosout, len(libs), ', '.join(d.name for d in libs), msl_out.name))
         # A short library is the failure that only shows up on the phone (every missing shader prints [RED] and draws
         # nothing, with the sound still playing), so check it against the shader map the app will get before packing.
-        want = set()
-        smap = gdir / 'shader_map.tsv'
-        if not smap.is_file(): smap = work / 'shader' / 'tables' / 'shader_map.tsv'
-        if smap.is_file():
-            for line in smap.read_text(errors='replace').splitlines():
-                c = line.split('\t')
-                # the file opens with a column-title row ("package index stage dm_ctl_sha16 source") that is not a
-                # comment, so the key has to look like one: 16 hex digits
-                if len(c) >= 4 and re.fullmatch(r'[0-9a-f]{16}', c[3]): want.add(c[3])
         if not msl_out_is_image:
-            have = len(list(msl_out.glob('*_b.metallib')))
-            if want and have < len(want):
-                die('%s has %d shader libraries but shader_map.tsv lists %d shaders: %d would draw nothing on the phone. '
-                    'Delete %s and pack again (a directory left by an interrupted run is the usual cause)'
-                    % (msl_out.name, have, len(want), len(want) - have, work))
+            have_keys, slice_only = library_presence(msl_out)
+            have = len(have_keys) + len(slice_only)
+            short = sorted(want - have_keys - slice_only)
+            if short:
+                die('%s has %d shader libraries but shader_map.tsv lists %d shaders: %d have no library and are not '
+                    'layer-only geometry shaders, so they would draw nothing on the phone: %s%s. Making them is '
+                    'deterministic, so deleting %s and packing again gives the same answer -- logs/shaders.log says what '
+                    'the build made of each (a directory left by an interrupted run is the other cause)'
+                    % (msl_out.name, have, len(want), len(short), ', '.join(short[:8]),
+                       ' and more' if len(short) > 8 else '', work))
             say('shader libraries: %s (%d of %d shaders)' % (msl_out.name, have, len(want) or have))
     if a.stop_after == 'guest': return say('stopped before assembly')
 

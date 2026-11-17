@@ -83,5 +83,118 @@ class ShaderLibrary(unittest.TestCase):
         self.assertFalse((app / 'msl' / 'b-000000000000.img').exists())
 
 
+class Completeness(unittest.TestCase):
+    """The packer's count of shader libraries against shader_map.tsv (issue #16).
+
+    A layer-only geometry shader (gs_slice) has a reflection and no library on purpose: the host draws it with the vertex
+    shader's layer entry points (dmsh_entry.py). Counting it missing refused a correct Pikmin 4 build after an hour of
+    translation, and told the user to repack a step that is deterministic.
+    """
+
+    SLICE = '439bed623be839b2'
+
+    def root(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        return pathlib.Path(t.name)
+
+    def test_a_folder_counts_a_slice_shader_as_whole(self):
+        lib = self.root() / LIB
+        lib.mkdir()
+        (lib / 'abcd_b.metallib').write_bytes(b'library')
+        (lib / 'abcd_b.json').write_bytes(b'{"stage": "ps"}')
+        (lib / (self.SLICE + '_b.json')).write_bytes(b'{"stage": "gs", "gs_slice": {"loc": 1, "comp": "x"}}')
+        have, slices = nxn.library_presence(lib)
+        self.assertEqual(have, {'abcd'})
+        self.assertEqual(slices, {self.SLICE})
+
+    def test_a_reflection_without_a_library_is_still_missing(self):
+        lib = self.root() / LIB
+        lib.mkdir()
+        (lib / 'abcd_b.json').write_bytes(b'{"stage": "ps"}')       # no metallib and not a slice writer
+        have, slices = nxn.library_presence(lib)
+        self.assertEqual(have, set())
+        self.assertEqual(slices, set())
+
+    def test_the_image_path_agrees_with_the_folder(self):
+        app = self.root() / 'DmIOS.app'
+        lib = self.root() / LIB
+        lib.mkdir()
+        (lib / 'abcd_b.metallib').write_bytes(b'library')
+        (lib / (self.SLICE + '_b.json')).write_bytes(b'{"stage": "gs", "gs_slice": {"loc": 1}}')
+        nxn.shader_library(lib, app)
+        have, slices = nxn.library_presence(app / 'msl' / (LIB + '.img'))
+        self.assertEqual(have, {'abcd'})
+        self.assertEqual(slices, {self.SLICE}, 'the image path lost the slice-only key, as it did in issue #16')
+
+    def test_the_shader_map_title_row_is_not_a_key(self):
+        smap = self.root() / 'shader_map.tsv'
+        smap.write_text('package\tindex\tstage\tdm_ctl_sha16\tsource\n'
+                        'gs_global.bin\t2\tgeometry\t%s\t/x#UE572\n' % self.SLICE)
+        self.assertEqual(nxn.shader_map_keys(smap), {self.SLICE})
+
+
+class UEArchives(unittest.TestCase):
+    """An Unreal game's shader code archives on the Windows route (issue #15)."""
+
+    def root(self):
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        return pathlib.Path(t.name)
+
+    def version(self, root):
+        d = root / 'v262144'
+        paks = d / 'RomFS' / 'Game' / 'Content' / 'Paks'
+        paks.mkdir(parents=True)
+        (paks / 'Carrot4-Switch.pak').write_bytes(b'PAK')
+        return d
+
+    def test_paks_are_found_where_unreal_puts_them(self):
+        root = self.root()
+        d = self.version(root)
+        found = nxn.ue_shader_dirs({'v262144': d})
+        self.assertEqual(set(found), {'v262144'})
+        self.assertEqual([rel for _, rel, _ in found['v262144'][2]],
+                         [str(pathlib.Path('Game') / 'Content' / 'Paks' / 'Carrot4-Switch.pak')])
+
+    def test_a_folder_with_no_paks_is_left_alone(self):
+        root = self.root()
+        d = root / 'v0'
+        (d / 'RomFS').mkdir(parents=True)
+        (d / 'RomFS' / 'main').write_bytes(b'')
+        self.assertEqual(nxn.ue_shader_dirs({'v0': d}), {})
+
+    def test_the_image_the_pack_keeps_is_searched_too(self):
+        # step_extract asks nx_extract for RomFS.img, not a tree: the search has to read the image (dm/tools/romfs.py).
+        root = self.root()
+        d = self.version(root)
+        nxn.romfs_images({'v262144': d}, root / 'work')
+        self.assertTrue((d / 'RomFS.img').is_file(), 'the fixture did not become one image')
+        found = nxn.ue_shader_dirs({'v262144': d})
+        self.assertEqual([rel for _, rel, _ in found['v262144'][2]],
+                         [str(pathlib.Path('Game') / 'Content' / 'Paks' / 'Carrot4-Switch.pak')])
+
+    def test_the_paks_come_out_of_the_image_byte_for_byte(self):
+        root = self.root()
+        d = self.version(root)
+        pak = d / 'RomFS' / 'Game' / 'Content' / 'Paks' / 'Carrot4-Switch.pak'
+        pak.write_bytes(bytes(range(256)) * 40)
+        nxn.romfs_images({'v262144': d}, root / 'work')
+        _, rom, files = nxn.ue_shader_dirs({'v262144': d})['v262144']
+        out = nxn.ue_paks_out(rom, files, root / 'mirror')
+        self.assertEqual((out / 'Game' / 'Content' / 'Paks' / 'Carrot4-Switch.pak').read_bytes(), bytes(range(256)) * 40)
+
+    def test_a_stamped_folder_is_reused_without_decoding(self):
+        root = self.root()
+        d = self.version(root)
+        _, rom, files = nxn.ue_shader_dirs({'v262144': d})['v262144']
+        out = d / 'ue_shaders'
+        out.mkdir()
+        (out / 'stamp').write_text(''.join('%s\t%d\n' % (rel, size) for _, rel, size in files))
+        nxn.step_ue_shaders({'v262144': d}, root / 'work', False)   # a real run would need ExeFS/main and decode the pak
+        self.assertEqual([p.name for p in out.iterdir()], ['stamp'],
+                         'the reuse branch did not stop before touching the archives')
+
+
 if __name__ == '__main__':
     unittest.main()
