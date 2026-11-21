@@ -1,43 +1,44 @@
 diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
 --- a/dm/gfx/tools/vk_shaders.py
 +++ b/dm/gfx/tools/vk_shaders.py
-@@ -21,7 +21,7 @@
- # Table rows: key <TAB> stage (vert / frag) <TAB> resources, space-separated kind:set.binding=slot[*count] (count: an array of descriptors in consecutive slots; u uniform buffer, b storage buffer, t image, s sampler, c combined image sampler = texture and sampler slot n,
- #   p push constants)
- # Usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]   (SPIR-V dirs: the RomFS, capture folders)
+@@ -26,7 +26,7 @@
+ #   o maps a dynamic buffer's set.binding to an offset index, and q gives that offset buffer's Metal slot
+ # RenderDragon material bone-index inputs are repaired in SPIR-V before translation; keys still identify the game's original words.
+ # Usage: vk_shaders.py <SPIR-V dir | NSO>... <out dir> [--ios <dir>]
 -import concurrent.futures as cf, hashlib, json, os, re, struct, subprocess, sys, tempfile
 +import concurrent.futures as cf, hashlib, json, os, re, shutil, struct, subprocess, sys, tempfile
+ from typing import NoReturn
  sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../tools'))
  from romfs import os, open
- sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-@@ -80,13 +80,16 @@
+@@ -153,6 +153,9 @@
      if not add: return words
      return words[:at] + [w for t, s in add.items() for w in ((4 << 16) | OP_DECORATE, t, DEC_ARRAY_STRIDE, s)] + words[at:]
  
 +# Every child gets stdin=DEVNULL: a packing run has no terminal, and a spirv-cross that decides to read its input from
 +# stdin waits forever on an inherited pipe (one shader in Super Mario Galaxy's 3,089 hung the whole translation for
 +# 20 minutes at 0.05 s of CPU time, and looked like a slow translator rather than a deadlock)
- def one(path, tmp, root):
-     data = open(path, 'rb').read()
-     if len(data) % 4: red(f'{path}: SPIR-V length {len(data)} is not a multiple of 4')
-     key = hashlib.sha256(data).hexdigest()[:16]   # of the game's words, which the host hashes
-     words = fix_strides(list(struct.unpack(f'<{len(data) // 4}I', data)))
-     src_spv = os.path.join(tmp, key + '.in.spv'); open(src_spv, 'wb').write(struct.pack(f'<{len(words)}I', *words))
+ def unsigned_bone_indices(words):
+     """Repair RenderDragon's R16_UINT bone input, preserving signed values/arithmetic after each load.
+ 
+@@ -399,7 +402,7 @@
+     if '.material.bin@' in path: words = unsigned_bone_indices(words)
+     src_spv = os.path.join(tmp, key + '.in.spv')
+     with open(src_spv, 'wb') as f: f.write(struct.pack(f'<{len(words)}I', *words))
 -    refl = json.loads(subprocess.run([SPIRV_CROSS, src_spv, '--reflect'], capture_output=True, text=True, check=True).stdout)
 +    refl = json.loads(subprocess.run([SPIRV_CROSS, src_spv, '--reflect'], capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL).stdout)
      eps = refl.get('entryPoints', [])
      if len(eps) != 1: red(f'{path}: entry points {eps} are not exactly one')
      stage = eps[0]['mode']
-@@ -122,7 +125,7 @@
-     # the row's centre (float2(x, 0.5)) and reads it at (x, 0)
-     cmd = [SPIRV_CROSS, spv, '--msl', '--msl-version', '20300', '--msl-decoration-binding', '--msl-texture-1d-as-2d', '--rename-entry-point', 'main', f'vk_{key}', stage, '--output', msl]
+@@ -501,7 +504,7 @@
+             if s not in argsets: cmd += ['--msl-discrete-descriptor-set', str(s)]
+         for s, b in dyn: cmd += ['--msl-dynamic-buffer', str(s), str(arg_ids[s, b])]
      if stage == 'vert': cmd.append('--flip-vert-y')
 -    r = subprocess.run(cmd, capture_output=True, text=True)
 +    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
      if r.returncode: red(f'{path}: spirv-cross failed: {r.stderr.strip()[:300]}')
      # The reflection lists every declared resource; the Metal entry point only takes the ones the shader uses (Hades' ShadowMap.frag declares a buffer it never reads,
      # which the game's own pipeline layout leaves out): keep the rows whose slot is an argument of the entry point, so the host only binds, and only reports, real ones
-@@ -151,7 +154,9 @@
+@@ -565,7 +568,9 @@
      def comp(m):
          a = m[:-6] + f'.{sdk}.air'
          # -fwrapv: signed integer overflow wraps, as SPIR-V's integer arithmetic does; in MSL it is undefined and the compiler folds around it (dmsh_chain.py MAC_METAL)
@@ -48,7 +49,7 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
          if r.returncode: red(f'{m}: metal compile failed: {r.stderr.strip()[:400]}')
          return a
      with cf.ThreadPoolExecutor(os.cpu_count()) as ex: airs = list(ex.map(comp, msls))
-@@ -164,6 +169,10 @@
+@@ -578,6 +583,10 @@
  def main():
      a = sys.argv[1:]
      ios = None
@@ -57,15 +58,15 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
 +    source_only = '--source-only' in a
 +    if source_only: a.remove('--source-only')
      if '--ios' in a: i = a.index('--ios'); ios = a[i + 1]; del a[i:i + 2]
-     if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir>... <out dir> [--ios <dir>]')
+     if len(a) < 2: sys.exit('usage: vk_shaders.py <SPIR-V dir | NSO>... <out dir> [--ios <dir>]')
      roots, out = a[:-1], a[-1]
-@@ -180,15 +189,20 @@
-         if skipped: print('[RED] skipped shader stages Metal does not have: ' + ', '.join(f'{k} {v}' for k, v in sorted(skipped.items())))
-         msls = [m for v in seen.values() for m in v[2]]
-         tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; resources kind:set.binding=slot (u uniform buffer, b storage buffer, t image, s sampler, c combined, p push constants)',
+@@ -594,15 +603,20 @@
+         viewport_suffixes = {f'_vp{v[0].split(":")[1]}.metal' for v in seen.values() if v[0].startswith('geomvp:')}
+         msls = [m for v in seen.values() for m in v[2] if '_vp' not in os.path.basename(m) or any(m.endswith(s) for s in viewport_suffixes)]
+         tsv = ['# Vulkan shaders (dm/gfx/tools/vk_shaders.py): key = sha256(SPIR-V)[:16], Metal function vk_<key>; stage vert/frag/comp:x,y,z/geomvp:location; resource kinds u/b/t/s/c/p and argument-buffer U/B/T/S/o/q',
 -               '# spirv-cross ' + ' '.join((lambda r: r.stdout + r.stderr)(subprocess.run([SPIRV_CROSS, '--revision'], capture_output=True, text=True)).split())]
 +               '# spirv-cross ' + ' '.join((lambda r: r.stdout + r.stderr)(subprocess.run([SPIRV_CROSS, '--revision'], capture_output=True, text=True, stdin=subprocess.DEVNULL)).split())]
-         tsv += [f'{k}\t{v[0]}\t{" ".join(v[1])}\t{v[3]}' for k, v in sorted(seen.items())]
+         tsv += [f'{k}\t{stage}\t{" ".join(res)}\t{src}' for k, (stage, res, _, src) in sorted(seen.items())]
          dirs = [(os.path.join(out, 'vk'), 'macosx', [MAC_MIN_FLAG])]   # the Mac host's minimum macOS, as the NVN chain's libraries (dmsh_chain.py MAC_MIN)
          # The iPhone library is compiled with -fmetal-math-mode=relaxed, as the NVN chain's (dm/ios/tools/ios_metal.py): the default fast mode lets the GPU compiler assume there is
          # no NaN / Inf, which would let it drop the NaN handling of the precise:: functions above
@@ -82,4 +83,4 @@ diff --git a/dm/gfx/tools/vk_shaders.py b/dm/gfx/tools/vk_shaders.py
 +            with open(os.path.join(d, 'vk_shaders.tsv'), 'w', newline='\n') as f: f.write('\n'.join(tsv) + '\n')
              print(f'{sdk}: {len(seen)} shaders → {lib}')
  
- if __name__ == '__main__': main()
+ if __name__ == '__main__':

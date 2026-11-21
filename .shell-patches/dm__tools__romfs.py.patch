@@ -1,7 +1,7 @@
 diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
 --- a/dm/tools/romfs.py
 +++ b/dm/tools/romfs.py
-@@ -21,6 +21,7 @@
+@@ -25,6 +25,7 @@
  HEAD = struct.Struct('<8sQQQ')
  ENT = struct.Struct('<QQIHBB')
  MAGIC = b'DMROMFS1'
@@ -9,7 +9,7 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
  
  
  class Image:
-@@ -92,7 +93,10 @@
+@@ -118,7 +119,10 @@
  
  
  def _resolve(path):
@@ -21,7 +21,7 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
      parts = p.split('/')
      for i, part in enumerate(parts):
          if not part.endswith('.img'): continue
-@@ -113,9 +117,24 @@
+@@ -139,11 +143,26 @@
  _fd_ranges = {}
  
  
@@ -39,15 +39,17 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
 +
  class _File(io.RawIOBase):
      def __init__(self, image, k):
--        self.fd = _os.open(image.path, _os.O_RDONLY)
 +        # O_BINARY: Windows opens a descriptor in text mode without it, and then a byte 0x1A (^Z) inside game data ends the
 +        # read -- a 208 MB file came back as 592 bytes and the whole RomFS summed to 253 KB, silently (2026-11-05). POSIX has
 +        # no such flag, so this is a no-op on a Mac.
-+        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
+         descriptors = _scan_descriptors.get()
+         backing = descriptors.get(image.path) if descriptors is not None else None
+-        self.fd = _os.dup(backing[1]) if backing is not None and backing[0] == _identity(image.stat) else _os.open(image.path, _os.O_RDONLY)
++        self.fd = _os.dup(backing[1]) if backing is not None and backing[0] == _identity(image.stat) else _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
          self.start, self.length = image.entry(k)[:2]
          self.pos = 0
          _fd_ranges[self.fd] = (self.start, self.length)
-@@ -129,7 +148,7 @@
+@@ -157,7 +176,7 @@
          self.pos = pos; return pos
      def readinto(self, buffer):
          size = min(len(buffer), max(0, self.length - self.pos))
@@ -56,7 +58,7 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
          buffer[:len(data)] = data; self.pos += len(data)
          return len(data)
      def close(self):
-@@ -147,10 +166,17 @@
+@@ -175,10 +194,17 @@
          if not resolved: return builtins.open(file, mode, buffering, encoding, errors, newline, **kwargs)
          if mode not in ('r', 'rb', 'rt'): raise OSError(errno.EROFS, 'RomFS images are read-only', file)
          image, relative = resolved; k = image.find(relative)
@@ -76,7 +78,7 @@ diff --git a/dm/tools/romfs.py b/dm/tools/romfs.py
          return reader if 'b' in mode else io.TextIOWrapper(reader, encoding=encoding, errors=errors, newline=newline)
  
  
-@@ -206,20 +232,35 @@
+@@ -234,20 +260,35 @@
  
  
  def walk(top, topdown=True, onerror=None, followlinks=False):

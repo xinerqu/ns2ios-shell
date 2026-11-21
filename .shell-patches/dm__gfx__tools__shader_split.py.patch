@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
 --- a/dm/gfx/tools/shader_split.py
 +++ b/dm/gfx/tools/shader_split.py
-@@ -98,12 +98,20 @@
+@@ -102,12 +102,20 @@
      if not (0 <= at and 0 <= n <= len(d) - at): red(f'{where}: {n:#x} bytes at {at:#x} lie outside the {len(d):#x} bytes there are')
      return d[at:at + n]
  
@@ -25,17 +25,16 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return zstd
  
  NVN2_KEY_CTL = 0x48
-@@ -3134,11 +3142,17 @@
+@@ -3541,10 +3549,17 @@
      return zstd.decompress(d, zstd_dict=_ZD[did])
  
  def unzs(path):
--    """A zstd file decompressed: frames without a dictionary through the zstd command as before (fed the bytes: inside a RomFS image the path is not a file the command can open),
--    frames that name one with that dictionary from ZDICTS"""
+-    """Decompress all frames in process, using the dictionary from ZDICTS if the file names one."""
 +    """A zstd file decompressed: frames without a dictionary through the zstd module when this Python has one, else the zstd command
 +    (fed the bytes: inside a RomFS image the path is not a file the command can open); frames that name one with that dictionary from ZDICTS"""
-     d = open(path, 'rb').read()
+     with open(path, 'rb') as f: d = f.read()
      did = zs_dict_id(d)
--    if not did: return subprocess.run(['zstd', '-d', '-c', '-q'], input=d, capture_output=True, check=True).stdout
+-    if not did: return zstd_mod().decompress(d)
 +    if not did:
 +        zstd = zstd_opt()
 +        if zstd: return zstd.decompress(d)
@@ -46,7 +45,7 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
      return unzs_dict(d, did, path)
  
  def frame_size(f):
-@@ -3767,7 +3781,10 @@
+@@ -4415,7 +4430,10 @@
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''
@@ -58,12 +57,12 @@ diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
          img = nso_image(mainnso)
          if not i:
              import unityfs
-@@ -3802,7 +3819,7 @@
+@@ -4450,7 +4468,7 @@
          files += sorted((os.path.join(dp, f), tag + '/' + os.path.relpath(os.path.join(dp, f), romfs)) for dp, _, fs in os.walk(romfs) for f in fs)
      zdicts = {k: v for r in romfs_v + dlc_v for k, v in zs_dicts(r).items()}   # Tears of the Kingdom's zstd dictionaries (zs_dicts)
      # First pass: every file; Unity bundles carry type trees, and the Shader trees are collected on the way. Second pass: Unity serialized files without type trees are scanned again with the borrowed trees
 -    J = int(os.environ.get('J', '8'))
 +    J = int(os.environ.get('J', str(min(os.cpu_count() or 8, 16))))   # the machine's own count: a scan waits on the image more than it computes
-     big = [j for p, r in files for j in (linkdata_jobs(p, r) or [])]   # Three Houses' 6.9 GB DATA1.bin: one job per range of entries, not one read of the whole file
-     pak_jobs, paks = kpka_jobs(files)   # Monster Hunter Rise's PAKs: the newest copy of each path, in ranges of entries
-     tr_jobs, trp = trpfs_jobs(files)   # Pokémon Legends: Z-A's Trinity packs (data.trpfs and its index data.trpfd), decoded by the game's own Oodle in the Mac host
+     roots = romfs_v + dlc_v
+     with cf.ProcessPoolExecutor(J, initializer=_pool_init, initargs=(common, {}, zdicts, roots)) as ex:
+         paths = list(dict.fromkeys(p for p, _ in files))

@@ -1,18 +1,18 @@
 diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
 --- a/dm/gfx/vk/hle_vk.m
 +++ b/dm/gfx/vk/hle_vk.m
-@@ -140,6 +140,8 @@
- typedef struct { char key[17]; int frag, nres; shres res[24]; } shinfo;
+@@ -196,6 +196,8 @@
+ static int is_arg(char k) { return k && strchr("UBTS", k); }
  static shinfo *g_sh; static int g_nsh;
  static id<MTLLibrary> g_lib;
 +static NSString *g_srcdir;                       // vk/src when the package holds the shaders as source (no Apple compiler on the packing computer)
 +static char g_srcwhy[512];                       // why sh_src_fn gave nothing, for the line that reports a shader missing
  static int sh_cmp(const void *a, const void *b) { return memcmp(((const shinfo *)a)->key, ((const shinfo *)b)->key, 16); }
- static void sh_load(void) {
-     const char *d = getenv("DM_MSL_DIR"); char p[1024];
-@@ -164,11 +166,48 @@
-     fclose(f);
-     qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);   // looked up by key (Super Mario Galaxy creates over 3,000 modules at boot)
+ static int sh_number(const char **p, unsigned *out) {
+     if (**p < '0' || **p > '9') return 0;
+@@ -268,11 +270,48 @@
+     if (!f) { LOG("[vk] [RED] cannot open %s (run dm/gfx/tools/vk_shaders.py first)", p); return; }
+     sh_read_table(f); fclose(f);
      snprintf(p, sizeof p, "%s/vk/vk_shaders.metallib", d);
 -    NSError *err = nil;
 -    g_lib = [g_dev newLibraryWithURL:[NSURL fileURLWithPath:@(p)] error:&err];
@@ -62,14 +62,18 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
  
  static void dev_init_once(void) {
      @autoreleasepool {
-@@ -911,8 +950,12 @@
-     for (int i = 0; i < 8; i++) snprintf(m->key + 2 * i, 3, "%02x", h[i]);
+@@ -1126,11 +1165,13 @@
      sh_capture(m->key, ci->pCode, ci->codeSize);
      m->si = sh_find(m->key);
--    @autoreleasepool { if (m->si && g_lib) m->fn = [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s", m->key]]; }
--    if (!m->fn) LOG("[vk] [RED] shader %s (%zu bytes of SPIR-V) is not in the library", m->key, ci->codeSize);
-+    @autoreleasepool { if (m->si) m->fn = g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s", m->key]] : sh_src_fn(m->key, 0); }
-+    if (!m->fn) {
+     @autoreleasepool {
+-        if (m->si && !m->si->geom_vp && g_lib) {
+-            m->fn = [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s", m->key]];
+-        }
+-    }
+-    if (!m->fn && !(m->si && m->si->geom_vp)) LOG("[vk] [RED] shader %s (%zu bytes of SPIR-V) is not in the library", m->key, ci->codeSize);
++        if (m->si && !m->si->geom_vp) m->fn = g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s", m->key]] : sh_src_fn(m->key, 0);
++    }
++    if (!m->fn && !(m->si && m->si->geom_vp)) {
 +        LOG("[vk] [RED] shader %s (%zu bytes of SPIR-V) is not in the library", m->key, ci->codeSize);
 +        static int d0; if (d0++ < 10) LOG("[vk] [RED]   %s: %s; %s", m->key, m->si ? "the table has it" : "no table row",
 +                                          g_lib ? "a compiled library is loaded" : (g_srcdir ? (g_srcwhy[0] ? g_srcwhy : "vk/src gave no function") : "no vk/src"));
@@ -77,7 +81,7 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
      else OLOG("CreateShaderModule %s", m->key);
      *out = m; return VK_SUCCESS;
  }
-@@ -986,7 +1029,7 @@
+@@ -1220,7 +1261,7 @@
              else if (st->stage == VK_SHADER_STAGE_FRAGMENT_BIT) {
                  if (dual && m->fn) {   // pipelines may be built on several threads
                      static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER; pthread_mutex_lock(&mu);
@@ -85,4 +89,4 @@ diff --git a/dm/gfx/vk/hle_vk.m b/dm/gfx/vk/hle_vk.m
 +                    if (!m->tried_d) { m->tried_d = 1; m->fn_d = g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"vk_%s_d", m->key]] : sh_src_fn(m->key, 1); }
                      pthread_mutex_unlock(&mu);
                  }
-                 pd.fragmentFunction = spec_fn(dual && m->fn_d ? m->fn_d : m->fn, m->key, dual && m->fn_d, st->pSpecializationInfo); p->fs = m->si;
+                 pd.fragmentFunction = spec_fn(dual && m->fn_d ? m->fn_d : m->fn, st->pSpecializationInfo); p->fs = m->si;

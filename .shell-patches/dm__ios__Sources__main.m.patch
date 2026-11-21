@@ -1,7 +1,7 @@
 diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 --- a/dm/ios/Sources/main.m
 +++ b/dm/ios/Sources/main.m
-@@ -8,6 +8,7 @@
+@@ -9,6 +9,7 @@
  #include <string.h>
  #include <sys/stat.h>
  #include <unistd.h>
@@ -9,7 +9,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  #include "game_profile.h"   // game profile constants (the RomFS marker path)
  #include "front.h"
  #include "romfs_image.h"
-@@ -20,10 +21,14 @@
+@@ -21,10 +22,14 @@
  extern char **environ;
  
  int dm_main(int argc, char **argv);   // dm/host/main.c compiled in with -Dmain=dm_main
@@ -25,7 +25,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
  
  // Documents/romfs.img, one RomFS image file (dm/tools/romfs_image.py, scripts/push_romfs.sh): only a complete one counts. Its index is written last and ends the file, so a copy cut off partway is skipped
  static int romfs_image_complete(NSString *path) {
-@@ -78,8 +83,15 @@
+@@ -79,8 +84,15 @@
      NSString *documentFolder = [doc stringByAppendingPathComponent:@"romfs"];
      if ([fm fileExistsAtPath:[documentFolder stringByAppendingPathComponent:@(DM_GAME_ROMFS_MARKER)]]) return documentFolder;
      if (romfs_image_complete(bundledImage)) return bundledImage;
@@ -42,7 +42,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      return nil;
  }
  
-@@ -102,6 +114,157 @@
+@@ -103,9 +115,161 @@
  // Why a slim build found no usable game files: the verdict on Documents/romfs.img (the first of romfs_document_images), in the log and for the screen (front_ios_boot_message). NULL when the build has no romfs.id
  static char g_boot_message[640];
  const char *front_ios_boot_message(void) { return g_boot_message[0] ? g_boot_message : NULL; }
@@ -197,10 +197,14 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +int dm_shell_library_needed(void) { return 0; }
 +const char *dm_shell_start_game(const char *tid) { (void)tid; return "This package runs the game it was built with."; }
 +#endif
+ 
+ static bool g_hud_enabled_from_saved_choice;
+ bool front_ios_hud_enabled_from_saved_choice(void) { return g_hud_enabled_from_saved_choice; }
++
+ 
  // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
  // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
- // its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
-@@ -124,14 +287,31 @@
+@@ -129,14 +293,31 @@
      fprintf(stderr, "[RED] boot: %s\n", g_boot_message);
  }
  
@@ -234,7 +238,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
          NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d]]; NSError *e = nil;
          if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
      }
-@@ -153,19 +333,17 @@
+@@ -158,19 +339,17 @@
      NSDictionary *settings_file = settings_data ? [NSJSONSerialization JSONObjectWithData:settings_data options:0 error:nil] : nil;
      for (NSDictionary *row in settings_file[@"settings"]) if ([row[@"env"] isKindOfClass:NSString.class]) [launcher_keys addObject:row[@"env"]];
  #endif
@@ -264,8 +268,8 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
 +    for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) env_file_read(ef, from_file);
      setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
      setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
-     front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
-@@ -174,10 +352,48 @@
+     front_hud_env();   // DM_METAL_HUD from the launch environment or an env file
+@@ -190,10 +369,48 @@
      NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];
      if (!getenv("DM_LANG") && [lang isKindOfClass:NSString.class] && lang.length) setenv("DM_LANG", lang.UTF8String, 0);
      fprintf(stderr, "boot: game language %s\n", getenv("DM_LANG") ?: "en-US");
@@ -314,7 +318,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      setenv("DM_SYSTEM_DIR", [doc stringByAppendingPathComponent:@"system"].fileSystemRepresentation, 0);
      setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
      setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
-@@ -186,6 +402,12 @@
+@@ -202,6 +419,12 @@
      if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
      chdir(doc.fileSystemRepresentation);
      g_argv[0] = strdup("dmhost"); g_argv[1] = strdup(dm.fileSystemRepresentation); g_argc = 2;
@@ -327,7 +331,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      dm_host_preload_start(g_argc, g_argv);   // Module tables / relocation / takeover run early in the background, in parallel with UIKit startup (and the launcher: the settings it sets are read when the game starts)
      return 1;
  }
-@@ -198,6 +420,11 @@
+@@ -214,6 +437,11 @@
  static NSString *program_env(void) {
      NSFileManager *fm = NSFileManager.defaultManager;
      NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0], *res = NSBundle.mainBundle.resourcePath;
@@ -339,7 +343,7 @@ diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
      NSString *dmdir = [res stringByAppendingPathComponent:@"dm"], *msl = [res stringByAppendingPathComponent:@"msl"], *prog = nil;
      NSString *plist = [NSString stringWithContentsOfFile:[dmdir stringByAppendingPathComponent:@"programs.txt"] encoding:NSUTF8StringEncoding error:nil];
      if (plist) {
-@@ -239,11 +466,19 @@
+@@ -255,11 +483,19 @@
      fprintf(stderr, "boot: dm_main returned %d\n", rc);
      return NULL;
  }

@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 --- a/dm/gfx/tools/dmsh_build.py
 +++ b/dm/gfx/tools/dmsh_build.py
-@@ -77,12 +77,17 @@
+@@ -105,12 +105,17 @@
  def record_index(path):   # → (an open descriptor, {a record's key: its bytes' (start, end)}): shader_split.py writes each record's key at +0x08, its bytes from its marker to the next one
      # Scanned through a read-only mapping that is closed again, so no package stays in this process. Pokopia's ps_rdb.bin (4.25 GB) read and cut into its 105,118
      # records left the process at 8.7 GB, and each fork (every spirv-cross and Metal compile) then took 75 ms instead of 3 with the GIL held: one shader worker at a time (GitHub issue #1036)
@@ -20,7 +20,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  def clone(src, dst):   # APFS copy-on-write, else a plain copy; the clonefile call, not a cp: a fork of this large process costs about 6 ms
      os.makedirs(os.path.dirname(dst), exist_ok=True)
      dmsh_mtlcache.clone(src, dst)
-@@ -91,7 +96,10 @@
+@@ -119,7 +124,10 @@
      os.makedirs(os.path.dirname(path), exist_ok=True)
      tmp = path + '.tmp-' + str(os.getpid()) + '-' + str(threading.get_ident())
      with open(tmp, 'w') as f: json.dump(value, f, ensure_ascii=False, indent=1)
@@ -32,15 +32,15 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  
  def source_without_rule_bodies():   # this file's code form (dmsh_chain.code_form): no comments, docstrings or formatting, and the rule functions' bodies blanked
      return dmsh_chain.code_form(open(__file__, 'r').read(), {f.__name__ for f, _ in RULES})
-@@ -247,6 +255,7 @@
-         atomic_json(os.path.join(d, key + '_b.json'), MTL.with_compiler(target, refl))
+@@ -279,6 +287,7 @@
+         atomic_json(os.path.join(d, key + '_b.json'), recorded)
  
  VIN_STATS = collections.Counter()
 +SRC_STATS = collections.Counter()   # units whose library had to stay MSL source
  PULL_STATS = collections.Counter()
  SIDE_STATS = collections.Counter()
  BF_STATS = collections.Counter()
-@@ -335,8 +344,17 @@
+@@ -406,8 +415,17 @@
          try:
              for t, d in targets: MTL.compile_split(t, u, [os.path.join(d, key + n + '.metallib') for n in names], lambda lib, groups=groups: dmsh_side.cut(lib, *groups))
          except (subprocess.CalledProcessError, ValueError) as e:
@@ -60,19 +60,19 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
              continue
          finally:
              try: os.unlink(u)
-@@ -763,7 +781,7 @@
+@@ -848,7 +866,7 @@
          if extra:
              j['attr'].update(extra); jp = os.path.join(w, f'job1_{key}.json'); json.dump([j], open(jp, 'w'))
              rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
 -            if rx.returncode or not os.path.exists(os.path.join(w, key + '.spv')): return 'translation failed', ('integer-input retranslation: ' + rx.stderr.strip())[:160], None
 +            if rx.returncode or not os.path.exists(os.path.join(w, key + '.spv')): return 'translation failed', ('integer-input retranslation: exit %s: ' % rx.returncode + (rx.stderr or rx.stdout or '(no output)'))[:160], None
              spv_single_lane(os.path.join(w, key + '.spv'))
-             r = subprocess.run([SPIRV_CROSS, *XC, os.path.join(w, key + '.spv'), '--output', msl], capture_output=True, text=True)
+             r = cross_msl(os.path.join(w, key + '.spv'), msl)
              if r.returncode: return 'MSL failed', r.stderr.strip()[:160], None
-@@ -888,6 +906,12 @@
+@@ -985,6 +1003,12 @@
  keys = [key for key in keys if key not in RT_KEYS]   # one universal RT library includes every discovered module, even on a partial build
  NJ = int(os.environ.get('J', '8'))
- PROCS = int(os.environ.get('DMSH_PROCS', NJ))   # processes that finish shaders (fin_worker); 0: NJ threads of this one
+ PROCS = 0 if SOURCE_ONLY else int(os.environ.get('DMSH_PROCS', NJ))   # processes that finish shaders (fin_worker); 0: NJ threads of this one
 +# Windows has no fork, and spawn cannot stand in for it here: this script does its work at import time, so every worker
 +# would re-run the whole build instead of finishing one shader (patch_nso.py falls back to serial for the same reason).
 +# PROCS = 0 is the path that runs the same fin() in this process's threads -- what every build did before the pool, and
@@ -82,7 +82,7 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  BATCH = 4 * NJ   # shaders translated and finished together: the next batch is translated while this one is finished, and a shader's working files go when it is (fin).
  # Minecraft Dungeons II, 15,826 shaders: at most 3,279 files under the build folder with batches of 256 removed whole, 68,230 before batches (Octopath Traveler 0's stopped build)
  # A full build starts from no shader outputs, a partial one from none of the keys it builds, so what a run leaves is what it built: every output is restored from the cache anyway.
-@@ -967,7 +991,7 @@
+@@ -1067,7 +1091,7 @@
          sys.exit(f'[RED] {name} holds no record of shader {key}, which the shader map names: the package and the map come from different shader_split.py runs{old}; '
                   f'split the shaders again (the NSP script does when {dm_dir} is removed)')
      o, e = recs[key]
@@ -91,21 +91,21 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
  try: RT_PLAN = dmsh_rt_build.make_job(dmsh_rt_compile.package_record(key, rec_of(key)[1]) for key in sorted(RT_KEYS)) if RT_KEYS else None
  except ValueError as _e: sys.exit(f'[RED] RT library inputs: {_e}')
  for key in keys: digests[key] = shader_key(key, *rec_of(key))
-@@ -1012,7 +1036,12 @@
+@@ -1112,7 +1136,12 @@
      try:
          if key in cache_hits and restored(key, wb):
              refl = json.loads(output_of('mac', key + '_b.json'))
 -            src = output_of('mac', key + '_b.metal').decode() if refl['stage'] in ('ps', 'vs') else ''
 +            # CRLF: the stored <key>_b.metal went through a text-mode write on Windows, so it comes back with CRLF -- and
-+            # dmsh_pull.variant() anchors its regex on '\nstruct main0_in\n{\n', which then matches nothing: every pulling
-+            # library was dropped as "no stage input", silently (Brain Memory, 2026-11-09: 245 of them; the warm rebuild
-+            # wrote 502 libraries where the cold run wrote 751). A cold run reads the source spirv-cross just wrote, which
-+            # is LF, and never sees it. Normalise on the way in, for this reader and the two beside it.
++            # dmsh_pull.variant() anchors its regex on the LF form of 'struct main0_in {', which then matches nothing: every
++            # pulling library was dropped as "no stage input", silently (Brain Memory, 2026-11-09: 245 of them; the warm
++            # rebuild wrote 502 libraries where the cold run wrote 751). A cold run reads the source spirv-cross just wrote,
++            # which is LF, and never sees it. Normalise on the way in, for this reader and the two beside it.
 +            src = (output_of('mac', key + '_b.metal').decode() if refl['stage'] in ('ps', 'vs') else '').replace('\r\n', '\n')
-             if refl['stage'] == 'vs': write_refl(key, pull_finish(key, src, vin_finish(key, src, refl)))
-             if refl['stage'] == 'ps': refl.update(ps_libraries(key, os.path.join(out, key + '_b.metal'), src, refl['bindings'])); write_refl(key, refl)   # stored without them (publish_cache)
-             return key, 'ok', '', refl
-@@ -1137,7 +1166,13 @@
+             if refl['stage'] == 'vs':
+                 side, cut_targets = vs_libraries(key, os.path.join(out, key + '_b.metal'), src)
+                 refl.update(side)   # stored without the side-library reflection (publish_cache)
+@@ -1240,7 +1269,13 @@
      name = f'{vk}_{gk}_m3.metallib'
      libs = [os.path.join(out, name)] + ([os.path.join(IOSOUT, name)] if IOSOUT else [])
      if vs is None or gs is None or gj is None: MESH_STATS['missing a library'] += 1; return
@@ -118,16 +118,16 @@ diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
 +    try: msl = dmsh_mesh.compose(vs.decode().replace('\r\n', '\n'), gs.decode().replace('\r\n', '\n'),
 +                                json.loads(gj)['geometry']['capture_reads'])
      except ValueError as e: MESH_STATS['not composed'] += 1; print(f'[RED] mesh {vk} {gk}: {e}', flush=True); return
+     msl = dmsh_rewrite.raw_noinline(msl, 'ms')   # final mesh code: undo noinline inherited from the vertex/geometry libraries (see raw_noinline)
      path = os.path.join(w, f'{vk}_{gk}_m3.metal'); open(path, 'w').write(msl)
-     try:
-@@ -1164,6 +1199,10 @@
- print(f'alpha test and logic operation libraries (<key>_bx, dmsh_side.py): {SIDE_STATS["generated"]} generated, {SIDE_STATS["failed"]} failed to compile, {SIDE_STATS["not generated"]} pixel shaders without either')
+@@ -1269,6 +1304,10 @@
  print(f'pulling libraries (<key>_bp, dmsh_pull.py): {PULL_STATS["generated"]} generated, {PULL_STATS["failed"]} failed to compile, {PULL_STATS["not generated"]} not generated, '
-       f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed)')
+       f'{PULL_STATS["no stage input"]} vertex shaders without stage inputs (none needed); '
+       f'{PULL_STATS["unit"]} vertex shaders\' libraries cut from one compile (dmsh_side.vs_unit), {PULL_STATS["unit failed"]} compiled each from its own source instead')
 +if SRC_STATS['unit fallback']:
 +    print(f"units whose library stayed MSL source (the compiler refused them): {SRC_STATS['unit fallback']:,} -- the phone compiles those once")
-+# Printed, not only counted: this step refuses pairs silently (mesh_finish returns on a missing input, and MESH_STATS was
-+# never reported), so a package without mesh libraries looked like a clean build from 0035 to 0041 (issue #14, 2026-11-12).
++# Printed, not only counted: this step refuses pairs silently (mesh_finish returns on a missing input, and MESH_STATS
++# was never reported), so a package without mesh libraries looked like a clean build from 0035 to 0041 (issue #14).
  print('mesh libraries (<vertex>_<geometry>_m3, dmsh_mesh.py): ' + (', '.join(f'{k} {v}' for k, v in MESH_STATS.items()) or 'none'))
  print(MTL.summary())
  for lvl in [k for k in st if k != 'ok']:

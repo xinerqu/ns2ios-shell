@@ -1,23 +1,21 @@
 diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
 --- a/dm/gfx/gl/hle_gl.m
 +++ b/dm/gfx/gl/hle_gl.m
-@@ -136,6 +136,7 @@
+@@ -147,6 +147,7 @@
  static id<MTLTexture> g_tex0, g_cube0, g_tex3d0, g_arr0;   // bound where a sampler's unit has no texture (or an unusable one): opaque black, as GL samples an incomplete texture
  static id<MTLSamplerState> g_samp0;
  static id<MTLLibrary> g_lib, g_util;             // the game's shaders; the layer's own (clears)
 +static NSString *g_srcdir;                       // gl/src when the package holds the shaders as source (no Apple compiler on the packing computer)
+ static const char *g_capture_dir, *g_capture_compiler;
  static uint64_t g_serial = 1;                    // serial of the command buffer being recorded (g_cb); committed ones have lower serials
  static _Atomic uint64_t g_done;                  // highest serial whose command buffer has completed
- static id<MTLCommandBuffer> g_cb;
-@@ -206,12 +207,57 @@
+@@ -244,10 +245,57 @@
      }
      fclose(f);
      qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);
 +    if (g_nsh) GLOG("shader table %d entries, %s/%c to %s/%c", g_nsh, g_sh[0].key, g_sh[0].frag ? 'f' : 'v', g_sh[g_nsh - 1].key, g_sh[g_nsh - 1].frag ? 'f' : 'v');
      snprintf(p, sizeof p, "%s/gl/gl_shaders.metallib", d);
--    NSError *err = nil;
--    g_lib = [g_dev newLibraryWithURL:[NSURL fileURLWithPath:@(p)] error:&err];
--    if (!g_lib) GLOG("[RED] shader library failed to load %s: %s", p, err.localizedDescription.UTF8String);
+-    g_lib = sh_library(p);
 +    // One compiled library when the packing computer had Apple's Metal compiler; otherwise gl_shaders.py translated the
 +    // shaders on a machine without one and wrote them to gl/src/, one source per shader, to be compiled here -- which is
 +    // what a Windows packer can do (glslang and spirv-cross run anywhere, xcrun metal does not).
@@ -70,14 +68,18 @@ diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
  
  
  static void dev_init_once(void) {
-@@ -2230,8 +2276,16 @@
-     sh_capture(s);
+@@ -2787,12 +2835,19 @@
      int frag = s->type == GL_FRAGMENT_SHADER;
-     s->si = sh_find(s->key, frag); s->compiled = 1;
--    @autoreleasepool { s->fn = s->si && g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"gl_%s_%c", s->key, frag ? 'f' : 'v']] : nil; }
--    if (!s->fn) { static int n; if (n++ < 50) GLOG("[RED] %s shader %s (%zu bytes of GLSL) is not in the library (DM_GL_CAPTURE collects it)", s->type == GL_VERTEX_SHADER ? "vertex" : "fragment", s->key, s->len); }
-+    @autoreleasepool { s->fn = s->si ? (g_lib ? [g_lib newFunctionWithName:[NSString stringWithFormat:@"gl_%s_%c", s->key, frag ? 'f' : 'v']] : sh_src_fn(s->key, frag)) : nil; }
-+    if (!s->fn) {
+     s->si = sh_find(s->key, frag);
+     @autoreleasepool {
+-        s->fn = s->si && g_lib ? sh_function(g_lib, s->si) : nil;
++        s->fn = s->si ? (g_lib ? sh_function(g_lib, s->si) : sh_src_fn(s->key, frag)) : nil;
+         if (g_capture_dir) sh_capture(s);
+     }
+     s->compiled = s->fn != nil;
+     if (s->fn) OLOG("CompileShader %s", s->key);
+-    else if (!g_capture_compiler) { static int n; if (n++ < 50) GLOG("[RED] %s shader %s (%zu bytes of GLSL) is not in the library (DM_GL_CAPTURE collects it)", s->type == GL_VERTEX_SHADER ? "vertex" : "fragment", s->key, s->len); }
++    else if (!g_capture_compiler) {
 +        static int n; if (n++ < 50) GLOG("[RED] %s shader %s (%zu bytes of GLSL) is not in the library (DM_GL_CAPTURE collects it)", s->type == GL_VERTEX_SHADER ? "vertex" : "fragment", s->key, s->len);
 +        // Which half failed: the table row (it carries the attribute, uniform and sampler layout a pipeline needs) or the
 +        // function in gl/src. Without this the two look the same, and a package whose shaders all compiled at first launch
@@ -85,7 +87,6 @@ diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
 +        static int d; if (d++ < 10) GLOG("[RED]   %s/%c: %s; %s", s->key, frag ? 'f' : 'v', s->si ? "the table has it" : "no table row",
 +                                        g_lib ? "a compiled library is loaded" : (g_srcdir ? (g_srcwhy[0] ? g_srcwhy : "gl/src gave no function") : "no gl/src"));
 +    }
-+
-     else OLOG("CompileShader %s", s->key);
  }
  GL(glGetShaderiv, void, GLuint sh, GLenum p, GLint *v) {
+     if (!SP_CHECK(sh, 0)) { *v = 0; return; }

@@ -1,15 +1,16 @@
 diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 --- a/dm/gfx/tools/dmsh_mtlcache.py
 +++ b/dm/gfx/tools/dmsh_mtlcache.py
-@@ -8,20 +8,37 @@
+@@ -8,7 +8,7 @@
  # Filling from earlier builds: every imported library must record the current compiler identity and flags in its reflection. Legacy libraries without that identity are not imported.
  # A fresh compile of two shaders per stage also checks their bytes. Each folder is read once per compiler identity (filled.json remembers its number of libraries).
  # Not part of the chain version (dmsh_chain.py): the cache never changes an output, it only skips recompiling one. Change FORMAT when what it stores changes.
 -import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections
 +import os, re, sys, json, shutil, ctypes, hashlib, threading, subprocess, collections, time
+ from typing import Any
  sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools'))
  import romfs, shader_cache, shader_lib   # the libraries of an earlier build may be one file (shader_lib.py), read in place
- STAMPS = 'metallib/filled.json'   # the earlier builds' folders already read
+@@ -16,7 +16,24 @@
  
  FORMAT = b'dmsh_mtlcache 2'   # earlier prefill could misclassify an unsampled library from another compiler
  OUTPUT = re.compile(r'[0-9a-f]{16}_b\.metal')   # a shader's MSL in dmsh_build.py's outputs: <key>_b.metal
@@ -34,6 +35,8 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
 +            time.sleep(0.05)
  
  
+ def cut_from_unit(stem, names):
+@@ -27,7 +44,7 @@
  def clone(src, dst):
      tmp = f'{dst}.tmp-{os.getpid()}-{threading.get_ident()}'
      if _clonefile is None or _clonefile(os.fsencode(src), os.fsencode(tmp), 0) != 0: shutil.copyfile(src, tmp)
@@ -42,7 +45,7 @@ diff --git a/dm/gfx/tools/dmsh_mtlcache.py b/dm/gfx/tools/dmsh_mtlcache.py
  
  
  def compiler_id(sdk):
-@@ -59,7 +76,7 @@
+@@ -65,7 +82,7 @@
          if self.store.to_file(p, lib): self.count((target, 'reused')); return
          tmp = f'{lib}.tmp-{os.getpid()}-{threading.get_ident()}'
          self._compile(target, msl, tmp)

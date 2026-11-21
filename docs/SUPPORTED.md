@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**184 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**209 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -38,6 +38,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 | handheld |
 | Blasphemous | `0100698009C6E000` | 1.0.8 |  |
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
+| Bloodstained: Curse of the Moon | `01004B800AF5A000` | 1.1.1 |  |
+| Bloodstained: Curse of the Moon 2 | `01004680124E6000` | 1.3.2 |  |
+| Bloodstained: Ritual of the Night | `0100BF500207C000` | 1.60 | 60 fps |
+| Borderlands: Game of the Year Edition | `010064800F66A000` | 1.0.2 | 60 fps |
 | Brain Memory Training Academy | `0100F5D01DA3A000` | 1.0.0 |  |
 | Burnout Paradise Remastered | `0100DBF01000A000` | 1.0.0 |  |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 | handheld |
@@ -59,6 +63,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
 | Donkey Kong Country: Tropical Freeze | `0100C1F0051B6000` | 1.0.2 |  |
 | DOOM 3 | `010029D00E740000` | 1.0.5 |  |
+| DRAGON BALL Z: KAKAROT + A NEW POWER AWAKENS SET | `010051C0134F8000` | 1.70 |  |
 | DRAGON BALL: Sparking! ZERO | `010035F022078000` | 2.0.76 | 60 fps |
 | DRAGON QUEST BUILDERS 2 | `010042000A986000` | 1.7.3d |  |
 | DRAGON QUEST I & II HD-2D Remake | `0100D7C01F254000` | 1.0.2 | 60 fps |
@@ -66,7 +71,9 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps · 暂不支持 |
 | EA SPORTS FC 27 | `0100C49025D3E000` | 1.8d.310c | 60 fps |
+| Farming Simulator 26: Nintendo Switch Edition | `0100D440269E8000` | 1.0.1.0 |  |
 | Fast Fusion | `040041E0212AE000` | v262144 |  |
+| FIFA 23 Legacy Edition | `01001C8016B4E000` | 1.0.3（也可 1.0.0） |  |
 | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `0100CE4010AAC000` | 1.0.3 |  |
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps · 暂不支持 |
 | FINAL FANTASY RESONANCE (Asian release) | `0100B8A026F14000` | 1.0.1 | 60 fps |
@@ -89,6 +96,9 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Kirby Air Riders | `040077201BE50000` | 1.3.3 |  |
 | Kirby and the Forgotten Land | `01004D300C5AE000` | 1.1.0 |  |
 | Kirby Star Allies | `01007E3006DDA000` | 4.0.0a |  |
+| Kirby's Dream Buffet | `0100A8E016236000` | 1.0.0 |  |
+| L.A. Noire | `0100830004FB6000` | 1.2 |  |
+| LEGO® Star Wars™: The Skywalker Saga | `010042D00D900000` | 1.10.0 | 60 fps |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 | 60 fps |
 | Mario & Luigi: Brothership | `01006D0017F7A000` | 1.0.0 | 60 fps |
 | Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
@@ -105,6 +115,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Metroid Prime 4: Beyond | `010019A01E2F2000` | 1.1.0 |  |
 | Metroid Prime Remastered | `010012101468C000` | 1.0.0 |  |
 | Minecraft Dungeons II | `0100A7C01B792000` | 1.1.3.0 | 60 fps |
+| Minecraft for Nintendo Switch | `0100D71004694000` | 1.26.62 |  |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
 | Monster Train 2 | `010051701FB46000` | 1.1.1 |  |
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
@@ -124,6 +135,8 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Patrick's Parabox | `0100E44016C22000` | 1.0.1 |  |
 | Persona 4 Golden | `010062B01525C000` | 1.0.2 |  |
 | Persona 5 Royal | `01005CA01580E000` | 1.0.2 |  |
+| Persona 5 Strikers | `0100801011C3E000` | 1.0.0 |  |
+| Persona 5 Tactica | `010087701B092000` | 1.1.0 | 60 fps |
 | Pikmin 4 | `0100B7C00933A000` | 1.1.1 | 60 fps |
 | Pokemon Pokopia | `0400A3A01EE4C000` | v655360 |  |
 | Pokémon Brilliant Diamond | `0100000011D90000` | 1.3.0 | 60 fps |
@@ -139,19 +152,25 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Princess Peach: Showtime! | `01007A3009184000` | 1.0.0 | 60 fps |
 | Raging Loop | `010020400E1C2000` | 1.0.0 |  |
 | Rayman Legends: Definitive Edition | `01005FF002E2A000` | 1.2 |  |
+| Re:ZERO -Starting Life in Another World- The Prophecy of the Throne | `0100D800117F4000` | 1.0.2 |  |
 | Red Dead Redemption | `01007820196A6000` | 1.0.7（也可 1.0.0 / 1.0.4） | 60 fps |
+| Resident Evil | `010050F00BC1A000` | 1.0.0 |  |
 | Resident Evil 4 | `0400569027BF4000` | v131072 |  |
 | Return of the Obra Dinn | `010032E00E6E2000` | 1.0.1 |  |
 | Rhythm Heaven Groove | `0100D9F01D474000` | 1.0.0 | handheld |
 | ROMANCE OF THE THREE KINGDOMS 8 REMAKE | `0100C2A01A730000` | 1.1.3 |  |
 | ROMANCE OF THE THREE KINGDOMS XIV: Diplomacy and Strategy Expansion Pack | `0100ED7012DB2000` | 1.0.10 |  |
+| Sam & Max: The Devil's Playhouse | `0100D5501857E000` | 1.8.0 |  |
 | Sea of Stars | `01008C0016544000` | 2.0.59001 |  |
 | SHIN MEGAMI TENSEI V: Vengeance | `010069C01AB82000` | 1.0.3 | 60 fps |
 | Sid Meier's Civilization VI | `010044500C182000` | 1.2.19 |  |
 | Sid Meier's Civilization VII | `0100C3601518C000` | 1.5.0.1 |  |
 | Silver Pines | `0100D5B026844000` | 1.0.0 |  |
+| Slay the Spire | `010026300BA4A000` | 1.0 |  |
 | Sonic Frontiers Definitive Edition | `0400921025B32000` | 1.0.0 |  |
 | Sonic Superstars | `01008F701C074000` | 1.1.8 |  |
+| South Park: The Fractured But Whole | `01008F2005154000` | 1.05 | 60 fps |
+| South Park: The Stick of Truth | `010095300B6A4000` | 1.01 |  |
 | Splatoon Raiders | `0400380020056000` | v65536 |  |
 | Star Fox | `0400E88025B1A000` | v131072 |  |
 | Stardew Valley | `0100E65002BB8000` | 1.6.15.13 |  |
@@ -166,12 +185,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Super Mario 3D All-Stars | `010049900F546000` | 1.1.4 | 暂不支持（多程序合集） |
 | Super Mario 3D World + Bowser's Fury | `010028600EBDA000` | 1.2.2 |  |
 | Super Mario Bros. Wonder | `010015100B514000` | 1.2.1（也可 1.0.0 / 1.0.1） |  |
+| Super Mario Bros. Wonder – Nintendo Switch 2 Edition + Meetup in Bellabel Park | `040015100B514001` | 1.2.1 |  |
 | Super Mario Galaxy | `010099C022B96000` | 1.3.1 | handheld · 需抓一次 |
 | Super Mario Galaxy 2 | `0100FD8022DAA000` | 1.4.0 | handheld · 需抓一次 |
 | Super Mario Odyssey | `0100000000010000` | 1.4.1 |  |
 | Super Mario Party Jamboree | `0100965017338000` | 2.3.0 |  |
 | Super Mario RPG | `0100BC0018138000` | 1.0.1 |  |
 | Super Monkey Ball Banana Rumble | `010031F019294000` | 2.20 |  |
+| Super Nintendo Entertainment System – Nintendo Classics | `01008D300C50C000` | 6.0.0 |  |
 | SUPER ROBOT WARS Y | `010063301BD50000` | 1.4.1 |  |
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 |  |
 | Taiko Risshiden V DX | `0100346017304000` | 1.1.1 | handheld |
@@ -181,15 +202,19 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 | 60 fps |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 |  |
-| The Legend of Zelda: Ocarina of Time | `0400486024DEC000` | v131072 | 60 fps |
+| The Legend of Zelda: Ocarina of Time | `0400486024DEC000` | 1.1.1 | 60 fps |
 | The Legend of Zelda: Skyward Sword HD | `01002DA013484000` | 1.0.1 |  |
 | The Legend of Zelda: Tears of the Kingdom | `0100F2C0115B6000` | 1.4.3 | 60 fps |
 | The Rogue Prince of Persia | `01008D9022462000` | 1.1.0 | 60 fps |
+| The Witcher 3: Wild Hunt — Complete Edition | `0100A0800E9C4000` | 4.04b | 60 fps |
 | Trails in the Sky 2nd Chapter | `01007A2027548000` | 1.0.4 |  |
 | TRIANGLE STRATEGY | `0100CC80140F8000` | 1.1.1 | 60 fps |
+| TSUKIHIME A piece of blue glass moon | `010057A01E4D4000` | 1.0.2 |  |
 | TUNIC | `0100DA801624E000` | 1.0.3 | 60 fps |
+| Twelve Minutes | `0100CD701434C000` | 1.0.1 |  |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
+| UnMetal | `01008F4014A74000` | 1.2.0 |  |
 | Warhammer Survivors | `0100CAA026246000` | 1.0.0 |  |
 | Well Dweller | `0100217023F6C000` | 1.0.0 |  |
 | Xenoblade Chronicles 2 | `0100E95004038000` | 2.1.0 |  |

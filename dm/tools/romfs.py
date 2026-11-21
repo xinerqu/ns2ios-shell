@@ -4,7 +4,11 @@ Readers opt into Path/open/os/mmap here; the real filesystem is untouched. A pat
 like /game/RomFS.img/Data/archive is a bounded view of that image entry. Ordinary
 paths retain their normal behavior, including writes to generated outputs.
 """
+from __future__ import annotations
+
 import builtins
+from contextlib import contextmanager, ExitStack
+from contextvars import ContextVar
 import errno
 import fnmatch
 import functools
@@ -92,6 +96,28 @@ def is_image(path):
     except (OSError, TypeError): return False
 
 
+def _identity(st: _os.stat_result): return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+
+_scan_descriptors: ContextVar[dict[str, tuple[tuple[int, int, int, int], int]] | None] = ContextVar('_scan_descriptors', default=None)
+
+
+@contextmanager
+def reuse_descriptors(roots):
+    """Keep one backing descriptor per RomFS image for a scan. Each reader still owns a duplicate for pread and bounded mmap."""
+    with ExitStack() as stack:
+        descriptors = {}
+        for path in dict.fromkeys(map(_os.path.abspath, roots)):
+            if not is_image(path): continue
+            fd = stack.enter_context(builtins.open(path, 'rb')).fileno()
+            descriptors[path] = (_identity(_os.fstat(fd)), fd)
+        token = _scan_descriptors.set(descriptors)
+        try:
+            yield
+        finally:
+            _scan_descriptors.reset(token)
+
+
 def _resolve(path):
     # One separator before splitting: on Windows abspath() returns backslashes, split('/') then yields a single part, no part
     # ends in .img, and every read of a RomFS image falls back to the file system and fails (E:\...\RomFS.img\AS, shader_split's
@@ -104,7 +130,7 @@ def _resolve(path):
         try: st = _os.stat(image)
         except OSError: continue
         if not _stat.S_ISREG(st.st_mode): continue
-        loaded = _image(image, (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns))
+        loaded = _image(image, _identity(st))
         if loaded is not None: return loaded, '/'.join(parts[i + 1:])
     return None
 
@@ -134,7 +160,9 @@ class _File(io.RawIOBase):
         # O_BINARY: Windows opens a descriptor in text mode without it, and then a byte 0x1A (^Z) inside game data ends the
         # read -- a 208 MB file came back as 592 bytes and the whole RomFS summed to 253 KB, silently (2026-11-05). POSIX has
         # no such flag, so this is a no-op on a Mac.
-        self.fd = _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
+        descriptors = _scan_descriptors.get()
+        backing = descriptors.get(image.path) if descriptors is not None else None
+        self.fd = _os.dup(backing[1]) if backing is not None and backing[0] == _identity(image.stat) else _os.open(image.path, _os.O_RDONLY | getattr(_os, 'O_BINARY', 0))
         self.start, self.length = image.entry(k)[:2]
         self.pos = 0
         _fd_ranges[self.fd] = (self.start, self.length)

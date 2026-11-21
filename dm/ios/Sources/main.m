@@ -4,6 +4,7 @@
 #import <Metal/Metal.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -265,9 +266,14 @@ int dm_shell_game_count(void) { return 1; }
 int dm_shell_library_needed(void) { return 0; }
 const char *dm_shell_start_game(const char *tid) { (void)tid; return "This package runs the game it was built with."; }
 #endif
+
+static bool g_hud_enabled_from_saved_choice;
+bool front_ios_hud_enabled_from_saved_choice(void) { return g_hud_enabled_from_saved_choice; }
+
+
 // Why this device cannot run the games: its GPU has no BC texture formats, which the games' textures use and the host does not decompress (dm/gfx/tex/README.md; the A16 and older,
 // GitHub issue #704), so the screen says so instead of Metal aborting at the game's first BC texture. NULL on a supported device. Called by startGame (front_ios.m) once the launcher has set
-// its switches: this makes the process's first Metal device, and Metal reads MTL_HUD_ENABLED then; checked at launch, it kept the launcher's Performance HUD off (GitHub issue #840)
+// its switches, so this device check gives front_hud_env() a chance to enable the Performance HUD at Play (GitHub issue #840).
 const char *front_ios_device_check(void) {
     static char msg[320]; static int done;
     if (done++) return msg[0] ? msg : NULL;
@@ -346,7 +352,18 @@ static int boot_env(void) {
     for (NSString *ef in @[[doc stringByAppendingPathComponent:@"env.txt"], dm_env]) env_file_read(ef, from_file);
     setenv("DM_ENV_FILE_KEYS", [from_file componentsJoinedByString:@" "].UTF8String, 1);   // the launcher keeps what an env file set (LauncherSettings.swift)
     setenv("DM_ENV_LAUNCH_KEYS", [from_launch componentsJoinedByString:@" "].UTF8String, 1);   // and what the launch environment set (docs/frontends.md, Saved choices)
-    front_hud_env();   // an env file's DM_METAL_HUD; nothing in this process makes a Metal device before startGame (front_ios.m), which applies the launcher's
+    front_hud_env();   // DM_METAL_HUD from the launch environment or an env file
+    // On the M4 iPad Air, setting MTL_HUD_ENABLED at Play was too late. Apply the saved choice before UIApplicationMain (GitHub issue #840).
+    const char *ignore_saved = getenv("DM_SAVED_CHOICES");
+    if (!getenv("DM_METAL_HUD") && !getenv("MTL_HUD_ENABLED") && (!ignore_saved || strcmp(ignore_saved, "0"))) {
+        id saved = [NSUserDefaults.standardUserDefaults objectForKey:@"launcher.DM_METAL_HUD"];
+        if ([saved isKindOfClass:NSString.class] && [saved isEqualToString:@"1"]) {
+            setenv("DM_METAL_HUD", "1", 0);
+            front_hud_env();
+            unsetenv("DM_METAL_HUD");   // Play still sets the app's HUD choice
+            g_hud_enabled_from_saved_choice = getenv("MTL_HUD_ENABLED") != NULL;
+        }
+    }
     // Game language (nn::oe::GetDesiredLanguage, hle_oe.c): the one the IPA was packed with (the NSP script's LANGUAGE / --language → DMLanguage in Info.plist), unless an env file sets DM_LANG
     // (or the launcher, which replaces this default before the game starts)
     NSString *lang = [NSBundle.mainBundle objectForInfoDictionaryKey:@"DMLanguage"];

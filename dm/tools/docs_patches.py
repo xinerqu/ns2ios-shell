@@ -119,7 +119,7 @@ SWITCH_BINDING = [
      'why': "the output size is the host's, but the stubs that follow it (projections, layout panes, screen copies) are this build's code"}),
     ('game_env', 'DOTNET_GCRegionRange=', {'what': ".NET's garbage-collector region range", 'now': 'game', 'goal': 'game', 'purpose': 'address space', 'why': "measured for the game's regions"}),
     ('stdalloc_cap', '', {'what': "StandardAllocator's address space", 'now': 'game', 'goal': 'game', 'purpose': 'address space',
-     'why': "what the regions after it need, measured by the NSP script's region check; the host's cap is the default"}),
+     'why': "what the regions after it need, measured by the NSP script's region check, or 1 GB from its heap check; the host's cap is the default"}),
     ('shader_key_skip', '', {'what': 'control-section bytes left out of shader keys', 'now': 'game', 'goal': 'game', 'purpose': 'shaders',
      'why': "the engine shares one control section among shaders; leaving GLSLC's compile information out of every game's keys would change every shader key"}),
     ('ue_texture_pool', '', {'what': "Unreal's texture streaming pool", 'now': 'game', 'goal': 'game', 'purpose': 'memory', 'why': "the game's own budget, raised to its Windows value"}),
@@ -375,12 +375,13 @@ def page():
         sdk_lines.append(f'- **sdk** {short(bid)} ({link(SDK, lineno(sdk_text, repr(bid)))}): ' + (', '.join(shipped) if shipped else 'no profile registers this build: see the comment above it'))
         for off, ob, nb, why in cuts: sdk_lines.append(f'  - cut `+{off:#x}`: {why}')
     rule_lines, comment = [], ''
+    sdk_kinds = {'node': 'node area 1 GB → 62 MB', 'align': 'regions of 4 MB and more aligned to 2 MB, as SDK 20', 'vamm': sdk.old_vamm}
     block = sdk_text[sdk_text.find("MATCH_CUTS = {'sdk'"):]
     for line in block.split('\n')[1:]:
         s = line.strip()
         if s.startswith('#'): comment = (comment + ' ' if comment else '') + s.lstrip('# ')
-        elif s.startswith(('node(', 'align(')):
-            rule_lines.append(f'- {"node area 1 GB → 62 MB" if s.startswith("node(") else "regions of 4 MB and more aligned to 2 MB, as SDK 20"}: {comment}'); comment = ''
+        elif kind := sdk_kinds.get(s.partition('(')[0]):
+            rule_lines.append(f'- {kind}: {comment}'); comment = ''
         elif s.startswith(']}'): break
     n_rules = sum(len(v) for v in getattr(sdk, 'MATCH_CUTS', {}).values())
     assert len(rule_lines) == n_rules, f'sdk_patches.py MATCH_CUTS: {len(rule_lines)} commented rules of {n_rules}'

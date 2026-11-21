@@ -45,7 +45,9 @@ def load_shim(repo):
 def assigned_list(tree, name):
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(getattr(t, 'id', None) == name for t in node.targets):
-            return node.value
+            v = node.value
+            # `MAC_RUN = [] if SOURCE_ONLY else [...]` (the base move of 2026-11-21): the commands are the else branch.
+            return v.orelse if isinstance(v, ast.IfExp) else v
     return None
 
 
@@ -61,7 +63,13 @@ def tokens(node, names):
             elif isinstance(e, ast.Subscript) and isinstance(e.value, ast.Name):
                 out.extend(names.get(e.value.id, []))   # MAC_METAL[4:] -- the tail only, close enough to probe the flags
             elif isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id == 'xcrun_out':
-                out.append('xcrun')                     # what the shim answers for `xcrun -f`
+                # `xcrun_out('-f', 'metal')` is the tool's path, and the shim answers the xcrun form (`xcrun -sdk … metal`,
+                # which is what it was written against and what the Mac chain issues); `--show-sdk-path` is only an
+                # -isysroot value. Before 2026-11-21 the tool's name was in the list itself.
+                a = [x.value for x in e.args if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+                if a[:2] == ['-f', 'metal']: out.extend(['xcrun', '-sdk', 'macosx', 'metal'])
+                elif a[:2] == ['-f', 'metallib']: out.extend(['xcrun', '-sdk', 'macosx', 'metallib'])
+                else: out.append('/sdk')                # --show-sdk-path
         return out
     return []
 
