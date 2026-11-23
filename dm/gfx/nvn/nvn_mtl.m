@@ -2199,7 +2199,7 @@ void mtl_sub_copy(uint64_t src, uint64_t dst, uint64_t n) {
     int dok = aok ? mtl_addr(dst, n, &db, &dof) : 0; valved |= aok && t_valve_refused;
     if (!aok || !dok) {
         if (!valved) MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
-        RED_ONCE(64, "buffer copy dropped at %#llx -> %#llx (%llu bytes): the residency valve refused a window", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+        { static int once; if (!once++) MLOG("[RED] buffer copy dropped at %#llx -> %#llx (%llu bytes): the residency valve refused a window", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
         return;
     }
     if (src != dst && src < dst + n && dst < src + n) { static int once;   // Metal leaves an overlapping copy undefined; seen only in Cuphead while its pool allocator gave out overlapping blocks (hle_nvn.c zcull_size)
@@ -2538,7 +2538,7 @@ void mtl_sub_update(const void *data, uint64_t dst, uint64_t n) {
     void *db; uint64_t dof;
     if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the guest memory is written already (rc_write above), only this copy is dropped
         if (!t_valve_refused) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
-        RED_ONCE(64, "uniform update dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
+        { static int once; if (!once++) MLOG("[RED] uniform update dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n); }
         return;
     }
     int defer = (enc_open() || (ubd_lazy() && !g_blit)) && g_nubd < UBD_MAX && ubd_on();
@@ -2570,7 +2570,7 @@ void mtl_sub_fill(uint64_t dst, uint64_t n, uint32_t value) {
     void *db; uint64_t dof;
     if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the pattern is in guest memory already (rc_write above), only this fill is dropped
         if (!t_valve_refused) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
-        RED_ONCE(64, "buffer fill dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
+        { static int once; if (!once++) MLOG("[RED] buffer fill dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n); }
         return;
     }
     uint8_t b0 = (uint8_t)value;
