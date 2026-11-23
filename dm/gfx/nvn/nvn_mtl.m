@@ -1113,9 +1113,15 @@ static void pool_res(int i) {
 // stride holding its address and on up to the end of what it asked (rounded up to the stride, plus a stride), made when first asked for. Only what lookups reach is wired. The chunks overlap, as adjacent
 // pools' buffers do at shared pages; GPU addresses are not contiguous across them, so a lookup must say how far it reads. One that does not know (length 1: an indirect draw's index buffer, a raw storage
 // address) gets BIG_WIN past its address, this fork's window (upstream answers it with one buffer of the whole pool instead: see pool_win for why the window stays here)
-// S2Arm's numbers, taken whole (its gal_buf.m: WIN_LEN 4 MB over WIN_STEP 2 MB, and every host mapping over 4 MB windowed rather than pinned whole): a pool of
-// BIG_MIN or more is windowed, a lookup gets a 4 MB window at its 2 MB stride, and a lookup that does not say how far it reads takes BIG_WIN past its address
-enum { BIG_MIN = 4u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 4u << 20, BIG_MAX = 256 };
+// S2Arm's shape, not its numbers (its gal_buf.m: WIN_LEN 4 MB over WIN_STEP 2 MB, and every host mapping over 4 MB windowed rather than pinned whole): a pool of
+// BIG_MIN or more is windowed at its 2 MB stride, and a lookup that does not say how far it reads takes BIG_WIN past its address -- one stride here, two there,
+// for the reason below
+// The window is one stride (2 MB), not two (2026-11-23): a window twice its stride overlaps the next one by half, and Metal charges
+// every buffer it is handed whole, so the same pages were counted twice -- NieR: Automata held 342 windows / 2234 MB over strides
+// that come to about half that, in a 5461 MB working set. A shader that reads past its window now gets a page fault at 2 MB past
+// the address it was looked up at instead of 4 (DM_NVN_POOL_WIN raises it per game; the loadout of a game that needs it shows up
+// as a GPU fault right away, not as a slow leak)
+enum { BIG_MIN = 4u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 2u << 20, BIG_MAX = 256 };
 typedef struct { uintptr_t lo, hi, a, b; const void *mem; int *chunk, full; NSMutableArray *old; } big_pool;   // chunk: stride → g_pools index + 1; full: the whole pool's entry + 1; old: buffers a longer chunk replaced, alive with the pool
 static big_pool g_big[BIG_MAX]; static int g_nbig;
 static id<MTLBuffer> pool_buf(uintptr_t a, uintptr_t b);   // a pool's zero-copy buffer over [a, b), made over writable pages (below)
@@ -1275,7 +1281,7 @@ static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, int r
     return g_npool - 1;
 }
 // The entry of a large pool for [addr, addr + len): the chunk of its stride, made or lengthened to reach as far as asked; -1 past the pool's end
-// How far past its address a lookup that does not say how far it reads may reach (DM_NVN_POOL_WIN, MB): 0 keeps BIG_WIN, the 4 MB window this fork took from S2Arm.
+// How far past its address a lookup that does not say how far it reads may reach (DM_NVN_POOL_WIN, MB): 0 keeps BIG_WIN, one stride (2 MB) since 2026-11-23.
 // A smaller window is what issue #14 asks for - one 5 GB pool's chunks came to 3606 MB over ranges that come to 608 MB. A set knob also drops the spare stride the
 // default adds, so the window is the asked length rounded up to a stride and no more. A shader that reads past the window it was handed is a GPU page fault: per game
 // Upstream (34856df4) answers a lookup of unknown length with one buffer of the whole pool instead. This fork keeps the window: the 5 GB pool a game holds on an
