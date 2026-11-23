@@ -67,7 +67,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (g_pools[i].res) return;
      res_add(g_pools[i].buf); res_commit(); g_pools[i].res = 1; g_pool_res_n++;
  }
-@@ -1074,15 +1111,23 @@
+@@ -1074,15 +1111,25 @@
  // graphics pool: the GPU has touched 1,111 MB by the first race, 326 MB of it in the last 1,500 frames; on a 16 GB Mac the driver then spent half its time wiring and unwiring (3.2 s of a 6 s Metal System
  // Trace) with 140 MB free, and frames took 100 ms and more every few frames. A pool of BIG_MIN or more therefore has no buffer of its own: a lookup gets a chunk, a zero-copy buffer over the BIG_S
  // stride holding its address and on up to the end of what it asked (rounded up to the stride, plus a stride), made when first asked for. Only what lookups reach is wired. The chunks overlap, as adjacent
@@ -85,6 +85,8 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static big_pool g_big[BIG_MAX]; static int g_nbig;
  static id<MTLBuffer> pool_buf(uintptr_t a, uintptr_t b);   // a pool's zero-copy buffer over [a, b), made over writable pages (below)
 -static int big_of(uint64_t addr) { for (int i = 0; i < g_nbig; i++) if (addr >= g_big[i].lo && addr < g_big[i].hi) return i; return -1; }
++static _Thread_local int t_valve_refused;   // this thread's last big_new found the residency valve closed (defined with it, below): the lookup fails and the caller drops that command
++static int res_valve_ok(uint64_t n);   // the residency valve, defined beside pool_buf
 +static int g_bidx[BIG_MAX], g_bidx_ok;   // g_big's indices by lo, for big_of: every pool over BIG_MIN is in here now, and a lookup must not walk them
 +static int big_cmp(const void *x, const void *y) { uintptr_t a = g_big[*(const int *)x].lo, b = g_big[*(const int *)y].lo; return a < b ? -1 : a > b; }
 +static int big_of(uint64_t addr) {   // caller holds g_mu
@@ -97,7 +99,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  // A pool to put into the table: its zero-copy buffer is made first, outside g_mu (pool_new_prep; it may retry for seconds), and the entry goes in under g_mu (pool_new_put), so a change
  // of several pools can be one step for every lookup (mtl_pool_replace)
  typedef struct { const void *mem; uint64_t size; uintptr_t lo, hi, a, b; __strong id<MTLBuffer> buf; } pool_new;   // buf nil: in chunks (a large pool)
-@@ -1116,9 +1161,9 @@
+@@ -1116,9 +1163,9 @@
  static void pool_new_put(pool_new *n) {   // caller holds g_mu
      if (!n->buf && g_nbig == BIG_MAX) n->buf = pool_buf_made(n->mem, n->size, n->a, n->b);   // the chunk table filled since pool_new_prep looked
      if (!n->buf) {
@@ -109,7 +111,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          static int nl; if (nl++ < 8) MLOG("memory pool %p+%llu MB: in chunks, wired as far as lookups reach", n->mem, (unsigned long long)(n->size >> 20));
          return;
      }
-@@ -1138,7 +1183,7 @@
+@@ -1138,7 +1185,7 @@
  static void big_moved(int i) {   // caller holds g_mu: entry i has a new index
      const pool_ent *e = &g_pools[i];
      for (int k = 0; k < g_nbig; k++) { big_pool *b = &g_big[k]; if (b->mem != e->key) continue;
@@ -118,7 +120,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          return; }
  }
  // The no-copy buffer goes through deferred release (out of the residency set and unreferenced after submitted commands complete). It used to be removed only from g_keep while the residency set still held a strong reference: after the pool was freed the buffer stayed alive wrapping that guest memory,
-@@ -1157,7 +1202,7 @@
+@@ -1157,7 +1204,7 @@
              i--; }
      if (bg >= 0) {
          [gone addObjectsFromArray:g_big[bg].old];
@@ -127,7 +129,19 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
  }
  // Once out of the table and with g_pool_gen bumped, a buffer is reached only by what a submission already encoded: so with none open it waits for the last committed fence, not the
-@@ -1222,8 +1267,26 @@
+@@ -1214,6 +1261,11 @@
+     qsort(g_pidx, (size_t)g_npool, sizeof *g_pidx, pidx_cmp); g_pidx_ok = 1;
+ }
+ static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, int reach) {   // caller holds g_mu: a new entry for [lo, end) of the pool, looked up for addresses in [lo, hi)
++    // The residency valve sits here, on the windows a session keeps making, not on the whole-pool buffers a pool is born with: those
++    // are one per pool and their creation has no graceful answer (a pool that cannot be mapped is the pool the game asked for), while
++    // a window that is refused leaves the lookup it came from without a buffer -- and that draw or copy is skipped (issue #14).
++    if (!res_valve_ok(end - lo)) { t_valve_refused = 1; return -1; }
++    t_valve_refused = 0;
+     id<MTLBuffer> buf = pool_buf(lo, end);
+     if (!buf) { MLOG("[RED] memory pool %p: the zero-copy buffer over %#lx..%#lx was refused", b->mem, (unsigned long)lo, (unsigned long)end); return -1; }
+     if (g_npool == g_cap) { g_cap = g_cap ? g_cap * 2 : 64; g_pools = realloc_or_die(g_pools, g_cap * sizeof *g_pools, "the memory pool table"); }
+@@ -1222,8 +1274,26 @@
      [g_keep addObject:buf];
      return g_npool - 1;
  }
@@ -156,7 +170,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static int big_full(big_pool *b, const char *why) {
      int n = big_new(b, b->a, b->b, b->b, REACH_WHOLE);
      if (n < 0) return -1;
-@@ -1236,13 +1299,28 @@
+@@ -1236,13 +1306,28 @@
  static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
      if (addr + len > b->hi) return -1;
      if (b->full) return b->full - 1;
@@ -190,7 +204,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (i >= 0) {   // lengthened: what is encoded with the shorter chunk keeps it, resident, until the pool goes
          [b->old addObject:g_pools[i].buf]; [g_keep removeObject:g_pools[i].buf]; g_pools[n].res = 0; if (g_pools[i].res) g_pool_res_n--;
          g_pools[i] = g_pools[n]; g_npool--; n = i;
-@@ -1269,7 +1347,7 @@
+@@ -1269,7 +1354,7 @@
  // asked about every texture's storage and made a chunk of 80 MB and more for each stride (then 64 MB past the address), or lengthened its chunk to that, 77 of them, 6.7 GB counted
  // by Metal, in Ocarina of Time's first area load. Caller holds g_mu
  static int pool_peek(uint64_t addr) {
@@ -199,7 +213,82 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return pool_held(addr, 1);
  }
  // Whether [addr, addr + len) lies in a pool, with no side effect: mtl_addr makes the pool resident, for a GPU use to follow. A large pool is answered from its range, since its lookup
-@@ -3939,6 +4017,10 @@
+@@ -1280,6 +1365,7 @@
+     return ok;
+ }
+ int mtl_addr(uint64_t addr, uint64_t len, void **buf, uint64_t *off) {
++    t_valve_refused = 0;   // a leftover 1 from an earlier lookup would make a real "not in any pool" look like the valve's answer
+     const pc_ent *c = pc_get(addr, len);
+     if (c) { *buf = (__bridge void *)c->buf; *off = addr - c->base; return 1; }
+     int ok = 0;
+@@ -2109,8 +2195,13 @@
+     if (src != dst) nvn_buffer_write_ranges(dst, n, buffer_copy_note);
+     pend_add(dst, n, 2); g_mdx_epoch++;
+     void *sb, *db; uint64_t so, dof;
+-    if (!mtl_addr(src, n, &sb, &so) || !mtl_addr(dst, n, &db, &dof))
+-        MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
++    int aok = mtl_addr(src, n, &sb, &so), valved = t_valve_refused;   // mtl_addr clears the flag, so keep both lookups' answers
++    int dok = aok ? mtl_addr(dst, n, &db, &dof) : 0; valved |= aok && t_valve_refused;
++    if (!aok || !dok) {
++        if (!valved) MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
++        RED_ONCE(64, "buffer copy dropped at %#llx -> %#llx (%llu bytes): the residency valve refused a window", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
++        return;
++    }
+     if (src != dst && src < dst + n && dst < src + n) { static int once;   // Metal leaves an overlapping copy undefined; seen only in Cuphead while its pool allocator gave out overlapping blocks (hle_nvn.c zcull_size)
+         if (!once++) MLOG("[RED] buffer copy with overlapping source and destination (src %#llx dst %#llx, %llu bytes): the result is undefined", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
+     enc_b_copy_buffer(blit_buf(src, src + n, dst, dst + n), (__bridge id<MTLBuffer>)sb, so, (__bridge id<MTLBuffer>)db, dof, n);
+@@ -2445,7 +2536,11 @@
+     rc_write(dst,n,data,0);
+     int pi = pend_add(dst, n, 1);
+     void *db; uint64_t dof;
+-    if (!mtl_addr(dst, n, &db, &dof)) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
++    if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the guest memory is written already (rc_write above), only this copy is dropped
++        if (!t_valve_refused) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
++        RED_ONCE(64, "uniform update dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
++        return;
++    }
+     int defer = (enc_open() || (ubd_lazy() && !g_blit)) && g_nubd < UBD_MAX && ubd_on();
+     size_t need = (n + 255u) & ~(size_t)255u;   // 256-aligned slots: a deferred update is read in place by draws as a uniform buffer
+     if (!g_ubs_buf || g_ubs_off + need > g_ubs_size) {
+@@ -2473,7 +2568,11 @@
+     rc_write(dst,n,&value,4);
+     pend_add(dst, n, 3); g_mdx_epoch++;
+     void *db; uint64_t dof;
+-    if (!mtl_addr(dst, n, &db, &dof)) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
++    if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the pattern is in guest memory already (rc_write above), only this fill is dropped
++        if (!t_valve_refused) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
++        RED_ONCE(64, "buffer fill dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
++        return;
++    }
+     uint8_t b0 = (uint8_t)value;
+     if (value == (uint32_t)b0 * 0x01010101u) { [blit_buf(0, 0, dst, dst + n) fillBuffer:(__bridge id<MTLBuffer>)db range:NSMakeRange(dof, n) value:b0]; return; }
+     enum { PAT = 64 << 10 }; static __strong id<MTLBuffer> pat; static uint32_t pat_v; static int pat_ok;
+@@ -3463,16 +3562,19 @@
+     return want;
+ }
+ 
+-// Idle trimming is opt-in. An explicit 0 still reports the cache for A/B runs.
++// Idle trimming: on by default since 2026-11-23, at 8 s. S2Arm's transient GPU pool trims after every submit and shrinks about
++// 8 s after a peak (graphics/metal/gal_core.m tg_trim); a staging cache that only ever grows is what a long session's readout
++// shows, and this one is 265 MB in a 5461 MB working set. DM_NVN_UPLOAD_IDLE_MS=0 turns it off again; any other value sets the
++// idle time, and the cache is reported either way.
+ static int g_up_idle_report;
+ static uint64_t up_idle_period(void) {
+     static int64_t ns = -1;
+     if (ns < 0) {
+         const char *e = getenv("DM_NVN_UPLOAD_IDLE_MS");
+-        g_up_idle_report = e && *e;
+-        char *end;
+-        int64_t ms = g_up_idle_report ? strtoll(e, &end, 10) : 0;
+-        ns = ms > 0 && ms <= INT64_MAX / 1000000 && !*end ? ms * 1000000 : 0;
++        g_up_idle_report = 1;
++        char *end = NULL;
++        int64_t ms = e && *e ? strtoll(e, &end, 10) : 8000;
++        ns = ms > 0 && ms <= INT64_MAX / 1000000 && (!end || !*end) ? ms * 1000000 : 0;
+     }
+     return (uint64_t)ns;
+ }
+@@ -3939,6 +4041,10 @@
  static uint64_t g_up_src_made;   // source buffers made (t_upload_src)
  static id<MTLBuffer> up_big_src(uint64_t addr, uint64_t len, uint64_t *off, int may_split) {
      // Not once the raw memory table holds the whole pool (big_full): the lookup finds that buffer. Ocarina of Time's first scene made 4,664 of these in one batch, 2.1 GB counted against the working set for pages already wired
@@ -210,7 +299,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      pthread_mutex_lock(&g_mu); int k = big_of(addr), in = k >= 0 && !g_big[k].full;
      if (k < 0 && len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
      pthread_mutex_unlock(&g_mu);
-@@ -3949,7 +4031,7 @@
+@@ -3949,7 +4055,7 @@
      if (may_split && budget && g_up_src_bytes && b - a > budget - MIN(g_up_src_bytes, budget)) { up_flush(); up_begin(); }
      id<MTLBuffer> buf = [g_dev newBufferWithBytesNoCopy:(void *)a length:b - a options:MTLResourceStorageModeShared deallocator:nil];
      if (!buf) return nil;
@@ -219,7 +308,69 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (budget) g_up_src_bytes += b - a;
      res_add(buf); [g_up_keep addObject:buf]; *off = (uint64_t)addr - a;
      return buf;
-@@ -5352,7 +5434,7 @@
+@@ -4843,6 +4949,61 @@
+     }
+     pthread_mutex_unlock(&g_gws_mu);
+ }
++// The residency valve (S2Arm's graphics/metal/gal_buf.m res_valve_ok, which they wrote after a kernel panic of 2026-10-18): a
++// zero-copy buffer in the residency set pins its pages wired, and taking it back out does not release them -- they go when the
++// process ends. So the only place to stop the growth is before the buffer is made. Past the cap this answers 0, the lookup that
++// wanted it fails, and the draw that needed it is dropped: degrading, instead of the process ending, which is what 2026-11-23
++// did (a 3.2 GB pool in a 5461 MB working set: Metal reported 5968 MB, 32 command buffers failed within a minute, and the host
++// aborts rather than watch the machine thrash -- NieR: Automata, 52 minutes in).
++//
++// Two things differ from theirs, both on purpose:
++//   * what it counts. Their valve counts the residency set (g_gres.allocatedSize). On this device that set was 4984 MB when
++//     Metal said 5968 MB, so a cap at the device's working set would never have fired. This counts Metal's currentAllocatedSize,
++//     the number the failure line prints, so the cap and the failure are the same quantity;
++//   * the number itself. DM_RES_CAP_MB overrides; the default is the device's recommendedMaxWorkingSetSize with no safety factor.
++//     Metal tolerated about 9% over it before it failed (5968 against 5461), and refusing 500 MB early only costs the player
++//     picture, not safety.
++//
++// The machine-wide wired check is theirs too, with one guard: with our pools (a 3.2 GB pool mapped as zero-copy buffers) wired
++// passes 45% of physical memory long before the game is in trouble, so it only counts once our own allocation is already past
++// half the cap -- the state their check was written for.
++static _Atomic uint64_t g_valve_refused, g_valve_refused_b;   // for the memory readout
++static uint64_t res_cap(void) {
++    static int64_t mb = -1;   // the cap in MB, read once
++    if (mb >= 0) return (uint64_t)mb << 20;
++    const char *e = getenv("DM_RES_CAP_MB");
++    long long want = -1;
++    if (e && *e) {
++        char *end = NULL; want = strtoll(e, &end, 10);
++        if (*end || want < 0) { MLOG("[RED] DM_RES_CAP_MB=%s: not a size in MB, the residency valve stays off", e); want = 0; }
++    }
++    if (want < 0) { if (!g_dev) return 0; want = (long long)(g_dev.recommendedMaxWorkingSetSize >> 20); }
++    mb = want;
++    if (mb) MLOG("residency valve: new zero-copy buffers stop at %lld MB of Metal allocation%s", (long long)mb,
++                 e && *e ? " (DM_RES_CAP_MB)" : " (the device's recommended working set)");
++    return (uint64_t)mb << 20;
++}
++static int res_valve_ok(uint64_t n) {
++    uint64_t cap = res_cap();
++    if (!cap) return 1;
++    uint64_t have = g_dev ? g_dev.currentAllocatedSize : 0;
++    int ok = have + n <= cap;
++    if (ok && have >= cap / 2) {
++        static uint64_t phys, pg;
++        if (!phys) { size_t l = sizeof phys; sysctlbyname("hw.memsize", &phys, &l, NULL, 0); pg = (uint64_t)sysconf(_SC_PAGESIZE); }
++        vm_statistics64_data_t vs; mach_msg_type_number_t c = HOST_VM_INFO64_COUNT; uint64_t wired = 0;
++        if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&vs, &c) == KERN_SUCCESS) wired = (uint64_t)vs.wire_count * (pg ? pg : 16384);
++        ok = !phys || wired <= phys / 100 * 45;
++    }
++    if (!ok) {
++        uint64_t k = atomic_fetch_add(&g_valve_refused, 1) + 1; atomic_fetch_add(&g_valve_refused_b, n);
++        if (k <= 4 || !(k & (k - 1)))
++            MLOG("[RED] residency valve: refused %.1f MB (Metal allocated %.1f of %.1f MB), %llu refusals, %.1f MB in all: "
++                 "this lookup fails and the command that needed it is dropped", n / 1048576.0, have / 1048576.0, cap / 1048576.0,
++                 (unsigned long long)k, (double)atomic_load(&g_valve_refused_b) / 1048576.0);
++    }
++    return ok;
++}
+ // A pool's zero-copy buffer, which the GPU writes through. One made while any of its pages is read-only drops every GPU write through it, silently, so it is made over its protected pages
+ // opened (nvn_dirty_open: writable, not counted as written, protected again once it is made; issue #1591). A chunk of a large pool is made long after the pool, by when uploads and GPU writes
+ // have protected pages in it; a small pool's first or last page may be a neighbour's, protected by that pool's texture
+@@ -5352,7 +5513,7 @@
          }
      }
      id have = tex_get(t->serial);
@@ -228,7 +379,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (!packaged && !have && on_sub_thread() && tex_cpu_content(t)) { mtl_tex_cpu_written(t); packaged = 1; }   // storage the CPU wrote before its first use (tex_cpu_content)
      if (!packaged && !have && on_sub_thread() && linear_storage_ok(t)) {   // a linear texture no view on its buffer can take (iOS wants 64-byte rows; Axiom Verge's 8x8 RGBA8 linear textures have 32): uploaded, and again after CPU writes
          uint32_t pf; void *mb; uint64_t mo; size_t row;
-@@ -5553,6 +5635,32 @@
+@@ -5553,6 +5714,34 @@
  #endif
      MLOG("memory up to frame %llu: resident %llu MB, GPU allocated %llu MB, deferred-release queue %lu, residency set %lu, serial objects %u, memory pools %d (resident %d; peak %d / tracking table capacity %d; freed but alive %lu, %llu MB), shared textures %u (%u kept by the sharing table alone, %llu MB, %llu MB of it drawn into or shader-written, the oldest idle %llu submissions; evicted with pools %llu (serial entries that went with them %llu), on storage takeover %llu in total), texture re-uploads %llu in total, per-frame arena blocks created %llu in total (alive %llu, %llu MB; released when idle %llu, %llu MB in total), finalized textures still referenced %u (small table, %llu put in total), retired but held by a serial %u, recycled texture heaps made %llu, reused %llu, freed %llu, waiting %u (%llu MB); headroom to the system memory limit %s", frame, rss_mb, gpu, nd, nr, ns, live, pres, peak, cap, dead_n, dead_mb, ashared, au.entries, (unsigned long long)(au.bytes >> 20), (unsigned long long)(au.writable_bytes >> 20), (unsigned long long)au.oldest_idle, (unsigned long long)as.evicted, (unsigned long long)as.pool_entries, (unsigned long long)as.taken, (unsigned long long)g_pkg_reuploads, (unsigned long long)g_arena_made, (unsigned long long)g_arena_live, (unsigned long long)(g_arena_live_bytes >> 20), (unsigned long long)g_arena_freed, (unsigned long long)(g_arena_freed_bytes >> 20), nghost, (unsigned long long)ghost_puts, nwait,
           (unsigned long long)g_rh_made, (unsigned long long)g_rh_reused, (unsigned long long)g_rh_trimmed, rh_n, (unsigned long long)(rh_bytes >> 20), avail);
@@ -255,13 +406,15 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +        MLOG("residency set by kind: textures %llu, %llu MB; heaps %llu, %llu MB; shared buffers %llu, %llu MB; private buffers %llu, %llu MB; pool buffers %d, %llu MB; large pools %d, chunks %llu, %llu MB, chunks a longer one replaced %llu, %llu MB",
 +             kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20);
 +        // What the last interval's lookups reached, and what the device says its own budget is: a set mostly of windows nothing reached again is one reclaiming would shrink
-+        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; uploads that borrowed a temporary instead of the pool's buffer: %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB",
++        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; uploads that borrowed a temporary instead of the pool's buffer: %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB; residency valve: cap %llu MB, refused %llu time(s), %llu MB",
 +             used_n, npools, used_b >> 20, borrow_b >> 20, (unsigned long long)(g_dev.recommendedMaxWorkingSetSize >> 20),
-+             (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20)); }
++             (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20),
++             (unsigned long long)(res_cap() >> 20), (unsigned long long)atomic_load(&g_valve_refused),
++             (unsigned long long)(atomic_load(&g_valve_refused_b) >> 20)); }
      { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
        mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
        MLOG("texture views by Metal texture (vc_get): %u textures hold cached views; %llu views reused, %llu made in total; texture buffers bound as 2D rows for wrapped 1D fetches %llu times, %llu made, %llu failed, %llu copied into aligned rows (%llu MB) "
-@@ -6687,11 +6795,11 @@
+@@ -6687,11 +6876,11 @@
      g_shmap_path = path;
      const char *m = getenv("DM_MSL_DIR");
      // Library directory = <DM_MSL_DIR or default cache>/b-<translation chain version>: the version comes from dm/gfx/nvn/dmsh_chain.h (tools/dmsh_chain.py), one for every game; a host built from an old source tree only accepts libraries of the old version
@@ -275,7 +428,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      // The library's stamp (inputs.tsv, written by a full dmsh_build.py run): the game and the digest of the profile inputs it was built from. The chain version is the same for every
      // game and every state of a profile's tables, so the stamp is what ties c1_full.tsv / cb_extent.tsv to these libraries: each names the inputs of the library it was made from
-@@ -6707,7 +6815,7 @@
+@@ -6707,7 +6896,7 @@
      NSString *cp = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"c1_full.tsv"];   // Same directory as the mapping table (Mac: dm/games/<id>; iOS: dm/ inside the App, copied along by build_ipa.sh)
      NSString *ct = cp ? [NSString stringWithContentsOfFile:cp encoding:NSUTF8StringEncoding error:nil] : nil;
      NSString *head = ct ? [[ct componentsSeparatedByString:@"\n"] firstObject] : nil;
@@ -284,7 +437,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (!head || ![head hasPrefix:want]) {
          MLOG("[RED] c1_full.tsv is stale or missing (its header must name this library's chain and inputs; a full dmsh_build.py run makes it); every c1 gets its own 64 KiB");
      } else {
-@@ -6741,7 +6849,7 @@
+@@ -6741,7 +6930,7 @@
      NvShader *geo_lean_v[5]; uint8_t geo_lean_tried;   // a geometry shader's lean kernels by input topology (looked up once)
      NvShader *geo_bg_v[5], *geo_bgv_v; uint8_t geo_bg_tried;   // its kernels by input topology (_bg<n>) and its reader (_bgv), looked up once (bit 7: the reader)
      NSMutableDictionary *geo_mesh;   // a vertex shader's mesh entries by lean kernel key (geo_mesh_fn; NSNull: none)
@@ -293,7 +446,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint8_t up_color;   // such a shader's colour, from its code at load with DM_UPSCALER=metalfx (up_mfx_color; UP_COLOR_UNREAD otherwise)
      int gs_loc, lay_loc; char gs_comp, lay_comp;   // a slice-writing geometry shader (no function: the layer comes from input gs_loc.gs_comp) / a vertex shader with layer entry points writing output lay_loc.lay_comp (dmsh_build.py gs_slice, vs_layer_entry); -1 = none
      uint64_t cbs_seen; uint32_t cbs_runs;   // the command buffer that listed this shader last, and how many have (cbs_note)
-@@ -6753,8 +6861,9 @@
+@@ -6753,8 +6942,9 @@
      NSString *ventry; id<MTLFunction> vfn; int vfn_state;
      NSString *pentry, *wlentry, *vinentry;   // a vertex shader's entry point in its pulling library, that library's wide-line one, and its entry point in the shadow-input library, as the reflection names them (side_entry); nil: ventry's name (a layer entry point)
      id<MTLFunction> pfn, wlfn; int pfn_state, has_pull;   // wlfn: the wide-line entry of the pulling library (wlentry, dmsh_pull.py; nvn_wline.inc), nil when it has none
@@ -305,7 +458,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  @implementation NvShader
  - (void)dealloc { free(rf.c1); free(geo_slot); }
  @end
-@@ -6870,6 +6979,27 @@
+@@ -6870,6 +7060,27 @@
      if (!s || [g_pso_user_seen containsObject:s]) return;
      [g_pso_user_seen addObject:s]; fputs(line, f); fflush(f);
  }
@@ -333,7 +486,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  // A library's name for the pipeline archive's index (arch_key): a digest of its bytes (SHA-256, first 16 bytes in hex), the same at every start and in every container. Not the file
  // it came from: Metal hands out one MTLFunction per function content, device-wide, so two shader keys whose libraries are the same bytes (Unity's sprite shaders: Cuphead's
  // c58ee1901c9eaaff, 229e46ed4370120b, bf6707736e88cca0 and 8e36438c7208b3c6 are one 23,038-byte library) share one function object, and fn4_note keeps the descriptor of whichever
-@@ -6888,6 +7018,20 @@
+@@ -6888,6 +7099,20 @@
  // Owned data can use malloc's existing arenas when new file mappings have no gap; the tradeoff is charged memory instead of reclaimable file pages.
  // The descriptor is closed promptly too: newLibraryWithURL keeps one open per library and exceeded iOS's soft limit of 256. The digest still names the original library bytes.
  static id<MTLLibrary> lib_from_map(msl_map f, NSError **err) {
@@ -354,7 +507,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      NSString *tag = lib_digest(f.data, f.size);
      dispatch_data_t d = dispatch_data_create(f.data, f.size, NULL, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
      munmap(f.base, f.base_len);
-@@ -7061,7 +7205,7 @@
+@@ -7061,7 +7286,7 @@
      NSError *e = nil;
      NSData *jd = msl_data([NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]);
      NSDictionary *j = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
@@ -363,7 +516,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          NvShader *o = [NvShader new]; o->stage = 2; o->lay_loc = -1; strlcpy(o->key, pc.UTF8String, sizeof o->key);
          o->gs_loc = [j[@"gs_slice"][@"loc"] intValue]; o->gs_comp = [[j[@"gs_slice"][@"comp"] description] UTF8String][0];
          return o;
-@@ -7070,14 +7214,14 @@
+@@ -7070,14 +7295,14 @@
      NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
      id<MTLLibrary> lib = lib_from_file(lp, &e);
      if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); return nil; }
@@ -380,7 +533,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // (rf.c1 is freed by dealloc when o goes: freeing it here too was a double free, which aborted FINAL FANTASY RESONANCE at its first such shader)
          MLOG("[RED] shader %s reflection conversion failed: a texture handle the translator could not trace to one slot (profile key tex_dyn_slots off)", pc.UTF8String); return nil; }
      NSString *entry = j[@"entry"]; int ez = 0;   // ez: a vertex shader's entry is its near = 0 one
-@@ -7125,6 +7269,9 @@
+@@ -7125,6 +7350,9 @@
      if (stage == 1) o->has_alpha = [j[@"alpha"] isKindOfClass:[NSDictionary class]];
      if (stage == 1) o->has_bz = [j[@"blend_zero"] boolValue];
      if (stage == 1) o->has_logic = [j[@"logic"] isKindOfClass:[NSDictionary class]];
@@ -390,7 +543,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      // A function that declares function constants cannot go into a pipeline until it is specialized, even when every constant is optional. SPIRV-Cross declares one for shaders that read a
      // texel buffer (spvLinearTextureAlignmentOverride, used only through is_function_constant_defined; one of Pokémon Legends: Z-A's imgui pixel shaders, 2bd5037003980716): an empty set of
      // values keeps its default. Without it the first pipeline with that shader failed Metal's validation (`fragmentFunction main0 cannot be used to build a pipeline state`)
-@@ -9428,7 +9575,9 @@
+@@ -9428,7 +9656,9 @@
      NSError *e = nil;
      if (!fs->afn_state) {
          fs->afn_state = 2;
@@ -401,7 +554,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          id<MTLFunction> own[2] = {fs->fn, fs->fn_d};
          for (int i = 0; i < 2 && !why; i++) {
              if (!own[i]) continue;
-@@ -9571,7 +9720,9 @@
+@@ -9571,7 +9801,9 @@
      NSError *e = nil; const char *why = NULL;
      if (!fs->lfn_state) {
          fs->lfn_state = 2;
@@ -412,7 +565,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          else why = "no library";
      }
      id<MTLFunction> f = nil; NSNumber *k = @(targets & 0xff);
-@@ -11084,6 +11235,95 @@
+@@ -11084,6 +11316,95 @@
      g_pt_spec_ns += bp_now() - ts;
      return ps;
  }
@@ -508,7 +661,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static id<MTLRenderPipelineState> pso_build(MTLRenderPipelineDescriptor *d, int off, NSError **e) { return pso_build_ex(d, off, e, 1); }   // off: !pso_key.border of the key d was made from
  // Pipeline key: current state S + pass formats (normal pass; a merged pass additionally carries lmap / specialized function, filled in by pso_get)
  static void pso_key_fill(pso_key *k, NvShader *vs, NvShader *fs, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples, int lmap) {
-@@ -11421,7 +11661,7 @@
+@@ -11421,7 +11742,7 @@
  static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int zero) {
      NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
      if ((!vj && pre_lib_absent(vk, @"_b.json")) || (!fj && pre_lib_absent(fk, @"_b.json"))) return nil;
@@ -517,7 +670,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (vj[@"mesh_stage"]) return nil;   // a mesh shader's pair (shader_pairs.tsv holds them for its padding): mesh pipelines are built at the draw (nvn_geometry.inc mtk_pso), no base
      NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
      int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
-@@ -11467,7 +11707,7 @@
+@@ -11467,7 +11788,7 @@
  // the same for the archive it makes offline, from the same files
  static NSString *pre_stamp(NSString *txt, int zero) {
      NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding]; uint8_t h[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(d.bytes, (CC_LONG)d.length, h);
@@ -526,7 +679,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
  }
  // The device's own prebuilt.tsv: that stamp, then whether the run found every library file its pairs need: "libs all", or "libs missing <file>" naming one it lacked (pre_lib_absent).
-@@ -11719,6 +11959,11 @@
+@@ -11719,6 +12040,11 @@
      else {
          MTLRenderPipelineDescriptor *d = pso_desc(&k, vs, fs, ms_fn ? ms_fn : g_pso_fsfn, g_pso_lmap != NULL);
          ps = pso_build(d, !k.border, &e);
@@ -538,7 +691,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      if (!took) {   // the draw waited (built here, made from its queued build, or waited for its running build)
          uint64_t w = bp_now() - bt - (g_pt_pred_ns - pred0); g_pw_n[why]++; g_pw_ns[why] += w;
-@@ -17018,7 +17263,7 @@
+@@ -17018,7 +17344,7 @@
          for (size_t y = 0; y < hb; y++) memcpy(dst + y * row, (const uint8_t *)t->mem + (y0 + y) * srow + x0, wb);
          return;
      }
@@ -547,7 +700,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      // A guest thread can live indefinitely without draining its outer pool: release readback temporaries here, after the GPU and CPU copies finish.
      // Finding: docs/reference/memory.md, GPU readback without an autorelease pool.
      @autoreleasepool {
-@@ -18926,13 +19171,27 @@
+@@ -18926,13 +19252,27 @@
  static up_mfx_scaler g_up_mfx[UP_MFX_SCALERS]; static int g_up_mfx_next;
  static uint64_t g_up_mfx_n, g_up_mfx_kept, g_up_mfx_straight[2];   // dispatches drawn by MetalFX, dispatches of a named shader left to it, of the drawn: input and output that were the game's own textures
  void mtl_up_mfx_stats(uint64_t *n, uint64_t *kept) { *n = g_up_mfx_n; *kept = g_up_mfx_kept; }
@@ -576,7 +729,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return v;
  }
  // The colour a variant of the network takes and writes, from the sRGB curves in its code (their constants are immediates, whole bytes in the code). The variants differ inside a pack, so this is the shader's and not the game's:
-@@ -18986,13 +19245,13 @@
+@@ -18986,13 +19326,13 @@
      if (!part && !up_mfx_has_pow(code, n) && up_mfx_squares(code, n)) return UP_COLOR_ROOT;
      return enc32 && dec32 && !enc16 && !dec16 ? UP_COLOR_LINEAR : dec16 && !enc16 && !enc32 && !dec32 ? UP_COLOR_SRGB : UP_COLOR_KEEP;
  }
@@ -593,7 +746,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint32_t nctl, ncode = 0; if (sd->control) nvn_ctl_lens(sd->control, &nctl, &ncode);
      cs->up_color = sd->data && ncode && ncode < (1u << 24) ? up_mfx_color((const void *)(uintptr_t)sd->data, ncode) : UP_COLOR_KEEP;
      MLOG("upscaler %s: %s", cs->key, cs->up_color == UP_COLOR_LINEAR ? "linear input and output, MetalFX in HDR mode" : cs->up_color == UP_COLOR_SRGB ? "sRGB-encoded input, linear output, MetalFX in perceptual mode" :
-@@ -19002,7 +19261,7 @@
+@@ -19002,7 +19342,7 @@
  static int up_mfx_wanted(NvShader *cs) {
      if (cs->up_mfx) return cs->up_mfx == 1;
      cs->up_mfx = 2;

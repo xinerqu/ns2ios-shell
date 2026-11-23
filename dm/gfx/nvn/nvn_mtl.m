@@ -1119,6 +1119,8 @@ enum { BIG_MIN = 4u << 20, BIG_IDX = 21, BIG_S = 1u << BIG_IDX, BIG_WIN = 4u << 
 typedef struct { uintptr_t lo, hi, a, b; const void *mem; int *chunk, full; NSMutableArray *old; } big_pool;   // chunk: stride → g_pools index + 1; full: the whole pool's entry + 1; old: buffers a longer chunk replaced, alive with the pool
 static big_pool g_big[BIG_MAX]; static int g_nbig;
 static id<MTLBuffer> pool_buf(uintptr_t a, uintptr_t b);   // a pool's zero-copy buffer over [a, b), made over writable pages (below)
+static _Thread_local int t_valve_refused;   // this thread's last big_new found the residency valve closed (defined with it, below): the lookup fails and the caller drops that command
+static int res_valve_ok(uint64_t n);   // the residency valve, defined beside pool_buf
 static int g_bidx[BIG_MAX], g_bidx_ok;   // g_big's indices by lo, for big_of: every pool over BIG_MIN is in here now, and a lookup must not walk them
 static int big_cmp(const void *x, const void *y) { uintptr_t a = g_big[*(const int *)x].lo, b = g_big[*(const int *)y].lo; return a < b ? -1 : a > b; }
 static int big_of(uint64_t addr) {   // caller holds g_mu
@@ -1259,6 +1261,11 @@ static void pidx_sort(void) {
     qsort(g_pidx, (size_t)g_npool, sizeof *g_pidx, pidx_cmp); g_pidx_ok = 1;
 }
 static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, int reach) {   // caller holds g_mu: a new entry for [lo, end) of the pool, looked up for addresses in [lo, hi)
+    // The residency valve sits here, on the windows a session keeps making, not on the whole-pool buffers a pool is born with: those
+    // are one per pool and their creation has no graceful answer (a pool that cannot be mapped is the pool the game asked for), while
+    // a window that is refused leaves the lookup it came from without a buffer -- and that draw or copy is skipped (issue #14).
+    if (!res_valve_ok(end - lo)) { t_valve_refused = 1; return -1; }
+    t_valve_refused = 0;
     id<MTLBuffer> buf = pool_buf(lo, end);
     if (!buf) { MLOG("[RED] memory pool %p: the zero-copy buffer over %#lx..%#lx was refused", b->mem, (unsigned long)lo, (unsigned long)end); return -1; }
     if (g_npool == g_cap) { g_cap = g_cap ? g_cap * 2 : 64; g_pools = realloc_or_die(g_pools, g_cap * sizeof *g_pools, "the memory pool table"); }
@@ -1358,6 +1365,7 @@ int mtl_addr_known(uint64_t addr, uint64_t len) {
     return ok;
 }
 int mtl_addr(uint64_t addr, uint64_t len, void **buf, uint64_t *off) {
+    t_valve_refused = 0;   // a leftover 1 from an earlier lookup would make a real "not in any pool" look like the valve's answer
     const pc_ent *c = pc_get(addr, len);
     if (c) { *buf = (__bridge void *)c->buf; *off = addr - c->base; return 1; }
     int ok = 0;
@@ -2187,8 +2195,13 @@ void mtl_sub_copy(uint64_t src, uint64_t dst, uint64_t n) {
     if (src != dst) nvn_buffer_write_ranges(dst, n, buffer_copy_note);
     pend_add(dst, n, 2); g_mdx_epoch++;
     void *sb, *db; uint64_t so, dof;
-    if (!mtl_addr(src, n, &sb, &so) || !mtl_addr(dst, n, &db, &dof))
-        MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+    int aok = mtl_addr(src, n, &sb, &so), valved = t_valve_refused;   // mtl_addr clears the flag, so keep both lookups' answers
+    int dok = aok ? mtl_addr(dst, n, &db, &dof) : 0; valved |= aok && t_valve_refused;
+    if (!aok || !dok) {
+        if (!valved) MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+        RED_ONCE(64, "buffer copy dropped at %#llx -> %#llx (%llu bytes): the residency valve refused a window", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+        return;
+    }
     if (src != dst && src < dst + n && dst < src + n) { static int once;   // Metal leaves an overlapping copy undefined; seen only in Cuphead while its pool allocator gave out overlapping blocks (hle_nvn.c zcull_size)
         if (!once++) MLOG("[RED] buffer copy with overlapping source and destination (src %#llx dst %#llx, %llu bytes): the result is undefined", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
     enc_b_copy_buffer(blit_buf(src, src + n, dst, dst + n), (__bridge id<MTLBuffer>)sb, so, (__bridge id<MTLBuffer>)db, dof, n);
@@ -2523,7 +2536,11 @@ void mtl_sub_update(const void *data, uint64_t dst, uint64_t n) {
     rc_write(dst,n,data,0);
     int pi = pend_add(dst, n, 1);
     void *db; uint64_t dof;
-    if (!mtl_addr(dst, n, &db, &dof)) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
+    if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the guest memory is written already (rc_write above), only this copy is dropped
+        if (!t_valve_refused) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
+        RED_ONCE(64, "uniform update dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
+        return;
+    }
     int defer = (enc_open() || (ubd_lazy() && !g_blit)) && g_nubd < UBD_MAX && ubd_on();
     size_t need = (n + 255u) & ~(size_t)255u;   // 256-aligned slots: a deferred update is read in place by draws as a uniform buffer
     if (!g_ubs_buf || g_ubs_off + need > g_ubs_size) {
@@ -2551,7 +2568,11 @@ void mtl_sub_fill(uint64_t dst, uint64_t n, uint32_t value) {
     rc_write(dst,n,&value,4);
     pend_add(dst, n, 3); g_mdx_epoch++;
     void *db; uint64_t dof;
-    if (!mtl_addr(dst, n, &db, &dof)) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
+    if (!mtl_addr(dst, n, &db, &dof)) {   // the residency valve closed: the pattern is in guest memory already (rc_write above), only this fill is dropped
+        if (!t_valve_refused) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
+        RED_ONCE(64, "buffer fill dropped at %#llx (%llu bytes): the residency valve refused the window", (unsigned long long)dst, (unsigned long long)n);
+        return;
+    }
     uint8_t b0 = (uint8_t)value;
     if (value == (uint32_t)b0 * 0x01010101u) { [blit_buf(0, 0, dst, dst + n) fillBuffer:(__bridge id<MTLBuffer>)db range:NSMakeRange(dof, n) value:b0]; return; }
     enum { PAT = 64 << 10 }; static __strong id<MTLBuffer> pat; static uint32_t pat_v; static int pat_ok;
@@ -3541,16 +3562,19 @@ static size_t up_slot_block_size(size_t demand) {
     return want;
 }
 
-// Idle trimming is opt-in. An explicit 0 still reports the cache for A/B runs.
+// Idle trimming: on by default since 2026-11-23, at 8 s. S2Arm's transient GPU pool trims after every submit and shrinks about
+// 8 s after a peak (graphics/metal/gal_core.m tg_trim); a staging cache that only ever grows is what a long session's readout
+// shows, and this one is 265 MB in a 5461 MB working set. DM_NVN_UPLOAD_IDLE_MS=0 turns it off again; any other value sets the
+// idle time, and the cache is reported either way.
 static int g_up_idle_report;
 static uint64_t up_idle_period(void) {
     static int64_t ns = -1;
     if (ns < 0) {
         const char *e = getenv("DM_NVN_UPLOAD_IDLE_MS");
-        g_up_idle_report = e && *e;
-        char *end;
-        int64_t ms = g_up_idle_report ? strtoll(e, &end, 10) : 0;
-        ns = ms > 0 && ms <= INT64_MAX / 1000000 && !*end ? ms * 1000000 : 0;
+        g_up_idle_report = 1;
+        char *end = NULL;
+        int64_t ms = e && *e ? strtoll(e, &end, 10) : 8000;
+        ns = ms > 0 && ms <= INT64_MAX / 1000000 && (!end || !*end) ? ms * 1000000 : 0;
     }
     return (uint64_t)ns;
 }
@@ -4925,6 +4949,61 @@ static void gws_take(uintptr_t lo, uintptr_t hi) {   // a texture over [lo, hi) 
     }
     pthread_mutex_unlock(&g_gws_mu);
 }
+// The residency valve (S2Arm's graphics/metal/gal_buf.m res_valve_ok, which they wrote after a kernel panic of 2026-10-18): a
+// zero-copy buffer in the residency set pins its pages wired, and taking it back out does not release them -- they go when the
+// process ends. So the only place to stop the growth is before the buffer is made. Past the cap this answers 0, the lookup that
+// wanted it fails, and the draw that needed it is dropped: degrading, instead of the process ending, which is what 2026-11-23
+// did (a 3.2 GB pool in a 5461 MB working set: Metal reported 5968 MB, 32 command buffers failed within a minute, and the host
+// aborts rather than watch the machine thrash -- NieR: Automata, 52 minutes in).
+//
+// Two things differ from theirs, both on purpose:
+//   * what it counts. Their valve counts the residency set (g_gres.allocatedSize). On this device that set was 4984 MB when
+//     Metal said 5968 MB, so a cap at the device's working set would never have fired. This counts Metal's currentAllocatedSize,
+//     the number the failure line prints, so the cap and the failure are the same quantity;
+//   * the number itself. DM_RES_CAP_MB overrides; the default is the device's recommendedMaxWorkingSetSize with no safety factor.
+//     Metal tolerated about 9% over it before it failed (5968 against 5461), and refusing 500 MB early only costs the player
+//     picture, not safety.
+//
+// The machine-wide wired check is theirs too, with one guard: with our pools (a 3.2 GB pool mapped as zero-copy buffers) wired
+// passes 45% of physical memory long before the game is in trouble, so it only counts once our own allocation is already past
+// half the cap -- the state their check was written for.
+static _Atomic uint64_t g_valve_refused, g_valve_refused_b;   // for the memory readout
+static uint64_t res_cap(void) {
+    static int64_t mb = -1;   // the cap in MB, read once
+    if (mb >= 0) return (uint64_t)mb << 20;
+    const char *e = getenv("DM_RES_CAP_MB");
+    long long want = -1;
+    if (e && *e) {
+        char *end = NULL; want = strtoll(e, &end, 10);
+        if (*end || want < 0) { MLOG("[RED] DM_RES_CAP_MB=%s: not a size in MB, the residency valve stays off", e); want = 0; }
+    }
+    if (want < 0) { if (!g_dev) return 0; want = (long long)(g_dev.recommendedMaxWorkingSetSize >> 20); }
+    mb = want;
+    if (mb) MLOG("residency valve: new zero-copy buffers stop at %lld MB of Metal allocation%s", (long long)mb,
+                 e && *e ? " (DM_RES_CAP_MB)" : " (the device's recommended working set)");
+    return (uint64_t)mb << 20;
+}
+static int res_valve_ok(uint64_t n) {
+    uint64_t cap = res_cap();
+    if (!cap) return 1;
+    uint64_t have = g_dev ? g_dev.currentAllocatedSize : 0;
+    int ok = have + n <= cap;
+    if (ok && have >= cap / 2) {
+        static uint64_t phys, pg;
+        if (!phys) { size_t l = sizeof phys; sysctlbyname("hw.memsize", &phys, &l, NULL, 0); pg = (uint64_t)sysconf(_SC_PAGESIZE); }
+        vm_statistics64_data_t vs; mach_msg_type_number_t c = HOST_VM_INFO64_COUNT; uint64_t wired = 0;
+        if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&vs, &c) == KERN_SUCCESS) wired = (uint64_t)vs.wire_count * (pg ? pg : 16384);
+        ok = !phys || wired <= phys / 100 * 45;
+    }
+    if (!ok) {
+        uint64_t k = atomic_fetch_add(&g_valve_refused, 1) + 1; atomic_fetch_add(&g_valve_refused_b, n);
+        if (k <= 4 || !(k & (k - 1)))
+            MLOG("[RED] residency valve: refused %.1f MB (Metal allocated %.1f of %.1f MB), %llu refusals, %.1f MB in all: "
+                 "this lookup fails and the command that needed it is dropped", n / 1048576.0, have / 1048576.0, cap / 1048576.0,
+                 (unsigned long long)k, (double)atomic_load(&g_valve_refused_b) / 1048576.0);
+    }
+    return ok;
+}
 // A pool's zero-copy buffer, which the GPU writes through. One made while any of its pages is read-only drops every GPU write through it, silently, so it is made over its protected pages
 // opened (nvn_dirty_open: writable, not counted as written, protected again once it is made; issue #1591). A chunk of a large pool is made long after the pool, by when uploads and GPU writes
 // have protected pages in it; a small pool's first or last page may be a neighbour's, protected by that pool's texture
@@ -5658,9 +5737,11 @@ void mtl_mem_stat(unsigned long long frame, unsigned long long rss_mb) {
         MLOG("residency set by kind: textures %llu, %llu MB; heaps %llu, %llu MB; shared buffers %llu, %llu MB; private buffers %llu, %llu MB; pool buffers %d, %llu MB; large pools %d, chunks %llu, %llu MB, chunks a longer one replaced %llu, %llu MB",
              kn[0], kb[0] >> 20, kn[1], kb[1] >> 20, kn[2], kb[2] >> 20, kn[3], kb[3] >> 20, npools, pool_b >> 20, nbig, chunk_n, chunk_b >> 20, old_n, old_b >> 20);
         // What the last interval's lookups reached, and what the device says its own budget is: a set mostly of windows nothing reached again is one reclaiming would shrink
-        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; uploads that borrowed a temporary instead of the pool's buffer: %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB",
+        MLOG("pool entries a lookup reached since the last line: %u of %d, %llu MB; uploads that borrowed a temporary instead of the pool's buffer: %llu MB; Metal: recommended working set %llu MB, allocated %llu MB, largest buffer %llu MB; residency valve: cap %llu MB, refused %llu time(s), %llu MB",
              used_n, npools, used_b >> 20, borrow_b >> 20, (unsigned long long)(g_dev.recommendedMaxWorkingSetSize >> 20),
-             (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20)); }
+             (unsigned long long)(g_dev.currentAllocatedSize >> 20), (unsigned long long)(g_dev.maxBufferLength >> 20),
+             (unsigned long long)(res_cap() >> 20), (unsigned long long)atomic_load(&g_valve_refused),
+             (unsigned long long)(atomic_load(&g_valve_refused_b) >> 20)); }
     { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
       mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
       MLOG("texture views by Metal texture (vc_get): %u textures hold cached views; %llu views reused, %llu made in total; texture buffers bound as 2D rows for wrapped 1D fetches %llu times, %llu made, %llu failed, %llu copied into aligned rows (%llu MB) "
