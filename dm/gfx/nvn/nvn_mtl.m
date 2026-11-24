@@ -8127,7 +8127,7 @@ static void shmap_read(void) {
     NSString *ventry; id<MTLFunction> vfn; int vfn_state;
     NSString *pentry, *wlentry, *vinentry;   // a vertex shader's entry point in its pulling library, that library's wide-line one, and its entry point in the shadow-input library, as the reflection names them (side_entry); nil: ventry's name (a layer entry point)
     id<MTLFunction> pfn, wlfn; int pfn_state, has_pull;   // wlfn: the wide-line entry of the pulling library (wlentry, dmsh_pull.py; nvn_wline.inc), nil when it has none
-    id<MTLLibrary> alib; id<MTLFunction> afn[2]; NSMutableDictionary *aufn; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind); afn: the alpha test entry points of fn / fn_d in the side library, aufn: fn_u's specialized per integer targets (at_fn)
+    id<MTLLibrary> alib; id<MTLFunction> afn; NSMutableDictionary *aufn; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind); afn: the alpha test entry point of fn in the side library, aufn: fn_u's specialized per integer targets (at_fn); blib below holds it too in a package from a machine without Apple's compiler
     id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; id<MTLLibrary> blib; } @end   // blib: the base library <key>_b, which in a package from a machine without Apple's compiler is source that already holds the <entry>_a / <entry>_l too (nometal_run.py split_into_one_library): at_fn / lo_fn fall back to it when there is no side library   // llib: the side library <key>_bx for logic operations, lfn: fn's entry point (a shader without the typed-output one, which holds its own) specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry point of fn in the side library <key>_bx (alib), (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names it, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
 @implementation NvShader
 - (void)dealloc { free(rf.c1); free(geo_slot); }
@@ -11132,18 +11132,13 @@ static id<MTLFunction> at_fn(NvShader *fs, id<MTLFunction> base) {
         id<MTLLibrary> lib = bx_lib(fs, &e);
         if (!lib && fs->blib) { lib = fs->blib; e = nil; }   // no side library: the package came from a machine without Apple's compiler, whose one library holds these entry points too (nometal_run.py)
         const char *why = lib ? NULL : "no library";
-        id<MTLFunction> own[2] = {fs->fn, fs->fn_d};
-        for (int i = 0; i < 2 && !why; i++) {
-            if (!own[i]) continue;
-            NSString *name = [own[i].name stringByAppendingString:@"_a"]; id<MTLFunction> f = fn4_note([lib newFunctionWithName:name], lib, name, nil);
+        if (fs->fn && !why) {
+            NSString *name = [fs->fn.name stringByAppendingString:@"_a"]; id<MTLFunction> f = fn4_note([lib newFunctionWithName:name], lib, name, nil);
             if (f && f.functionConstantsDictionary.count) f = fn_spec(lib, name, [MTLFunctionConstantValues new], &e);   // as shader_load
             if (!f) why = "no entry point";
             else if (!fn_args_match(fs, f)) why = "its argument buffer differs from the base library's";
             else fs->afn = f;
         }
-        if (!why) { fs->afn_state = 1; fs->alib = lib; static int n; if (++n <= 3 || !(n & (n - 1))) MLOG("alpha test: side library of %s loaded (%d shaders so far)", fs->key, n); }
-        else { static int n; if (n++ < 8) MLOG("[RED] alpha test entry points of %s not usable (%s%s%s): its alpha-tested draws go without the test", fs->key, why, e ? ": " : "", e ? e.localizedDescription.UTF8String : ""); }
-    }
     id f = fs->afn_state == 1 ? fs->afn : nil;
     os_unfair_lock_unlock(&g_at_lock);
     return f;
