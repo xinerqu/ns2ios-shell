@@ -11139,6 +11139,7 @@ static id<MTLFunction> at_fn(NvShader *fs, id<MTLFunction> base) {
             else if (!fn_args_match(fs, f)) why = "its argument buffer differs from the base library's";
             else fs->afn = f;
         }
+    }
     id f = fs->afn_state == 1 ? fs->afn : nil;
     os_unfair_lock_unlock(&g_at_lock);
     return f;
