@@ -47,7 +47,7 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
  #endif
      if (!want) return;
      g_gf_min_free = mf && *mf ? env_size("DM_GUEST_FILE_MIN_FREE", 0, 0x100000) : (uint64_t)2 << 30;
-@@ -314,17 +334,28 @@
+@@ -314,17 +334,27 @@
  static void *alias_windows_thread(void *arg);
  static void *regions_thread(void *arg);
  static void mem_init_once(void) {
@@ -65,12 +65,44 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
 +        g_mem_stack > RESERVE - 0x10000000 - g_mem_alias ||
 +        ((RESERVE | g_mem_alias | g_mem_stack) & (pg - 1)))
          die("guest address-space profile has invalid native boundaries");
--    // The alias region is the console's on the Mac (64 GB for Switch 1, 128 GB for Switch 2; or the profile's, when larger): games lay their regions out for that much, and what the
--    // profile can give an iPhone (one reservation of at most 6 GB) crashed Trails in the Sky 1st Chapter at launch, Just Dance within a minute, and Xenoblade Chronicles 2 Switch 2
--    // Edition (two 60 GB reservations) at start. It is address space, not memory: the application pool bounds what is mapped. DM_ALIAS_SIZE=<bytes> sets another size, the heap and
+     // The alias region is the console's on the Mac (64 GB for Switch 1, 128 GB for Switch 2; or the profile's, when larger): games lay their regions out for that much, and what the
+     // profile can give an iPhone (one reservation of at most 6 GB) crashed Trails in the Sky 1st Chapter at launch, Just Dance within a minute, and Xenoblade Chronicles 2 Switch 2
+     // Edition (two 60 GB reservations) at start. It is address space, not memory: the application pool bounds what is mapped. DM_ALIAS_SIZE=<bytes> sets another size, the heap and
 -    // stacks as they are; the profile's value reproduces an iPhone's address space on the Mac (the NSP script's heap check)
 -    size_t alias = dm_alias_size_for(dm_sdk_ounce());
 -    g_reserve = RESERVE - DM_GAME_MEM_ALIAS + alias;
++    // stacks as they are; the profile's value reproduces an iPhone's address space on the Mac (the NSP script's heap check).
++    // This fork takes the profile from the packer at run time (g_mem_alias; the shell compiles the placeholder profile as 0) and falls back to the console's own size when nothing
++    // set one, which is what the Mac gets
++    size_t alias = g_mem_alias ? (size_t)g_mem_alias : dm_alias_size_for(dm_sdk_ounce());
++    const char *as = getenv("DM_ALIAS_SIZE");
++    if (as && *as) { alias = (size_t)strtoull(as, NULL, 0); if (alias < 0x10000000 || (alias & (pg - 1))) die("DM_ALIAS_SIZE %s: at least 256 MB, in whole host pages", as); }
++    g_reserve = (size_t)RESERVE - (size_t)g_mem_alias + alias;
+     g_as = mmap(NULL, g_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+     if (g_as == MAP_FAILED) {
+ #if TARGET_OS_IPHONE
+@@ -343,8 +373,8 @@
+     //   and resource loading then MapPhysicalMemory's into the alias region after the node area on demand. With a 1.25 GB alias region only about 256 MB was left there, and 3 MB-class layout archives (WipeCourseIn / WipeWarp)
+     //   got no address, were skipped, and crashed on a null pointer when used (main +0x373e04). So alias = node area + 1.75 GB + slack; the heap needs only 1.47 GB, and 2.625 GB is plenty.
+     // The alias and stack sizes come from the game profile (mem_alias / mem_stack, the Mac's alias region as above), the heap takes the rest of mem_reserve
+-    g_heap  = g_as + 0x10000000; g_heap_cap = RESERVE - DM_GAME_MEM_ALIAS - DM_GAME_MEM_STACK - 0x10000000;
+-    g_stack = g_heap + g_heap_cap; g_stack_cap = DM_GAME_MEM_STACK;
++    g_heap  = g_as + 0x10000000; g_heap_cap = RESERVE - (size_t)g_mem_alias - (size_t)g_mem_stack - 0x10000000;
++    g_stack = g_heap + g_heap_cap; g_stack_cap = (size_t)g_mem_stack;
+     g_alias = g_stack + g_stack_cap; g_alias_cap = alias;
+     if (!(g_alias_bits = calloc((g_alias_cap >> 18) + 1, sizeof *g_alias_bits))) die("alias region page bitmap calloc");
+     if (!(g_alias_exposed = calloc(g_alias_cap / pg / 64 + 1, sizeof *g_alias_exposed))) die("alias exposure bitmap calloc");
+@@ -371,26 +401,29 @@
+ // and hands the whole block to its own StandardAllocator (main+0x32137a0) -- so heap size = pool − image footprint, it has only as much as the host reports.
+ // Previously 3 GB was reported here and SetHeapSize never failed: the heap was about 150 MB smaller than on the real device, at the run entry peak the main heap had only about 18 MB left, and under high local load a timing shift made a 128 KB request return null,
+ // which the guest writes to without a null check (CRASH main+0x1b36138, re-verified after merge with inv_tap).
+-#define APP_POOL DM_GAME_APP_POOL   // game profile app_pool (Mario 0xCD500000)
++// APP_POOL is app_pool() above: the profile value, overridable through DM_APP_POOL (Hades II 0xCD500000)
+ // Giant bss (modules with the patch area before the base, patch_nso.py FAR): the image bytes beyond the file part. Used memory was reported as "heap + 64 MB", where the 64 MB covers ordinary modules' code and data (Mario's two modules are about 74 MB together,
+ // and the heap it opens = pool − 64 MB − 1.75 GB virtual address memory − 1 MB = 0x5be00000, as on hardware); Metroid Dread's main has about 1.8 GB of bss, the engine's static heap, which the Switch counts as used;
+ // without it the game asks for pool − 64 MB = 3.15 GB of heap
+ // NROs are left out: their buffers already belong to the game's heap. Counting every offline-mapped NRO's bss made FFX/X-2's used memory exceed its pool before any LoadModule.
+ static size_t big_bss_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (!g_mod[i].nro && g_mod[i].patch_off < 0) n += g_mod[i].size - g_mod[i].back_len - g_mod[i].file_image_len; return n; }
 +// Whether MapPhysicalMemory and GetInfo(UsedMemorySize) enforce the application pool limit:
 +// explicit mem_map_limit on/off (1/0) wins; unset (-1) enforces Horizon's limit for Switch 2 (spec: Ounce),
 +// while keeping Switch 1 off by default for legacy profiles with an artificially reduced app_pool (Ace Attorney Investigations Collection).
@@ -82,30 +114,9 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
 +    return cfg < 0 ? dm_sdk_ounce() : cfg != 0;
 +}
 +static uint64_t used_beside_heap(void) { return MEM_USED + big_bss_bytes() + (mem_map_limit_on() ? (uint64_t)atomic_load(&g_alias_mapped) : 0); }
-     g_as = mmap(NULL, g_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
-     if (g_as == MAP_FAILED) {
- #if TARGET_OS_IPHONE
-@@ -343,8 +374,8 @@
-     //   and resource loading then MapPhysicalMemory's into the alias region after the node area on demand. With a 1.25 GB alias region only about 256 MB was left there, and 3 MB-class layout archives (WipeCourseIn / WipeWarp)
-     //   got no address, were skipped, and crashed on a null pointer when used (main +0x373e04). So alias = node area + 1.75 GB + slack; the heap needs only 1.47 GB, and 2.625 GB is plenty.
-     // The alias and stack sizes come from the game profile (mem_alias / mem_stack, the Mac's alias region as above), the heap takes the rest of mem_reserve
--    g_heap  = g_as + 0x10000000; g_heap_cap = RESERVE - DM_GAME_MEM_ALIAS - DM_GAME_MEM_STACK - 0x10000000;
--    g_stack = g_heap + g_heap_cap; g_stack_cap = DM_GAME_MEM_STACK;
-+    g_heap  = g_as + 0x10000000; g_heap_cap = RESERVE - (size_t)g_mem_alias - (size_t)g_mem_stack - 0x10000000;
-+    g_stack = g_heap + g_heap_cap; g_stack_cap = (size_t)g_mem_stack;
-     g_alias = g_stack + g_stack_cap; g_alias_cap = alias;
-     if (!(g_alias_bits = calloc((g_alias_cap >> 18) + 1, sizeof *g_alias_bits))) die("alias region page bitmap calloc");
-     if (!(g_alias_exposed = calloc(g_alias_cap / pg / 64 + 1, sizeof *g_alias_exposed))) die("alias exposure bitmap calloc");
-@@ -371,7 +402,7 @@
- // and hands the whole block to its own StandardAllocator (main+0x32137a0) -- so heap size = pool − image footprint, it has only as much as the host reports.
- // Previously 3 GB was reported here and SetHeapSize never failed: the heap was about 150 MB smaller than on the real device, at the run entry peak the main heap had only about 18 MB left, and under high local load a timing shift made a 128 KB request return null,
- // which the guest writes to without a null check (CRASH main+0x1b36138, re-verified after merge with inv_tap).
--#define APP_POOL DM_GAME_APP_POOL   // game profile app_pool (Mario 0xCD500000)
-+// APP_POOL is app_pool() above: the profile value, overridable through DM_APP_POOL (Hades II 0xCD500000)
- // Giant bss (modules with the patch area before the base, patch_nso.py FAR): the image bytes beyond the file part. Used memory was reported as "heap + 64 MB", where the 64 MB covers ordinary modules' code and data (Mario's two modules are about 74 MB together,
- // and the heap it opens = pool − 64 MB − 1.75 GB virtual address memory − 1 MB = 0x5be00000, as on hardware); Metroid Dread's main has about 1.8 GB of bss, the engine's static heap, which the Switch counts as used;
- // without it the game asks for pool − 64 MB = 3.15 GB of heap
-@@ -383,14 +414,16 @@
+ static _Atomic int64_t g_alias_mapped;   // bytes mapped in the alias region (page bitmap)
+ // The used memory beside the heap, one figure: GetInfo's UsedMemorySize is the heap plus this, and SetHeapSize and MapPhysicalMemory charge this against the pool, as Horizon charges a
+ // request against the pool less the used memory it reports. A game that asks for total − used (the SDK's nninitStartup, Age of Calamity, Monster Hunter Rise) therefore always gets it.
  // SetHeapSize charged the rewritten modules' size instead (their patch areas and key pages included), which GetInfo never reported: a game whose modules were larger than mem_used was
  // refused the heap the host had just offered (ResultLimitReached; MIO: Memories in Orbit, 68 MB of modules against the default 64 MB, aborted in nninitStartup, GitHub issue #941).
  // mem_used only sets what the game sees (its heap size, as on hardware); the host's own module copies (patch areas, key pages) are not the Switch's to count
@@ -117,16 +128,6 @@ diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
 -    return cfg < 0 ? dm_sdk_ounce() : cfg != 0;
 -}
 -static uint64_t used_beside_heap(void) { return (uint64_t)DM_GAME_MEM_USED + big_bss_bytes() + (mem_map_limit_on() ? (uint64_t)atomic_load(&g_alias_mapped) : 0); }
-+    // The alias region is the console's on the Mac (64 GB for Switch 1, 128 GB for Switch 2; or the profile's, when larger): games lay their regions out for that much, and what the
-+    // profile can give an iPhone (one reservation of at most 6 GB) crashed Trails in the Sky 1st Chapter at launch, Just Dance within a minute, and Xenoblade Chronicles 2 Switch 2
-+    // Edition (two 60 GB reservations) at start. It is address space, not memory: the application pool bounds what is mapped. DM_ALIAS_SIZE=<bytes> sets another size, the heap and
-+    // stacks as they are; the profile's value reproduces an iPhone's address space on the Mac (the NSP script's heap check).
-+    // This fork takes the profile from the packer at run time (g_mem_alias; the shell compiles the placeholder profile as 0) and falls back to the console's own size when nothing
-+    // set one, which is what the Mac gets
-+    size_t alias = g_mem_alias ? (size_t)g_mem_alias : dm_alias_size_for(dm_sdk_ounce());
-+    const char *as = getenv("DM_ALIAS_SIZE");
-+    if (as && *as) { alias = (size_t)strtoull(as, NULL, 0); if (alias < 0x10000000 || (alias & (pg - 1))) die("DM_ALIAS_SIZE %s: at least 256 MB, in whole host pages", as); }
-+    g_reserve = (size_t)RESERVE - (size_t)g_mem_alias + alias;
  
  // For memory accounting (memstat.m): the range of the whole guest address space block (base = NULL when not initialized)
  void svc_guest_range(uint8_t **base, size_t *size) { *base = g_as; *size = g_reserve; }

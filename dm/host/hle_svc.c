@@ -345,17 +345,16 @@ static void mem_init_once(void) {
         g_mem_stack > RESERVE - 0x10000000 - g_mem_alias ||
         ((RESERVE | g_mem_alias | g_mem_stack) & (pg - 1)))
         die("guest address-space profile has invalid native boundaries");
-// Whether MapPhysicalMemory and GetInfo(UsedMemorySize) enforce the application pool limit:
-// explicit mem_map_limit on/off (1/0) wins; unset (-1) enforces Horizon's limit for Switch 2 (spec: Ounce),
-// while keeping Switch 1 off by default for legacy profiles with an artificially reduced app_pool (Ace Attorney Investigations Collection).
-// Read at run time: DM_MEM_MAP_LIMIT from the packer first (the shell compiles the placeholder profile), then the profile's tri-state
-static int mem_map_limit_on(void) {
-    const char *e = getenv("DM_MEM_MAP_LIMIT");
-    if (e && *e) return atoi(e) != 0;
-    int cfg = DM_GAME_MEM_MAP_LIMIT;
-    return cfg < 0 ? dm_sdk_ounce() : cfg != 0;
-}
-static uint64_t used_beside_heap(void) { return MEM_USED + big_bss_bytes() + (mem_map_limit_on() ? (uint64_t)atomic_load(&g_alias_mapped) : 0); }
+    // The alias region is the console's on the Mac (64 GB for Switch 1, 128 GB for Switch 2; or the profile's, when larger): games lay their regions out for that much, and what the
+    // profile can give an iPhone (one reservation of at most 6 GB) crashed Trails in the Sky 1st Chapter at launch, Just Dance within a minute, and Xenoblade Chronicles 2 Switch 2
+    // Edition (two 60 GB reservations) at start. It is address space, not memory: the application pool bounds what is mapped. DM_ALIAS_SIZE=<bytes> sets another size, the heap and
+    // stacks as they are; the profile's value reproduces an iPhone's address space on the Mac (the NSP script's heap check).
+    // This fork takes the profile from the packer at run time (g_mem_alias; the shell compiles the placeholder profile as 0) and falls back to the console's own size when nothing
+    // set one, which is what the Mac gets
+    size_t alias = g_mem_alias ? (size_t)g_mem_alias : dm_alias_size_for(dm_sdk_ounce());
+    const char *as = getenv("DM_ALIAS_SIZE");
+    if (as && *as) { alias = (size_t)strtoull(as, NULL, 0); if (alias < 0x10000000 || (alias & (pg - 1))) die("DM_ALIAS_SIZE %s: at least 256 MB, in whole host pages", as); }
+    g_reserve = (size_t)RESERVE - (size_t)g_mem_alias + alias;
     g_as = mmap(NULL, g_reserve, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (g_as == MAP_FAILED) {
 #if TARGET_OS_IPHONE
@@ -408,22 +407,23 @@ static void mem_init(void) {
 // without it the game asks for pool − 64 MB = 3.15 GB of heap
 // NROs are left out: their buffers already belong to the game's heap. Counting every offline-mapped NRO's bss made FFX/X-2's used memory exceed its pool before any LoadModule.
 static size_t big_bss_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (!g_mod[i].nro && g_mod[i].patch_off < 0) n += g_mod[i].size - g_mod[i].back_len - g_mod[i].file_image_len; return n; }
+// Whether MapPhysicalMemory and GetInfo(UsedMemorySize) enforce the application pool limit:
+// explicit mem_map_limit on/off (1/0) wins; unset (-1) enforces Horizon's limit for Switch 2 (spec: Ounce),
+// while keeping Switch 1 off by default for legacy profiles with an artificially reduced app_pool (Ace Attorney Investigations Collection).
+// Read at run time: DM_MEM_MAP_LIMIT from the packer first (the shell compiles the placeholder profile), then the profile's tri-state
+static int mem_map_limit_on(void) {
+    const char *e = getenv("DM_MEM_MAP_LIMIT");
+    if (e && *e) return atoi(e) != 0;
+    int cfg = DM_GAME_MEM_MAP_LIMIT;
+    return cfg < 0 ? dm_sdk_ounce() : cfg != 0;
+}
+static uint64_t used_beside_heap(void) { return MEM_USED + big_bss_bytes() + (mem_map_limit_on() ? (uint64_t)atomic_load(&g_alias_mapped) : 0); }
 static _Atomic int64_t g_alias_mapped;   // bytes mapped in the alias region (page bitmap)
 // The used memory beside the heap, one figure: GetInfo's UsedMemorySize is the heap plus this, and SetHeapSize and MapPhysicalMemory charge this against the pool, as Horizon charges a
 // request against the pool less the used memory it reports. A game that asks for total − used (the SDK's nninitStartup, Age of Calamity, Monster Hunter Rise) therefore always gets it.
 // SetHeapSize charged the rewritten modules' size instead (their patch areas and key pages included), which GetInfo never reported: a game whose modules were larger than mem_used was
 // refused the heap the host had just offered (ResultLimitReached; MIO: Memories in Orbit, 68 MB of modules against the default 64 MB, aborted in nninitStartup, GitHub issue #941).
 // mem_used only sets what the game sees (its heap size, as on hardware); the host's own module copies (patch areas, key pages) are not the Switch's to count
-    // The alias region is the console's on the Mac (64 GB for Switch 1, 128 GB for Switch 2; or the profile's, when larger): games lay their regions out for that much, and what the
-    // profile can give an iPhone (one reservation of at most 6 GB) crashed Trails in the Sky 1st Chapter at launch, Just Dance within a minute, and Xenoblade Chronicles 2 Switch 2
-    // Edition (two 60 GB reservations) at start. It is address space, not memory: the application pool bounds what is mapped. DM_ALIAS_SIZE=<bytes> sets another size, the heap and
-    // stacks as they are; the profile's value reproduces an iPhone's address space on the Mac (the NSP script's heap check).
-    // This fork takes the profile from the packer at run time (g_mem_alias; the shell compiles the placeholder profile as 0) and falls back to the console's own size when nothing
-    // set one, which is what the Mac gets
-    size_t alias = g_mem_alias ? (size_t)g_mem_alias : dm_alias_size_for(dm_sdk_ounce());
-    const char *as = getenv("DM_ALIAS_SIZE");
-    if (as && *as) { alias = (size_t)strtoull(as, NULL, 0); if (alias < 0x10000000 || (alias & (pg - 1))) die("DM_ALIAS_SIZE %s: at least 256 MB, in whole host pages", as); }
-    g_reserve = (size_t)RESERVE - (size_t)g_mem_alias + alias;
 
 // For memory accounting (memstat.m): the range of the whole guest address space block (base = NULL when not initialized)
 void svc_guest_range(uint8_t **base, size_t *size) { *base = g_as; *size = g_reserve; }
