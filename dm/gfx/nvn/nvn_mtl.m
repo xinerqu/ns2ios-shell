@@ -4970,9 +4970,9 @@ static void gws_take(uintptr_t lo, uintptr_t hi) {   // a texture over [lo, hi) 
 //     Metal tolerated about 9% over it before it failed (5968 against 5461), and refusing 500 MB early only costs the player
 //     picture, not safety.
 //
-// The machine-wide wired check is theirs too, with one guard: with our pools (a 3.2 GB pool mapped as zero-copy buffers) wired
-// passes 45% of physical memory long before the game is in trouble, so it only counts once our own allocation is already past
-// half the cap -- the state their check was written for.
+// Their machine-wide wired check is NOT here: with our pools (a 3.2 GB pool mapped as zero-copy buffers) wired is past 45% of
+// physical memory from the start, and the guard that was meant to keep it quiet (only look once we are past half the cap) was
+// true at 3557 MB -- it refused from there on. The measurement is in res_valve_ok below.
 static _Atomic uint64_t g_valve_refused, g_valve_refused_b;   // for the memory readout
 static uint64_t res_cap(void) {
     static int64_t mb = -1;   // the cap in MB, read once
@@ -4990,17 +4990,16 @@ static uint64_t res_cap(void) {
     return (uint64_t)mb << 20;
 }
 static int res_valve_ok(uint64_t n) {
+    // The count is Metal's allocation against the cap, and nothing else. It used to also refuse while the machine's wired
+    // memory was over 45% of physical (S2Arm's second condition, which they added for a kernel panic): with a game's pool
+    // mapped zero-copy, wired is past that from the start, so the valve refused a window at 3557 MB of a 5461 MB cap and
+    // then refused every lookup after it -- 262,144 refusals, and NieR: Automata lost draws all over a scene that had
+    // memory to spare (2026-11-24, the picture with the smeared bands). A condition that fires at 65% of its own cap is
+    // not a safety net; the first real test of it is what showed that
     uint64_t cap = res_cap();
     if (!cap) return 1;
     uint64_t have = g_dev ? g_dev.currentAllocatedSize : 0;
     int ok = have + n <= cap;
-    if (ok && have >= cap / 2) {
-        static uint64_t phys, pg;
-        if (!phys) { size_t l = sizeof phys; sysctlbyname("hw.memsize", &phys, &l, NULL, 0); pg = (uint64_t)sysconf(_SC_PAGESIZE); }
-        vm_statistics64_data_t vs; mach_msg_type_number_t c = HOST_VM_INFO64_COUNT; uint64_t wired = 0;
-        if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&vs, &c) == KERN_SUCCESS) wired = (uint64_t)vs.wire_count * (pg ? pg : 16384);
-        ok = !phys || wired <= phys / 100 * 45;
-    }
     if (!ok) {
         uint64_t k = atomic_fetch_add(&g_valve_refused, 1) + 1; atomic_fetch_add(&g_valve_refused_b, n);
         if (k <= 4 || !(k & (k - 1)))
