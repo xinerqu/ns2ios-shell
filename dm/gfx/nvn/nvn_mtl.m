@@ -4966,9 +4966,9 @@ static void gws_take(uintptr_t lo, uintptr_t hi) {   // a texture over [lo, hi) 
 //   * what it counts. Their valve counts the residency set (g_gres.allocatedSize). On this device that set was 4984 MB when
 //     Metal said 5968 MB, so a cap at the device's working set would never have fired. This counts Metal's currentAllocatedSize,
 //     the number the failure line prints, so the cap and the failure are the same quantity;
-//   * the number itself. DM_RES_CAP_MB overrides; the default is the device's recommendedMaxWorkingSetSize with no safety factor.
-//     Metal tolerated about 9% over it before it failed (5968 against 5461), and refusing 500 MB early only costs the player
-//     picture, not safety.
+//   * the number itself. DM_RES_CAP_MB overrides; the default is 107% of the device's recommendedMaxWorkingSetSize. Metal
+//     tolerated 109% on the one device this has been measured on (5968 MB against 5461), and the 2% between the two is there so
+//     the valve fires before Metal does rather than at the same instant.
 //
 // Their machine-wide wired check is NOT here: with our pools (a 3.2 GB pool mapped as zero-copy buffers) wired is past 45% of
 // physical memory from the start, and the guard that was meant to keep it quiet (only look once we are past half the cap) was
@@ -4983,10 +4983,13 @@ static uint64_t res_cap(void) {
         char *end = NULL; want = strtoll(e, &end, 10);
         if (*end || want < 0) { MLOG("[RED] DM_RES_CAP_MB=%s: not a size in MB, the residency valve stays off", e); want = 0; }
     }
-    if (want < 0) { if (!g_dev) return 0; want = (long long)(g_dev.recommendedMaxWorkingSetSize >> 20); }
+    // 107% of the device's recommendation: Metal tolerated 109% on the one device we have measured a death on (5968 MB of
+    // 5461, NieR: Automata 2026-11-23), so the valve sits just under that and lets a game use the headroom Metal allows
+    // instead of stopping at the recommendation itself
+    if (want < 0) { if (!g_dev) return 0; want = (long long)((g_dev.recommendedMaxWorkingSetSize / 100) * 107 >> 20); }
     mb = want;
     if (mb) MLOG("residency valve: new zero-copy buffers stop at %lld MB of Metal allocation%s", (long long)mb,
-                 e && *e ? " (DM_RES_CAP_MB)" : " (the device's recommended working set)");
+                 e && *e ? " (DM_RES_CAP_MB)" : " (107%% of the device's recommended working set)");
     return (uint64_t)mb << 20;
 }
 static int res_valve_ok(uint64_t n) {
