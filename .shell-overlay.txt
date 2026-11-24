@@ -70,7 +70,8 @@
 ~ dm/tools/nx_extract/Program.cs      # wraps the stacked storage in AlignedReadStorage
 ~ dm/tools/romfs.py                    # _resolve splits on '/': on Windows abspath gives backslashes, so a RomFS image was never recognised and every read fell back to the file system
 
-~ dm/gfx/tools/dmsh_chain.py    # SPIRV_CROSS: the release's .exe on Windows, not the in-repo macOS build
+~ dm/gfx/tools/dmsh_chain.py    # SPIRV_CROSS: the release's .exe on Windows, not the in-repo macOS build; CRLF folded before hashing so a Windows packer and a Mac shell name the same chain
+~ dm/gfx/nvn/dmsh_chain.h       # generated (dmsh_chain.py --header): this fork's tools differ from upstream's, so its chain version does too; shell_build.sh rewrites it at build time
 ~ dm/gfx/tools/tool_lock.py     # tolerate a single-file translator build and a CRLF checkout
 ~ dm/gfx/tools/dmsh_mtlcache.py # ctypes.CDLL(None) is POSIX-only
 ~ dm/gfx/tools/dmsh_build.py    # atomic_json retries a Windows sharing violation: keys sharing a digest publish the same .json at once

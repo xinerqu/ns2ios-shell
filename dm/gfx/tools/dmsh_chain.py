@@ -89,10 +89,16 @@ def storage_constant_mode():
 def options():
     return 'debug=%s reduced=%s sconst=%s' % (os.environ.get('XLATE_DEBUG', '1') != '0', os.environ.get('XLATE_REDUCED', '1') == '1', storage_constant_mode())
 
+def _bytes(path):
+    """The file's bytes with CRLF folded to LF: the same source checked out on Windows and on a Mac must name the same chain.
+    A packer on Windows is a first-class route for this fork, and without this its chain differed from the shell's -- every
+    shader refused for the wrong version, black screen with music only (2026-11-25)."""
+    return open(path, 'rb').read().replace(b'\r\n', b'\n')
+
 def version():
     h = hashlib.sha256()
     for f in FILES:
-        h.update(f.encode() + b'\0' + open(os.path.join(GFX, f), 'rb').read() + b'\0')
+        h.update(f.encode() + b'\0' + _bytes(os.path.join(GFX, f)) + b'\0')
     h.update(options().encode())
     return h.hexdigest()[:12]
 
@@ -178,7 +184,7 @@ def xlate_source_sha(gfx_dir=None):   # stamped into dmsh_xlate by native_tools.
     dm_dir = gfx.parent
     h = hashlib.sha256()
     for p in xlate_source_files(gfx):
-        h.update(p.relative_to(dm_dir).as_posix().encode() + b'\0' + p.read_bytes() + b'\0')
+        h.update(p.relative_to(dm_dir).as_posix().encode() + b'\0' + _bytes(str(p)) + b'\0')
     return h.hexdigest()[:16]
 
 def header_text(v):

@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/tools/dmsh_chain.py b/dm/gfx/tools/dmsh_chain.py
 --- a/dm/gfx/tools/dmsh_chain.py
 +++ b/dm/gfx/tools/dmsh_chain.py
-@@ -77,6 +77,11 @@
+@@ -77,17 +77,28 @@
  XLATE_DIR = os.path.dirname(os.environ.get('XLATE', os.path.join(HERE, 'dmsh_xlate_bin/dmsh_xlate')))
  # spirv-cross likewise: the in-repo build (spirv_cross_bin/build.sh, a pinned upstream commit) that matches the lock file, not the one on PATH, so every Mac converts with the same build
  SPIRV_CROSS = os.environ.get('SPIRV_CROSS', os.path.join(HERE, 'spirv_cross_bin/spirv-cross'))
@@ -13,3 +13,30 @@ diff --git a/dm/gfx/tools/dmsh_chain.py b/dm/gfx/tools/dmsh_chain.py
  
  def storage_constant_mode():
      return os.environ.get('DMSH_SCONST', 'fp')
+ 
+ def options():
+     return 'debug=%s reduced=%s sconst=%s' % (os.environ.get('XLATE_DEBUG', '1') != '0', os.environ.get('XLATE_REDUCED', '1') == '1', storage_constant_mode())
++
++def _bytes(path):
++    """The file's bytes with CRLF folded to LF: the same source checked out on Windows and on a Mac must name the same chain.
++    A packer on Windows is a first-class route for this fork, and without this its chain differed from the shell's -- every
++    shader refused for the wrong version, black screen with music only (2026-11-25)."""
++    return open(path, 'rb').read().replace(b'\r\n', b'\n')
+ 
+ def version():
+     h = hashlib.sha256()
+     for f in FILES:
+-        h.update(f.encode() + b'\0' + open(os.path.join(GFX, f), 'rb').read() + b'\0')
++        h.update(f.encode() + b'\0' + _bytes(os.path.join(GFX, f)) + b'\0')
+     h.update(options().encode())
+     return h.hexdigest()[:12]
+ 
+@@ -173,7 +184,7 @@
+     dm_dir = gfx.parent
+     h = hashlib.sha256()
+     for p in xlate_source_files(gfx):
+-        h.update(p.relative_to(dm_dir).as_posix().encode() + b'\0' + p.read_bytes() + b'\0')
++        h.update(p.relative_to(dm_dir).as_posix().encode() + b'\0' + _bytes(str(p)) + b'\0')
+     return h.hexdigest()[:16]
+ 
+ def header_text(v):

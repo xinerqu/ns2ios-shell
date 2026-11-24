@@ -33,6 +33,12 @@ ROOT=${DM_ROOT:-$HOME/dm-work}; O=$ROOT/build/shell; DD=$O/dd; A=$O/app
 rm -rf "$O" && mkdir -p "$O" || die "cannot create $O"
 [ -f "../games/$GAME/game.tsv" ] || die "placeholder profile ../games/$GAME/game.tsv is missing"
 
+# The chain version this shell expects has to be this tree's. The packer computes the same value from the same sources before it
+# builds a library; a header left over from an older tree makes the shell refuse every shader for the wrong version -- black screen,
+# music only (2026-11-25: the header here had not been written since 11-10, and the base move changed the chain's tools).
+python3 gfx/tools/dmsh_chain.py --header >/dev/null || die "could not write gfx/nvn/dmsh_chain.h"
+t "chain version $(sed -n 's/^#define DMSH_CHAIN "\(.*\)"/\1/p' gfx/nvn/dmsh_chain.h)"
+
 t "generate Gen/ (host source links, empty module assembly, placeholder tables)"
 rm -rf Gen && mkdir -p Gen/dm/font Gen/Assets.xcassets || die "cannot create Gen"
 python3 tools/gen_build.py ../host Gen > Gen/dm.xcconfig || die "gen_build.py (needs make + clang from Xcode)"
