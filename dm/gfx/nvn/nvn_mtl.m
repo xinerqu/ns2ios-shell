@@ -8533,7 +8533,7 @@ static NvShader *shader_load(NSString *pc, int stage, int layer) {
     NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
     id<MTLLibrary> lib = lib_from_file(lp, &e);
     if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); shader_missing_note(pc.UTF8String); return nil; }
-    if (![j[@"chain"] isEqual:@DM_CHAIN]) { MLOG("[RED] shader %s has translation chain version %s, but this host expects %s", pc.UTF8String, [[j[@"chain"] description] UTF8String], DM_CHAIN); return nil; }
+    if (![j[@"chain"] isEqual:@(DM_CHAIN)]) { MLOG("[RED] shader %s has translation chain version %s, but this host expects %s", pc.UTF8String, [[j[@"chain"] description] UTF8String], DM_CHAIN); return nil; }
     if (layer && !j[@"entry_layer"]) { MLOG("[RED] vertex shader %s has no layer entry points", pc.UTF8String); return nil; }
     NvShader *o = [NvShader new]; o->gs_loc = o->lay_loc = -1;
     if (stage == NVN_RT_RESOURCE_STAGE && [j[@"rt"] isKindOfClass:NSDictionary.class]) o->rtMetadata = [j[@"rt"] copy];
@@ -13457,7 +13457,7 @@ static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int ze
 static MTL4MeshRenderPipelineDescriptor *pre_desc_mesh(NSString *tk, NSString *mk, NSString *fk, int zero) {
     NSDictionary *mj = pre_json(mk);
     if (!mj && pre_lib_absent(mk, @"_b.json")) return nil;
-    if (!mj || ![mj[@"chain"] isEqual:@DM_CHAIN]) return nil;
+    if (!mj || ![mj[@"chain"] isEqual:@(DM_CHAIN)]) return nil;
     NSDictionary *mst = [mj[@"mesh_stage"] isKindOfClass:[NSDictionary class]] ? mj[@"mesh_stage"] : nil;
     if (!mst || ![mst[@"kind"] isEqual:@"ms"] || [mst[@"prim"] boolValue]) return nil;
     int notask = [tk isEqualToString:@"-"];
@@ -13469,7 +13469,7 @@ static MTL4MeshRenderPipelineDescriptor *pre_desc_mesh(NSString *tk, NSString *m
         if (![mst[@"task"] boolValue]) return nil;
         NSDictionary *tj = pre_json(tk);
         if (!tj && pre_lib_absent(tk, @"_b.json")) return nil;
-        if (!tj || ![tj[@"chain"] isEqual:@DM_CHAIN]) return nil;
+        if (!tj || ![tj[@"chain"] isEqual:@(DM_CHAIN)]) return nil;
         NSDictionary *tst = [tj[@"mesh_stage"] isKindOfClass:[NSDictionary class]] ? tj[@"mesh_stage"] : nil;
         if (!tst || ![tst[@"kind"] isEqual:@"ts"]) return nil;
         oentry = tst ? (tj[@"entry"] ?: @"main0") : nil;
@@ -13493,7 +13493,7 @@ static MTL4MeshRenderPipelineDescriptor *pre_desc_mesh(NSString *tk, NSString *m
     } else {
         NSDictionary *fj = pre_json(fk);
         if (!fj && pre_lib_absent(fk, @"_b.json")) return nil;
-        if (!fj || ![fj[@"chain"] isEqual:@DM_CHAIN]) return nil;
+        if (!fj || ![fj[@"chain"] isEqual:@(DM_CHAIN)]) return nil;
         NSDictionary *fr = fj[@"raster"]; if ([fr isKindOfClass:[NSDictionary class]] && [fr[@"primitive_id"] intValue]) return nil;
         if (pre_lib_absent(fk, @"_b.metallib")) return nil;
         id<MTLLibrary> fl = lib_from_file([NSString stringWithFormat:@"%@/%@_b.metallib", g_msl_dir, fk], &e);
