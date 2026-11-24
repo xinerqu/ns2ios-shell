@@ -406,6 +406,7 @@ static void mem_init(void) {
 // and the heap it opens = pool − 64 MB − 1.75 GB virtual address memory − 1 MB = 0x5be00000, as on hardware); Metroid Dread's main has about 1.8 GB of bss, the engine's static heap, which the Switch counts as used;
 // without it the game asks for pool − 64 MB = 3.15 GB of heap
 // NROs are left out: their buffers already belong to the game's heap. Counting every offline-mapped NRO's bss made FFX/X-2's used memory exceed its pool before any LoadModule.
+static _Atomic int64_t g_alias_mapped;   // bytes mapped in the alias region (page bitmap)
 static size_t big_bss_bytes(void) { size_t n = 0; for (int i = 0; i < g_nmod; i++) if (!g_mod[i].nro && g_mod[i].patch_off < 0) n += g_mod[i].size - g_mod[i].back_len - g_mod[i].file_image_len; return n; }
 // Whether MapPhysicalMemory and GetInfo(UsedMemorySize) enforce the application pool limit:
 // explicit mem_map_limit on/off (1/0) wins; unset (-1) enforces Horizon's limit for Switch 2 (spec: Ounce),
@@ -418,7 +419,6 @@ static int mem_map_limit_on(void) {
     return cfg < 0 ? dm_sdk_ounce() : cfg != 0;
 }
 static uint64_t used_beside_heap(void) { return MEM_USED + big_bss_bytes() + (mem_map_limit_on() ? (uint64_t)atomic_load(&g_alias_mapped) : 0); }
-static _Atomic int64_t g_alias_mapped;   // bytes mapped in the alias region (page bitmap)
 // The used memory beside the heap, one figure: GetInfo's UsedMemorySize is the heap plus this, and SetHeapSize and MapPhysicalMemory charge this against the pool, as Horizon charges a
 // request against the pool less the used memory it reports. A game that asks for total − used (the SDK's nninitStartup, Age of Calamity, Monster Hunter Rise) therefore always gets it.
 // SetHeapSize charged the rewritten modules' size instead (their patch areas and key pages included), which GetInfo never reported: a game whose modules were larger than mem_used was
