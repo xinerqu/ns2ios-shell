@@ -1,7 +1,7 @@
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
-@@ -43,6 +43,29 @@
+@@ -45,6 +45,29 @@
  #include "msl_image.h"
  #include "dmsh_chain.h"   // DMSH_CHAIN: the translation chain version of the B shader library expected by this source tree, one for every game (beside this file, tools/dmsh_chain.py --header)
  #include "game_profile.h"   // game profile constants (profile id, the profile's switches)
@@ -31,7 +31,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  // Texture slot table per stage: 0-127 the combined handles (nvnCommandBufferBindTexture), 128-255 the separate texture binds (NVN_SEPTEX_SLOT0, nvn_obj.h)
  #define NTEX 256
  // The NVN driver's constant segments c0 and c2 (byte offsets, slot counts) and the binding kinds of the shader reflection have one definition, which the shader build reads too (dmsh_build.py through dmsh_abi.py)
-@@ -332,6 +355,13 @@
+@@ -340,6 +363,13 @@
      "indirect-count multi-draw", "texture readback", "texture copy t2t", "diagnostics", "snapshot ring", "upload batches", "upload slot", "encode thread drain", "uniform copy worker", "old-queue command buffer"};
  static _Atomic uint64_t g_ws_n[WS_N], g_ws_blk[WS_N], g_ws_ns[WS_N];
  static int ws_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_WAITS"); v = e && atoi(e) > 0; } return v; }
@@ -45,19 +45,19 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static inline uint64_t ws_t0(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
  static inline void ws_put(int site, uint64_t t0, int blocked) {
      atomic_fetch_add_explicit(&g_ws_n[site], 1, memory_order_relaxed);
-@@ -428,6 +458,11 @@
+@@ -438,6 +468,11 @@
  static id<MTLCommandBuffer> cl_cb(void) { id<MTLCommandBuffer> cb = [g_q commandBuffer]; res_name(cb, nil); return cb; }
  static NSHashTable *g_res_objects;
- static _Atomic unsigned g_image_heap_n, g_big_n, g_pair_n;   // g_big_n: large pools in chunks, whose buffers overlap (BIG_MIN); g_pair_n: storage pairs (pair_texture)
+ static _Atomic unsigned g_image_heap_n, g_big_n, g_pair_n, g_sparse_n;   // g_big_n: large pools in chunks, whose buffers overlap (BIG_MIN); g_pair_n: storage pairs (pair_texture); g_sparse_n: sparse virtual pools whose runs alias physical pools and replaced run buffers
 +// Which pool entries lookups reached since the last readout (one bit each, set in pool_res): a window nothing reaches again is one an eviction could take back,
 +// so this count is the number that says whether reclaiming is worth writing. Print only.
 +#define USED_MAX 8192u
 +static _Atomic uint64_t g_used[USED_MAX / 64]; static _Atomic unsigned g_used_n;
 +static _Atomic uint64_t g_up_src_b;   // bytes borrowed by up_big_src since the last readout: the uploads that made a temporary instead of using the pool's own buffer
- static inline MTL4VisibilityOptions resource_vis(void) { return MTL4VisibilityOptionDevice | (g_image_heap_n || g_big_n || g_pair_n ? MTL4VisibilityOptionResourceAlias : 0); }
- // Residency churn by call site (the power line every 300 frames, mtl_res_stats): each commit with changes is a kernel call whose cost grows with what was added or removed
- enum { RS_SITES = 16 }; static struct { int line; uint64_t n, bytes; } g_rs_site[RS_SITES]; static uint64_t g_rs_rm, g_rs_commits, g_rs_commit_ns;
-@@ -1066,7 +1101,9 @@
+ static inline MTL4VisibilityOptions resource_vis(void) { return MTL4VisibilityOptionDevice | (g_image_heap_n || g_big_n || g_pair_n || g_sparse_n ? MTL4VisibilityOptionResourceAlias : 0); }
+ void mtl_sparse_alias_delta(int delta) {
+     if (delta > 0) atomic_fetch_add(&g_sparse_n, (unsigned)delta);
+@@ -1318,7 +1353,9 @@
  // (they measured on a 17 Pro Max a 512 MB render-target pool addressed 0 times in a run, with about 530 MB more device wired memory; a 4 GB A14 was ended by the system within seconds of launch because of it).
  // So a pool is not put into the residency set when created; it is put in, and the residency set committed on the spot, the first time the GPU gets its address through mtl_addr / mtl_gpu_addr -- these are the only two ways the GPU gets pool addresses,
  // and committing on the spot is earlier than any command buffer commit that uses it. CPU-side reads of pool contents through mtl_addr trigger it too (conservative, never misses). Caller holds g_mu
@@ -67,15 +67,17 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (g_pools[i].res) return;
      res_add(g_pools[i].buf); res_commit(); g_pools[i].res = 1; g_pool_res_n++;
  }
-@@ -1074,15 +1111,31 @@
+@@ -1326,17 +1363,31 @@
  // graphics pool: the GPU has touched 1,111 MB by the first race, 326 MB of it in the last 1,500 frames; on a 16 GB Mac the driver then spent half its time wiring and unwiring (3.2 s of a 6 s Metal System
  // Trace) with 140 MB free, and frames took 100 ms and more every few frames. A pool of BIG_MIN or more therefore has no buffer of its own: a lookup gets a chunk, a zero-copy buffer over the BIG_S
  // stride holding its address and on up to the end of what it asked (rounded up to the stride, plus a stride), made when first asked for. Only what lookups reach is wired. The chunks overlap, as adjacent
 -// pools' buffers do at shared pages; GPU addresses are not contiguous across them, so a lookup must say how far it reads. One that does not know (length 1: an indirect draw's index buffer, a storage
 -// buffer whose address the game keeps or pushes) may read on to the pool's end, and takes one buffer of the whole pool, as raw global memory does, whose pool table the shader walks by itself (big_full).
 -// A guess of 64 MB past the address made a chunk of 80 to 96 MB at each stride such a lookup started in, overlapping each other and each counted whole by Metal: Trails in the Sky 1st Chapter
--// had 4,243 MB of shared buffers over its 1,507 MB pool and its command buffers failed out of memory on an M1 (issue #877)
--enum { BIG_MIN = 512u << 20, BIG_S = 16u << 20, BIG_MAX = 32 };
+-// had 4,243 MB of shared buffers over its 1,507 MB pool and its command buffers failed out of memory on an M1 (issue #877). From 256 MB: Ocarina of Time's render
+-// targets live in virtual pools over one 305 MB physical pool, which the raw pool table no longer names (hle_nvn.c tex_bytes_elsewhere); one compute shader still binds a 200 KB
+-// storage buffer at an address in it every frame, and that lookup wired all 305 MB on the iPhone 17 (docs/reference/memory.md)
+-enum { BIG_MIN = 256u << 20, BIG_S = 16u << 20, BIG_MAX = 32 };
 +// pools' buffers do at shared pages; GPU addresses are not contiguous across them, so a lookup must say how far it reads. One that does not know (length 1: an indirect draw's index buffer, a raw storage
 +// address) gets BIG_WIN past its address, this fork's window (upstream answers it with one buffer of the whole pool instead: see pool_win for why the window stays here)
 +// S2Arm's shape, not its numbers (its gal_buf.m: WIN_LEN 4 MB over WIN_STEP 2 MB, and every host mapping over 4 MB windowed rather than pinned whole): a pool of
@@ -105,7 +107,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  // A pool to put into the table: its zero-copy buffer is made first, outside g_mu (pool_new_prep; it may retry for seconds), and the entry goes in under g_mu (pool_new_put), so a change
  // of several pools can be one step for every lookup (mtl_pool_replace)
  typedef struct { const void *mem; uint64_t size; uintptr_t lo, hi, a, b; __strong id<MTLBuffer> buf; } pool_new;   // buf nil: in chunks (a large pool)
-@@ -1116,9 +1169,9 @@
+@@ -1370,9 +1421,9 @@
  static void pool_new_put(pool_new *n) {   // caller holds g_mu
      if (!n->buf && g_nbig == BIG_MAX) n->buf = pool_buf_made(n->mem, n->size, n->a, n->b);   // the chunk table filled since pool_new_prep looked
      if (!n->buf) {
@@ -117,7 +119,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          static int nl; if (nl++ < 8) MLOG("memory pool %p+%llu MB: in chunks, wired as far as lookups reach", n->mem, (unsigned long long)(n->size >> 20));
          return;
      }
-@@ -1138,7 +1191,7 @@
+@@ -1392,7 +1443,7 @@
  static void big_moved(int i) {   // caller holds g_mu: entry i has a new index
      const pool_ent *e = &g_pools[i];
      for (int k = 0; k < g_nbig; k++) { big_pool *b = &g_big[k]; if (b->mem != e->key) continue;
@@ -125,17 +127,17 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +        if (e->reach == REACH_WHOLE) b->full = i + 1; else b->chunk[(e->lo - b->a) >> BIG_IDX] = i + 1;
          return; }
  }
- // The no-copy buffer goes through deferred release (out of the residency set and unreferenced after submitted commands complete). It used to be removed only from g_keep while the residency set still held a strong reference: after the pool was freed the buffer stayed alive wrapping that guest memory,
-@@ -1157,7 +1210,7 @@
-             i--; }
-     if (bg >= 0) {
+ // Replaced pool-run ranges (mtl_pool_replace): sparse buffer-backed textures (tex_buffer / tex_linear) over the untouched part of a merged or split run must re-resolve onto the new
+@@ -1445,7 +1496,7 @@
+             if (!noted) prun_note_locked(g_big[bg].lo, g_big[bg].hi, nil);
+         }
          [gone addObjectsFromArray:g_big[bg].old];
 -        free(g_big[bg].chunk); g_big[bg] = g_big[--g_nbig]; g_pidx_ok = 0; g_plast = -1; atomic_fetch_add(&g_pool_gen, 1); atomic_fetch_sub(&g_big_n, 1);
 +        free(g_big[bg].chunk); g_big[bg] = g_big[--g_nbig]; g_pidx_ok = 0; g_plast = -1; g_bidx_ok = 0; atomic_fetch_add(&g_pool_gen, 1); atomic_fetch_sub(&g_big_n, 1);
      }
  }
  // Once out of the table and with g_pool_gen bumped, a buffer is reached only by what a submission already encoded: so with none open it waits for the last committed fence, not the
-@@ -1214,6 +1267,11 @@
+@@ -1502,6 +1553,11 @@
      qsort(g_pidx, (size_t)g_npool, sizeof *g_pidx, pidx_cmp); g_pidx_ok = 1;
  }
  static int big_new(big_pool *b, uintptr_t lo, uintptr_t hi, uintptr_t end, int reach) {   // caller holds g_mu: a new entry for [lo, end) of the pool, looked up for addresses in [lo, hi)
@@ -147,7 +149,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      id<MTLBuffer> buf = pool_buf(lo, end);
      if (!buf) { MLOG("[RED] memory pool %p: the zero-copy buffer over %#lx..%#lx was refused", b->mem, (unsigned long)lo, (unsigned long)end); return -1; }
      if (g_npool == g_cap) { g_cap = g_cap ? g_cap * 2 : 64; g_pools = realloc_or_die(g_pools, g_cap * sizeof *g_pools, "the memory pool table"); }
-@@ -1222,8 +1280,26 @@
+@@ -1510,8 +1566,26 @@
      [g_keep addObject:buf];
      return g_npool - 1;
  }
@@ -176,7 +178,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  static int big_full(big_pool *b, const char *why) {
      int n = big_new(b, b->a, b->b, b->b, REACH_WHOLE);
      if (n < 0) return -1;
-@@ -1236,13 +1312,28 @@
+@@ -1524,13 +1598,28 @@
  static int big_lookup(big_pool *b, uint64_t addr, uint64_t len) {
      if (addr + len > b->hi) return -1;
      if (b->full) return b->full - 1;
@@ -210,7 +212,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (i >= 0) {   // lengthened: what is encoded with the shorter chunk keeps it, resident, until the pool goes
          [b->old addObject:g_pools[i].buf]; [g_keep removeObject:g_pools[i].buf]; g_pools[n].res = 0; if (g_pools[i].res) g_pool_res_n--;
          g_pools[i] = g_pools[n]; g_npool--; n = i;
-@@ -1269,7 +1360,7 @@
+@@ -1557,7 +1646,7 @@
  // asked about every texture's storage and made a chunk of 80 MB and more for each stride (then 64 MB past the address), or lengthened its chunk to that, 77 of them, 6.7 GB counted
  // by Metal, in Ocarina of Time's first area load. Caller holds g_mu
  static int pool_peek(uint64_t addr) {
@@ -219,7 +221,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return pool_held(addr, 1);
  }
  // Whether [addr, addr + len) lies in a pool, with no side effect: mtl_addr makes the pool resident, for a GPU use to follow. A large pool is answered from its range, since its lookup
-@@ -1280,6 +1371,7 @@
+@@ -1568,6 +1657,7 @@
      return ok;
  }
  int mtl_addr(uint64_t addr, uint64_t len, void **buf, uint64_t *off) {
@@ -227,24 +229,25 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      const pc_ent *c = pc_get(addr, len);
      if (c) { *buf = (__bridge void *)c->buf; *off = addr - c->base; return 1; }
      int ok = 0;
-@@ -2109,8 +2201,13 @@
+@@ -2449,9 +2539,13 @@
      if (src != dst) nvn_buffer_write_ranges(dst, n, buffer_copy_note);
      pend_add(dst, n, 2); g_mdx_epoch++;
      void *sb, *db; uint64_t so, dof;
--    if (!mtl_addr(src, n, &sb, &so) || !mtl_addr(dst, n, &db, &dof))
--        MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
+-    if (!mtl_addr(src, n, &sb, &so) || !mtl_addr(dst, n, &db, &dof)) {
+-        void nvn_vpool_note(uint64_t, char *, size_t); char sn[256], dn[256]; nvn_vpool_note(src, sn, sizeof sn); nvn_vpool_note(dst, dn, sizeof dn);
+-        MDIE("buffer copy address is in no memory pool src=%#llx%s dst=%#llx%s n=%#llx", (unsigned long long)src, sn, (unsigned long long)dst, dn, (unsigned long long)n);
 +    int aok = mtl_addr(src, n, &sb, &so), valved = t_valve_refused;   // mtl_addr clears the flag, so keep both lookups' answers
 +    int dok = aok ? mtl_addr(dst, n, &db, &dof) : 0; valved |= aok && t_valve_refused;
 +    if (!aok || !dok) {
-+        if (!valved) MDIE("buffer copy address is in no memory pool src=%#llx dst=%#llx n=%#llx", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n);
++        if (!valved) { void nvn_vpool_note(uint64_t, char *, size_t); char sn[256], dn[256]; nvn_vpool_note(src, sn, sizeof sn); nvn_vpool_note(dst, dn, sizeof dn);
++            MDIE("buffer copy address is in no memory pool src=%#llx%s dst=%#llx%s n=%#llx", (unsigned long long)src, sn, (unsigned long long)dst, dn, (unsigned long long)n); }
 +        { static int once; if (!once++) MLOG("[RED] buffer copy dropped at %#llx -> %#llx (%llu bytes): the residency valve refused a window", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
 +        return;
-+    }
+     }
      if (src != dst && src < dst + n && dst < src + n) { static int once;   // Metal leaves an overlapping copy undefined; seen only in Cuphead while its pool allocator gave out overlapping blocks (hle_nvn.c zcull_size)
          if (!once++) MLOG("[RED] buffer copy with overlapping source and destination (src %#llx dst %#llx, %llu bytes): the result is undefined", (unsigned long long)src, (unsigned long long)dst, (unsigned long long)n); }
-     enc_b_copy_buffer(blit_buf(src, src + n, dst, dst + n), (__bridge id<MTLBuffer>)sb, so, (__bridge id<MTLBuffer>)db, dof, n);
-@@ -2445,7 +2542,11 @@
-     rc_write(dst,n,data,0);
+@@ -2812,7 +2906,11 @@
+     post_shadow_wb(dst, n);
      int pi = pend_add(dst, n, 1);
      void *db; uint64_t dof;
 -    if (!mtl_addr(dst, n, &db, &dof)) MDIE("uniform update target is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
@@ -256,8 +259,8 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      int defer = (enc_open() || (ubd_lazy() && !g_blit)) && g_nubd < UBD_MAX && ubd_on();
      size_t need = (n + 255u) & ~(size_t)255u;   // 256-aligned slots: a deferred update is read in place by draws as a uniform buffer
      if (!g_ubs_buf || g_ubs_off + need > g_ubs_size) {
-@@ -2473,7 +2574,11 @@
-     rc_write(dst,n,&value,4);
+@@ -2841,7 +2939,11 @@
+     post_shadow_wb(dst, n);
      pend_add(dst, n, 3); g_mdx_epoch++;
      void *db; uint64_t dof;
 -    if (!mtl_addr(dst, n, &db, &dof)) MDIE("buffer fill address is in no memory pool dst=%#llx n=%#llx", (unsigned long long)dst, (unsigned long long)n);
@@ -269,7 +272,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint8_t b0 = (uint8_t)value;
      if (value == (uint32_t)b0 * 0x01010101u) { [blit_buf(0, 0, dst, dst + n) fillBuffer:(__bridge id<MTLBuffer>)db range:NSMakeRange(dof, n) value:b0]; return; }
      enum { PAT = 64 << 10 }; static __strong id<MTLBuffer> pat; static uint32_t pat_v; static int pat_ok;
-@@ -3463,16 +3568,19 @@
+@@ -3967,16 +4069,19 @@
      return want;
  }
  
@@ -294,7 +297,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      return (uint64_t)ns;
  }
-@@ -3939,6 +4047,10 @@
+@@ -4475,6 +4580,10 @@
  static uint64_t g_up_src_made;   // source buffers made (t_upload_src)
  static id<MTLBuffer> up_big_src(uint64_t addr, uint64_t len, uint64_t *off, int may_split) {
      // Not once the raw memory table holds the whole pool (big_full): the lookup finds that buffer. Ocarina of Time's first scene made 4,664 of these in one batch, 2.1 GB counted against the working set for pages already wired
@@ -305,7 +308,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      pthread_mutex_lock(&g_mu); int k = big_of(addr), in = k >= 0 && !g_big[k].full;
      if (k < 0 && len) { int i = pool_find(addr, len); in = i >= 0 && !g_pools[i].res && !addr_meets(g_pools[i].lo, g_pools[i].hi); }
      pthread_mutex_unlock(&g_mu);
-@@ -3949,7 +4061,7 @@
+@@ -4485,7 +4594,7 @@
      if (may_split && budget && g_up_src_bytes && b - a > budget - MIN(g_up_src_bytes, budget)) { up_flush(); up_begin(); }
      id<MTLBuffer> buf = [g_dev newBufferWithBytesNoCopy:(void *)a length:b - a options:MTLResourceStorageModeShared deallocator:nil];
      if (!buf) return nil;
@@ -314,10 +317,11 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (budget) g_up_src_bytes += b - a;
      res_add(buf); [g_up_keep addObject:buf]; *off = (uint64_t)addr - a;
      return buf;
-@@ -4843,6 +4955,63 @@
+@@ -5389,6 +5498,63 @@
+         g_gws[i].taken = 1;
      }
      pthread_mutex_unlock(&g_gws_mu);
- }
++}
 +// The residency valve (S2Arm's graphics/metal/gal_buf.m res_valve_ok, which they wrote after a kernel panic of 2026-10-18): a
 +// zero-copy buffer in the residency set pins its pages wired, and taking it back out does not release them -- they go when the
 +// process ends. So the only place to stop the growth is before the buffer is made. Past the cap this answers 0, the lookup that
@@ -374,11 +378,10 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +                 (unsigned long long)k, (double)atomic_load(&g_valve_refused_b) / 1048576.0);
 +    }
 +    return ok;
-+}
+ }
  // A pool's zero-copy buffer, which the GPU writes through. One made while any of its pages is read-only drops every GPU write through it, silently, so it is made over its protected pages
  // opened (nvn_dirty_open: writable, not counted as written, protected again once it is made; issue #1591). A chunk of a large pool is made long after the pool, by when uploads and GPU writes
- // have protected pages in it; a small pool's first or last page may be a neighbour's, protected by that pool's texture
-@@ -5352,7 +5521,7 @@
+@@ -6470,7 +6636,7 @@
          }
      }
      id have = tex_get(t->serial);
@@ -387,10 +390,10 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (!packaged && !have && on_sub_thread() && tex_cpu_content(t)) { mtl_tex_cpu_written(t); packaged = 1; }   // storage the CPU wrote before its first use (tex_cpu_content)
      if (!packaged && !have && on_sub_thread() && linear_storage_ok(t)) {   // a linear texture no view on its buffer can take (iOS wants 64-byte rows; Axiom Verge's 8x8 RGBA8 linear textures have 32): uploaded, and again after CPU writes
          uint32_t pf; void *mb; uint64_t mo; size_t row;
-@@ -5553,6 +5722,34 @@
- #endif
-     MLOG("memory up to frame %llu: resident %llu MB, GPU allocated %llu MB, deferred-release queue %lu, residency set %lu, serial objects %u, memory pools %d (resident %d; peak %d / tracking table capacity %d; freed but alive %lu, %llu MB), shared textures %u (%u kept by the sharing table alone, %llu MB, %llu MB of it drawn into or shader-written, the oldest idle %llu submissions; evicted with pools %llu (serial entries that went with them %llu), on storage takeover %llu in total), texture re-uploads %llu in total, per-frame arena blocks created %llu in total (alive %llu, %llu MB; released when idle %llu, %llu MB in total), finalized textures still referenced %u (small table, %llu put in total), retired but held by a serial %u, recycled texture heaps made %llu, reused %llu, freed %llu, waiting %u (%llu MB); headroom to the system memory limit %s", frame, rss_mb, gpu, nd, nr, ns, live, pres, peak, cap, dead_n, dead_mb, ashared, au.entries, (unsigned long long)(au.bytes >> 20), (unsigned long long)(au.writable_bytes >> 20), (unsigned long long)au.oldest_idle, (unsigned long long)as.evicted, (unsigned long long)as.pool_entries, (unsigned long long)as.taken, (unsigned long long)g_pkg_reuploads, (unsigned long long)g_arena_made, (unsigned long long)g_arena_live, (unsigned long long)(g_arena_live_bytes >> 20), (unsigned long long)g_arena_freed, (unsigned long long)(g_arena_freed_bytes >> 20), nghost, (unsigned long long)ghost_puts, nwait,
-          (unsigned long long)g_rh_made, (unsigned long long)g_rh_reused, (unsigned long long)g_rh_trimmed, rh_n, (unsigned long long)(rh_bytes >> 20), avail);
+@@ -6686,6 +6852,34 @@
+         MLOG("system memory at frame %llu: free %llu MB, wired %llu MB, compressed %llu MB, file-backed %llu MB, purgeable %llu MB, of %llu MB; residency set %llu MB; %s", frame,
+              (unsigned long long)sm.free, (unsigned long long)sm.wired, (unsigned long long)sm.compressed, (unsigned long long)sm.file, (unsigned long long)sm.purgeable, (unsigned long long)sm.total,
+              (unsigned long long)(g_res ? g_res.allocatedSize >> 20 : 0), pl); }
 +    // How the residency set is spent, by kind, on every readout (res_top prints this only at the first out-of-memory error): a set that climbs by the region, with the guest's pool wrappers
 +    // in it, is the question this line answers. Which bucket grows decides which one to go after; it prints only, it never refuses anything
 +    {   unsigned long long kn[4] = {0, 0, 0, 0}, kb[4] = {0, 0, 0, 0}, pool_b = 0, used_b = 0, borrow_b = 0, chunk_b = 0, chunk_n = 0, old_n = 0, old_b = 0; unsigned used_n = 0; int npools = 0, nbig = 0;
@@ -422,7 +425,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      { void mtl_vc_stats(unsigned *, uint64_t *, uint64_t *), mtl_tb2_stats(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *); uint64_t mtl_tex_mis_count(void); unsigned vn; uint64_t vh, vm, tb, tm, tf, tc, tcb;
        mtl_vc_stats(&vn, &vh, &vm); mtl_tb2_stats(&tb, &tm, &tf, &tc, &tcb);
        MLOG("texture views by Metal texture (vc_get): %u textures hold cached views; %llu views reused, %llu made in total; texture buffers bound as 2D rows for wrapped 1D fetches %llu times, %llu made, %llu failed, %llu copied into aligned rows (%llu MB) "
-@@ -6687,11 +6884,11 @@
+@@ -7865,11 +8059,11 @@
      g_shmap_path = path;
      const char *m = getenv("DM_MSL_DIR");
      // Library directory = <DM_MSL_DIR or default cache>/b-<translation chain version>: the version comes from dm/gfx/nvn/dmsh_chain.h (tools/dmsh_chain.py), one for every game; a host built from an old source tree only accepts libraries of the old version
@@ -436,16 +439,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      // The library's stamp (inputs.tsv, written by a full dmsh_build.py run): the game and the digest of the profile inputs it was built from. The chain version is the same for every
      // game and every state of a profile's tables, so the stamp is what ties c1_full.tsv / cb_extent.tsv to these libraries: each names the inputs of the library it was made from
-@@ -6707,7 +6904,7 @@
-     NSString *cp = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"c1_full.tsv"];   // Same directory as the mapping table (Mac: dm/games/<id>; iOS: dm/ inside the App, copied along by build_ipa.sh)
-     NSString *ct = cp ? [NSString stringWithContentsOfFile:cp encoding:NSUTF8StringEncoding error:nil] : nil;
-     NSString *head = ct ? [[ct componentsSeparatedByString:@"\n"] firstObject] : nil;
--    NSString *want = [NSString stringWithFormat:@"# chain b-%s inputs %@ ", DMSH_CHAIN, st_inputs ?: @"-"];   // a library without a stamp matches no table
-+    NSString *want = [NSString stringWithFormat:@"# chain b-%s inputs %@ ", DM_CHAIN, st_inputs ?: @"-"];   // a library without a stamp matches no table
-     if (!head || ![head hasPrefix:want]) {
-         MLOG("[RED] c1_full.tsv is stale or missing (its header must name this library's chain and inputs; a full dmsh_build.py run makes it); every c1 gets its own 64 KiB");
-     } else {
-@@ -6741,7 +6938,7 @@
+@@ -7919,7 +8113,7 @@
      NvShader *geo_lean_v[5]; uint8_t geo_lean_tried;   // a geometry shader's lean kernels by input topology (looked up once)
      NvShader *geo_bg_v[5], *geo_bgv_v; uint8_t geo_bg_tried;   // its kernels by input topology (_bg<n>) and its reader (_bgv), looked up once (bit 7: the reader)
      NSMutableDictionary *geo_mesh;   // a vertex shader's mesh entries by lean kernel key (geo_mesh_fn; NSNull: none)
@@ -453,20 +447,19 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +    uint8_t up_mfx;   // a compute shader that is the game's own upscaler (DM_GAME_UPSCALER_KEYS from the shader map, or DM_NVN_UPSCALER_KEYS from dm/env.txt): 0 not decided, 1 drawn by MetalFX when DM_UPSCALER=metalfx, 2 not one or one its colour keeps (up_mfx_wanted)
      uint8_t up_color;   // such a shader's colour, from its code at load with DM_UPSCALER=metalfx (up_mfx_color; UP_COLOR_UNREAD otherwise)
      int gs_loc, lay_loc; char gs_comp, lay_comp;   // a slice-writing geometry shader (no function: the layer comes from input gs_loc.gs_comp) / a vertex shader with layer entry points writing output lay_loc.lay_comp (dmsh_build.py gs_slice, vs_layer_entry); -1 = none
-     uint64_t cbs_seen; uint32_t cbs_runs;   // the command buffer that listed this shader last, and how many have (cbs_note)
-@@ -6753,8 +6950,9 @@
+     uint8_t buf_n, buf_idx[NVN_REFL_MAXB];   // and those that read a buffer or a handle out of one (sh_buf_list), made with tex_idx
+@@ -7933,8 +8127,8 @@
      NSString *ventry; id<MTLFunction> vfn; int vfn_state;
      NSString *pentry, *wlentry, *vinentry;   // a vertex shader's entry point in its pulling library, that library's wide-line one, and its entry point in the shadow-input library, as the reflection names them (side_entry); nil: ventry's name (a layer entry point)
      id<MTLFunction> pfn, wlfn; int pfn_state, has_pull;   // wlfn: the wide-line entry of the pulling library (wlentry, dmsh_pull.py; nvn_wline.inc), nil when it has none
--    id<MTLLibrary> alib; id<MTLFunction> afn[2]; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind)
--    id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; } @end   // llib: the side library <key>_bx for logic operations, lfn: fn's entry point (a shader without the typed-output one, which holds its own) specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry points of fn and fn_d in the side library <key>_bx (alib), (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names them, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
-+    id<MTLLibrary> alib; id<MTLFunction> afn[2]; NSMutableDictionary *aufn; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind)
-+    id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; id<MTLLibrary> blib;   // 基础库 <key>_b：在没装苹果编译器的机器上打的包里，它装的本身就是源码，而且已经含 <entry>_a / <entry>_l（nometal_run.py 的 split_into_one_library），at_fn / lo_fn 找不到侧库时从这里取   // the base library <key>_b: a package made on a machine without Apple's compiler carries it as source that already holds the <entry>_a / <entry>_l too (nometal_run.py split_into_one_library), and at_fn / lo_fn take them from here when there is no side library
-+    } @end   // llib: the side library <key>_bx for logic operations, lfn: fn's entry point (a shader without the typed-output one, which holds its own) specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry points of fn and fn_d in the side library <key>_bx (alib), aufn: fn_u's specialized per integer targets (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names them, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
+-    id<MTLLibrary> alib; id<MTLFunction> afn; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind)
+-    id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; } @end   // llib: the side library <key>_bx for logic operations, lfn: fn's entry point (a shader without the typed-output one, which holds its own) specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry point of fn in the side library <key>_bx (alib), (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names it, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
++    id<MTLLibrary> alib; id<MTLFunction> afn[2]; NSMutableDictionary *aufn; int afn_state, has_alpha, has_bz;   // has_bz: its entry points read the blend weight word (bz_bind); afn: the alpha test entry points of fn / fn_d in the side library, aufn: fn_u's specialized per integer targets (at_fn)
++    id<MTLLibrary> llib; NSMutableDictionary<NSNumber *, id<MTLFunction>> *lfn; int lfn_state, has_logic; id<MTLLibrary> blib; } @end   // blib: the base library <key>_b, which in a package from a machine without Apple's compiler is source that already holds the <entry>_a / <entry>_l too (nometal_run.py split_into_one_library): at_fn / lo_fn fall back to it when there is no side library   // llib: the side library <key>_bx for logic operations, lfn: fn's entry point (a shader without the typed-output one, which holds its own) specialized per set of targets (lo_fn; lfn_state as afn_state; has_logic: the reflection names its entry points, dmsh_logic.py)   // afn: the alpha test entry point of fn in the side library <key>_bx (alib), (at_fn; afn_state 0 untried, 1 loaded, 2 failed; has_alpha: the reflection names it, dmsh_alpha.py)   // pfn: the same entry of the pulling library <key>_bp (pull_fn; has_pull: the reflection names one, dmsh_pull.py)   // vertex: the entry point loaded (by the depth mode); vfn: the same entry of the shadow-input library <key>_bv (vin_fn; state 0 untried, 1 loaded, 2 failed)
  @implementation NvShader
  - (void)dealloc { free(rf.c1); free(geo_slot); }
  @end
-@@ -6870,6 +7068,27 @@
+@@ -8054,6 +8248,27 @@
      if (!s || [g_pso_user_seen containsObject:s]) return;
      [g_pso_user_seen addObject:s]; fputs(line, f); fflush(f);
  }
@@ -494,9 +487,9 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
  // A library's name for the pipeline archive's index (arch_key): a digest of its bytes (SHA-256, first 16 bytes in hex), the same at every start and in every container. Not the file
  // it came from: Metal hands out one MTLFunction per function content, device-wide, so two shader keys whose libraries are the same bytes (Unity's sprite shaders: Cuphead's
  // c58ee1901c9eaaff, 229e46ed4370120b, bf6707736e88cca0 and 8e36438c7208b3c6 are one 23,038-byte library) share one function object, and fn4_note keeps the descriptor of whichever
-@@ -6888,6 +7107,20 @@
- // Owned data can use malloc's existing arenas when new file mappings have no gap; the tradeoff is charged memory instead of reclaimable file pages.
- // The descriptor is closed promptly too: newLibraryWithURL keeps one open per library and exceeded iOS's soft limit of 256. The digest still names the original library bytes.
+@@ -8085,6 +8300,20 @@
+     return b;
+ }
  static id<MTLLibrary> lib_from_map(msl_map f, NSError **err) {
 +    // A package made on a machine without Apple's Metal compiler carries its shaders as source in these entries
 +    // (dm/gfx/tools/nometal_run.py), and Metal builds a library from a binary only: compile the source here, through the
@@ -512,10 +505,10 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +        if (!lib && !src && err) *err = [NSError errorWithDomain:@"dm" code:1 userInfo:@{NSLocalizedDescriptionKey: @"not a compiled library and not readable source"}];
 +        return lib;
 +    }
-     NSString *tag = lib_digest(f.data, f.size);
-     dispatch_data_t d = dispatch_data_create(f.data, f.size, NULL, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-     munmap(f.base, f.base_len);
-@@ -7061,7 +7294,7 @@
+     size_t sz = f.size;
+     NSString *tag = lib_digest(f.data, sz);
+     dispatch_data_t d;
+@@ -8285,7 +8514,7 @@
      NSError *e = nil;
      NSData *jd = msl_data([NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]);
      NSDictionary *j = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
@@ -524,15 +517,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          NvShader *o = [NvShader new]; o->stage = 2; o->lay_loc = -1; strlcpy(o->key, pc.UTF8String, sizeof o->key);
          o->gs_loc = [j[@"gs_slice"][@"loc"] intValue]; o->gs_comp = [[j[@"gs_slice"][@"comp"] description] UTF8String][0];
          return o;
-@@ -7070,14 +7303,14 @@
-     NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
-     id<MTLLibrary> lib = lib_from_file(lp, &e);
-     if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); return nil; }
--    if (![j[@"chain"] isEqual:@DMSH_CHAIN]) { MLOG("[RED] shader %s has translation chain version %s, but this host expects %s", pc.UTF8String, [[j[@"chain"] description] UTF8String], DMSH_CHAIN); return nil; }
-+    if (![j[@"chain"] isEqual:[NSString stringWithUTF8String:DM_CHAIN]]) { MLOG("[RED] shader %s has translation chain version %s, but this host expects %s", pc.UTF8String, [[j[@"chain"] description] UTF8String], DM_CHAIN); return nil; }
-     if (layer && !j[@"entry_layer"]) { MLOG("[RED] vertex shader %s has no layer entry points", pc.UTF8String); return nil; }
-     NvShader *o = [NvShader new]; o->gs_loc = o->lay_loc = -1;
-     if (stage == NVN_RT_RESOURCE_STAGE && [j[@"rt"] isKindOfClass:NSDictionary.class]) o->rtMetadata = [j[@"rt"] copy];
+@@ -8301,7 +8530,7 @@
      if (stage == 0 && [j[@"layer_from"] isKindOfClass:[NSDictionary class]]) { o->lay_loc = [j[@"layer_from"][@"loc"] intValue]; o->lay_comp = [[j[@"layer_from"][@"comp"] description] UTF8String][0]; }
      char err[160];
      if (nvn_refl_from_json(j, &o->rf, err, sizeof err)) { MLOG("[RED] shader %s reflection conversion failed: %s", pc.UTF8String, err); return nil; }
@@ -541,7 +526,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          // (rf.c1 is freed by dealloc when o goes: freeing it here too was a double free, which aborted FINAL FANTASY RESONANCE at its first such shader)
          MLOG("[RED] shader %s reflection conversion failed: a texture handle the translator could not trace to one slot (profile key tex_dyn_slots off)", pc.UTF8String); return nil; }
      NSString *entry = j[@"entry"]; int ez = 0;   // ez: a vertex shader's entry is its near = 0 one
-@@ -7125,6 +7358,9 @@
+@@ -8350,6 +8579,9 @@
      if (stage == 1) o->has_alpha = [j[@"alpha"] isKindOfClass:[NSDictionary class]];
      if (stage == 1) o->has_bz = [j[@"blend_zero"] boolValue];
      if (stage == 1) o->has_logic = [j[@"logic"] isKindOfClass:[NSDictionary class]];
@@ -551,18 +536,24 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      // A function that declares function constants cannot go into a pipeline until it is specialized, even when every constant is optional. SPIRV-Cross declares one for shaders that read a
      // texel buffer (spvLinearTextureAlignmentOverride, used only through is_function_constant_defined; one of Pokémon Legends: Z-A's imgui pixel shaders, 2bd5037003980716): an empty set of
      // values keeps its default. Without it the first pipeline with that shader failed Metal's validation (`fragmentFunction main0 cannot be used to build a pipeline state`)
-@@ -9428,7 +9664,9 @@
+@@ -10897,9 +11129,13 @@
      NSError *e = nil;
      if (!fs->afn_state) {
          fs->afn_state = 2;
 -        id<MTLLibrary> lib = bx_lib(fs, &e); const char *why = lib ? NULL : "no library";
+-        if (!why) {
+-            NSString *name = [fs->fn.name stringByAppendingString:@"_a"]; id<MTLFunction> f = fn4_note([lib newFunctionWithName:name], lib, name, nil);
 +        id<MTLLibrary> lib = bx_lib(fs, &e);
 +        if (!lib && fs->blib) { lib = fs->blib; e = nil; }   // no side library: the package came from a machine without Apple's compiler, whose one library holds these entry points too (nometal_run.py)
 +        const char *why = lib ? NULL : "no library";
-         id<MTLFunction> own[2] = {fs->fn, fs->fn_d};
-         for (int i = 0; i < 2 && !why; i++) {
-             if (!own[i]) continue;
-@@ -9571,7 +9809,9 @@
++        id<MTLFunction> own[2] = {fs->fn, fs->fn_d};
++        for (int i = 0; i < 2 && !why; i++) {
++            if (!own[i]) continue;
++            NSString *name = [own[i].name stringByAppendingString:@"_a"]; id<MTLFunction> f = fn4_note([lib newFunctionWithName:name], lib, name, nil);
+             if (f && f.functionConstantsDictionary.count) f = fn_spec(lib, name, [MTLFunctionConstantValues new], &e);   // as shader_load
+             if (!f) why = "no entry point";
+             else if (!fn_args_match(fs, f)) why = "its argument buffer differs from the base library's";
+@@ -11040,7 +11276,9 @@
      NSError *e = nil; const char *why = NULL;
      if (!fs->lfn_state) {
          fs->lfn_state = 2;
@@ -573,7 +564,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
          else why = "no library";
      }
      id<MTLFunction> f = nil; NSNumber *k = @(targets & 0xff);
-@@ -11084,6 +11324,95 @@
+@@ -12739,6 +12977,95 @@
      g_pt_spec_ns += bp_now() - ts;
      return ps;
  }
@@ -666,10 +657,10 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
 +    return ps;
 +}
 +#endif
- static id<MTLRenderPipelineState> pso_build(MTLRenderPipelineDescriptor *d, int off, NSError **e) { return pso_build_ex(d, off, e, 1); }   // off: !pso_key.border of the key d was made from
- // Pipeline key: current state S + pass formats (normal pass; a merged pass additionally carries lmap / specialized function, filled in by pso_get)
- static void pso_key_fill(pso_key *k, NvShader *vs, NvShader *fs, const uint32_t cfmt[8], uint32_t dfmt, uint32_t sfmt, uint32_t samples, int lmap) {
-@@ -11421,7 +11750,7 @@
+ static id<MTLRenderPipelineState> pso_build(MTLRenderPipelineDescriptor *d, int off, NSError **e) { return pso_build_ex(d, off, e, 1); }   // off: FN_OFF_* mask (pso_off)
+ // Whether a pipeline of key k needs dm_blend0's runtime words: pure function of (k, fs, merged), so prewarmed rows keep their keys and predictions never read g_pass.cfmt
+ static int pso_blend_live(const pso_key *k, NvShader *fs, int merged) {
+@@ -13097,7 +13424,7 @@
  static MTL4RenderPipelineDescriptor *pre_desc(NSString *vk, NSString *fk, int zero) {
      NSDictionary *vj = pre_json(vk), *fj = pre_json(fk);
      if ((!vj && pre_lib_absent(vk, @"_b.json")) || (!fj && pre_lib_absent(fk, @"_b.json"))) return nil;
@@ -678,7 +669,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      if (vj[@"mesh_stage"]) return nil;   // a mesh shader's pair (shader_pairs.tsv holds them for its padding): mesh pipelines are built at the draw (nvn_geometry.inc mtk_pso), no base
      NSString *ventry = zero && vj[@"entry_z"] ? vj[@"entry_z"] : vj[@"entry"], *fentry = fj[@"entry"] ?: @"main0";
      int pull = [vj[@"pull"] isKindOfClass:[NSDictionary class]];
-@@ -11467,7 +11796,7 @@
+@@ -13214,7 +13541,7 @@
  // the same for the archive it makes offline, from the same files
  static NSString *pre_stamp(NSString *txt, int zero) {
      NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding]; uint8_t h[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(d.bytes, (CC_LONG)d.length, h);
@@ -687,10 +678,10 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
              h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
  }
  // The device's own prebuilt.tsv: that stamp, then whether the run found every library file its pairs need: "libs all", or "libs missing <file>" naming one it lacked (pre_lib_absent).
-@@ -11719,6 +12048,11 @@
+@@ -13480,6 +13807,11 @@
      else {
          MTLRenderPipelineDescriptor *d = pso_desc(&k, vs, fs, ms_fn ? ms_fn : g_pso_fsfn, g_pso_lmap != NULL);
-         ps = pso_build(d, !k.border, &e);
+         ps = pso_build(d, pso_off(&k, fs, g_pso_lmap != NULL), &e);
 +#ifdef DM_SHELL
 +        // The pass binds an integer target that this shader writes from a float output: compile the shader again with
 +        // that declaration fixed, keep the row, and use the pipeline that comes out of it (dm_shader_learn.h)
@@ -699,17 +690,8 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      }
      if (!took) {   // the draw waited (built here, made from its queued build, or waited for its running build)
          uint64_t w = bp_now() - bt - (g_pt_pred_ns - pred0); g_pw_n[why]++; g_pw_ns[why] += w;
-@@ -17018,7 +17352,7 @@
-         for (size_t y = 0; y < hb; y++) memcpy(dst + y * row, (const uint8_t *)t->mem + (y0 + y) * srow + x0, wb);
-         return;
-     }
--    if (tex_from_storage(t) || (DM_GAME_TEX_DIRTY_UPLOAD && t->mem && nvn_ft_written(t))) { read_texels_storage(t, level, layer0, r, dst, row, img); return; }
-+    if (tex_from_storage(t) || (tex_dirty_upload_on() && t->mem && nvn_ft_written(t))) { read_texels_storage(t, level, layer0, r, dst, row, img); return; }
-     // A guest thread can live indefinitely without draining its outer pool: release readback temporaries here, after the GPU and CPU copies finish.
-     // Finding: docs/reference/memory.md, GPU readback without an autorelease pool.
-     @autoreleasepool {
-@@ -18926,13 +19260,27 @@
- static up_mfx_scaler g_up_mfx[UP_MFX_SCALERS]; static int g_up_mfx_next;
+@@ -21449,13 +21781,27 @@
+ static up_mfx_scaler g_up_mfx[UP_MFX_SCALERS]; static uint64_t g_up_mfx_use;
  static uint64_t g_up_mfx_n, g_up_mfx_kept, g_up_mfx_straight[2];   // dispatches drawn by MetalFX, dispatches of a named shader left to it, of the drawn: input and output that were the game's own textures
  void mtl_up_mfx_stats(uint64_t *n, uint64_t *kept) { *n = g_up_mfx_n; *kept = g_up_mfx_kept; }
 +// The key list is compiled in (DM_GAME_UPSCALER_KEYS, game.py from the shader map); the game-free shell compiles the placeholder profile,
@@ -737,7 +719,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      return v;
  }
  // The colour a variant of the network takes and writes, from the sRGB curves in its code (their constants are immediates, whole bytes in the code). The variants differ inside a pack, so this is the shader's and not the game's:
-@@ -18986,13 +19334,13 @@
+@@ -21509,13 +21855,13 @@
      if (!part && !up_mfx_has_pow(code, n) && up_mfx_squares(code, n)) return UP_COLOR_ROOT;
      return enc32 && dec32 && !enc16 && !dec16 ? UP_COLOR_LINEAR : dec16 && !enc16 && !enc32 && !dec32 ? UP_COLOR_SRGB : UP_COLOR_KEEP;
  }
@@ -754,7 +736,7 @@ diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
      uint32_t nctl, ncode = 0; if (sd->control) nvn_ctl_lens(sd->control, &nctl, &ncode);
      cs->up_color = sd->data && ncode && ncode < (1u << 24) ? up_mfx_color((const void *)(uintptr_t)sd->data, ncode) : UP_COLOR_KEEP;
      MLOG("upscaler %s: %s", cs->key, cs->up_color == UP_COLOR_LINEAR ? "linear input and output, MetalFX in HDR mode" : cs->up_color == UP_COLOR_SRGB ? "sRGB-encoded input, linear output, MetalFX in perceptual mode" :
-@@ -19002,7 +19350,7 @@
+@@ -21525,7 +21871,7 @@
  static int up_mfx_wanted(NvShader *cs) {
      if (cs->up_mfx) return cs->up_mfx == 1;
      cs->up_mfx = 2;

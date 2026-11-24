@@ -3,7 +3,7 @@
 Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not edit by hand.  
 本页由 `dm/tools/supported_list.py` 从 `dm/games/*/game.tsv` 生成，请勿手动修改。
 
-**209 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
+**230 款游戏。** 文件名不重要——打包器从包内容识别游戏，在下表里对上 title ID 就够了。
 
 - **IPA 体积** ≈ 你的 NSP/XCI 体积 + 约 16 MB（壳本身）。游戏文件在包里是原样存放的，不再压缩。
 - **首次启动**要编译着色器：打包时只把 Switch 的着色器翻译成 Metal 源码，编译在手机上做（之后有缓存）。几秒到大作几分钟，启动时有进度页。
@@ -19,12 +19,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | 13 Sentinels: Aegis Rim (Asia) | `01008D7016438000` | 1.00 |  |
 | 13 Sentinels: Aegis Rim (Japan) | `010045C014650000` | 1.00 |  |
 | Absolum | `0100A83022A22000` | 1.1.2（也可 1.1.1） |  |
+| Ace Angler: Fishing Spirits | `01007C50132C8000` | 1.2.3 |  |
 | Ace Attorney Investigations Collection | `010005501E68C000` | 1.0.0.2 |  |
 | Advance Wars 1+2: Re-Boot Camp | `0100300012F2A000` | 1.0.0 |  |
 | AI: THE SOMNIUM FILES | `010089B00D09C000` | 1.0.1 |  |
 | AI: THE SOMNIUM FILES - nirvanA Initiative | `0100713016CCC000` | 1.0.2 |  |
 | Animal Crossing: New Horizons | `01006F8002326000` | 3.0.3 |  |
 | ANIMAL WELL | `010020D01AD24000` | 1.0.10 |  |
+| Assassin's Creed® Ⅲ Remastered | `01007F600B134000` | 1.0.0 | 60 fps |
 | ASTRAL CHAIN | `01007300020FA000` | 1.0.1 | 60 fps |
 | Atelier Ryza: Ever Darkness & the Secret Hideout DX | `0100199023B2E000` | 1.2.0 |  |
 | Baba Is You | `01002CD00A51C000` | 1.0.12 |  |
@@ -36,6 +38,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Bayonetta 2 | `01007960049A0000` | 1.2 |  |
 | Bayonetta 3 | `01004A4010FEA000` | 1.2.0 | 暂不支持 |
 | Big Brain Academy: Brain vs. Brain | `0100620012D6E000` | 1.2.0 | handheld |
+| BioShock Remastered | `0100AD10102B2000` | 1.0.2 |  |
 | Blasphemous | `0100698009C6E000` | 1.0.8 |  |
 | Blasphemous 2 | `010040801A4C8000` | 1.0.8 |  |
 | Bloodstained: Curse of the Moon | `01004B800AF5A000` | 1.1.1 |  |
@@ -43,8 +46,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Bloodstained: Ritual of the Night | `0100BF500207C000` | 1.60 | 60 fps |
 | Borderlands: Game of the Year Edition | `010064800F66A000` | 1.0.2 | 60 fps |
 | Brain Memory Training Academy | `0100F5D01DA3A000` | 1.0.0 |  |
+| BRAVELY DEFAULT Ⅱ | `01006DC010326000` | 1.0.0 | 60 fps |
 | Burnout Paradise Remastered | `0100DBF01000A000` | 1.0.0 |  |
 | Captain Toad: Treasure Tracker | `01009BF0072D4000` | 1.4.2 | handheld |
+| CAPTAIN TSUBASA 2: WORLD FIGHTERS | `01009720213B0000` | 1.0.6 | 60 fps |
 | Castlevania: Belmont's Curse | `0100BA4026E94000` | 1.1.0 |  |
 | Catherine: Full Body | `0100BF00112C0000` | 1.0.1a |  |
 | Celeste | `01002B30028F6000` | 1.4.1.1 |  |
@@ -52,12 +57,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Cozy Land | `0100777022394000` | 1.0.0 |  |
 | Cult of the Lamb | `01002E7016C46000` | 1.5.28 |  |
 | Cuphead | `0100A5C00D162000` | 1.3.7 |  |
+| Cytus α | `010063100B2C2000` | 1.0.6 | handheld |
 | DARK SOULS: REMASTERED | `01004AB00A260000` | 1.0.3 |  |
 | DAVE THE DIVER | `010097F018538000` | v1.0.6.1267 |  |
 | Dead Cells | `0100646009FBE000` | 1.25.0 |  |
 | Diablo II: Resurrected | `0100726014352000` | 1.0.34.0 |  |
 | Diablo III: Eternal Collection | `01001B300B9BE000` | 2.7.7.92380 |  |
 | Digimon Story Cyber Sleuth: Complete Edition | `010014E00DB56000` | 1.0.3 |  |
+| Digimon Story Time Stranger | `010062E01FE0C000` | 1.2.2 |  |
 | Divinity: Original Sin 2 - Definitive Edition | `010027400CDC6000` | 1.0.12 | 60 fps |
 | Donkey Kong Bananza | `040074A01BF12000` | v458752 |  |
 | Donkey Kong Country Returns HD | `01009D901BC56000` | 1.1.0 |  |
@@ -71,8 +78,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | DRAGON QUEST VII Reimagined | `0100A9D01C446000` | 1.2.0 | 60 fps |
 | DRAGON QUEST XI S: Echoes of an Elusive Age – Definitive Edition | `01006C300E9F0000` | 1.0.4 | 60 fps · 暂不支持 |
 | EA SPORTS FC 27 | `0100C49025D3E000` | 1.8d.310c | 60 fps |
+| Factorio | `01004200189F4000` | 2.0.76 |  |
 | Farming Simulator 26: Nintendo Switch Edition | `0100D440269E8000` | 1.0.1.0 |  |
 | Fast Fusion | `040041E0212AE000` | v262144 |  |
+| Fate/hollow ataraxia REMASTERED | `010070E022546000` | 1.0.2 b723 |  |
 | FIFA 23 Legacy Edition | `01001C8016B4E000` | 1.0.3（也可 1.0.0） |  |
 | FINAL FANTASY CRYSTAL CHRONICLES Remastered Edition | `0100CE4010AAC000` | 1.0.3 |  |
 | FINAL FANTASY RESONANCE | `0100606026F12000` | 1.0.1 | 60 fps · 暂不支持 |
@@ -80,19 +89,22 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | FINAL FANTASY TACTICS - The Ivalice Chronicles | `010038B015560000` | 1.4.0 |  |
 | FINAL FANTASY V | `0100AA201415C000` | 1.2.0_5 |  |
 | FINAL FANTASY VI | `0100AA001415E000` | 1.2.1_5 |  |
+| FINAL FANTASY VIII Remastered | `01008B900DC0A000` | 1.0.1_5 |  |
 | FINAL FANTASY X/X-2 HD Remaster | `0100BC300CB48000` | 1.0.0 |  |
 | FINAL FANTASY XII THE ZODIAC AGE | `0100EB100AB42000` | 1.1.0 |  |
 | Fire Emblem Engage | `0100A6301214E000` | 2.0.0 | 60 fps |
 | Fire Emblem Fortune's Weave | `04007EF01F8AE000` | v131072 | 60 fps |
 | Fire Emblem: Three Houses | `010055D009F78000` | 1.2.0 |  |
 | Ghost Trick: Phantom Detective | `010029B018432000` | 1.0.0 |  |
+| Guacamelee! 2 | `01007E100456C000` | 1.0.4 |  |
 | Hades | `0100535012974000` | 1.0.38233 |  |
 | Hades II | `0100A00019DE0000` | 0.0.126424（也可 1.0.141667） |  |
-| Hollow Knight | `0100633007D48000` | 1.5.12620 |  |
-| Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 |  |
+| Hollow Knight | `0100633007D48000` | 1.5.12620 | 60 fps |
+| Hollow Knight: Silksong | `010013C00E930000` | 1.0.30000 | 60 fps |
 | Hyrule Warriors: Age of Calamity | `01002B00111A2000` | 1.3.0 | 60 fps |
 | Hyrule Warriors: Age of Imprisonment | `04003F40232DE000` | v196608 |  |
 | Hyrule Warriors: Definitive Edition | `0100AE00096EA000` | 1.0.1 |  |
+| It Takes Two | `010092A0172E4000` | 1.0.3 | 60 fps |
 | Kirby Air Riders | `040077201BE50000` | 1.3.3 |  |
 | Kirby and the Forgotten Land | `01004D300C5AE000` | 1.1.0 |  |
 | Kirby Star Allies | `01007E3006DDA000` | 4.0.0a |  |
@@ -101,15 +113,16 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | LEGO® Star Wars™: The Skywalker Saga | `010042D00D900000` | 1.10.0 | 60 fps |
 | Luigi's Mansion 3 | `0100DCA0064A6000` | 1.4.0 | 60 fps |
 | Mario & Luigi: Brothership | `01006D0017F7A000` | 1.0.0 | 60 fps |
-| Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 |  |
-| Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 |  |
+| Mario + Rabbids Kingdom Battle | `010067300059A000` | 1.9.589692 | 60 fps |
+| Mario + Rabbids® Sparks of Hope | `0100317013770000` | 1.6.2225577 | 60 fps |
 | Mario Golf: Super Rush | `0100C9C00E25C000` | 4.0.0 |  |
 | Mario Kart 8 Deluxe | `0100152000022000` | 4.0.1（也可 4.0.0） |  |
-| Mario Kart World | `0400C3F00006E000` | v0 | 60 fps |
+| Mario Kart World | `0400C3F00006E000` | v0（也可 1.8.0） | 60 fps |
 | Mario Party Superstars | `01006FE013472000` | 1.1.1 |  |
 | Mario Tennis Fever | `0400D4201C6EA000` | v327680 |  |
 | Mario vs. Donkey Kong | `0100B99019412000` | 1.0.1 |  |
 | Mega Man Legacy Collection | `01002D4007AE0000` | 1.0.3 |  |
+| METAL GEAR SOLID: Peace Walker - Master Collection Version | `010099801C4FA000` | 1.3.0 | 暂不支持（多程序合集） |
 | Metro 2033 Redux | `0100D4900E82C000` | 1.0.0 |  |
 | Metroid Dread | `010093801237C000` | 2.1.0 |  |
 | Metroid Prime 4: Beyond | `010019A01E2F2000` | 1.1.0 |  |
@@ -118,11 +131,14 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Minecraft for Nintendo Switch | `0100D71004694000` | 1.26.62 |  |
 | Monster Hunter Rise | `0100B04011742000` | 16.0.2 | 60 fps |
 | Monster Train 2 | `010051701FB46000` | 1.1.1 |  |
+| Mortal Kombat 11 | `0100F2200C984000` | 1.0.26 |  |
 | Need For Speed™ Hot Pursuit Remastered | `010029B0118E8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `010056B015FE8000` | 1.0.3 | 60 fps |
 | NieR:Automata The End of YoRHa Edition | `0100B8E016F76000` | 1.0.3 | 60 fps |
 | Nintendo Switch 2 Welcome Tour | `040057C02159A000` | ? |  |
 | Nintendo Switch Sports Resort | `04008E001F098000` | ? |  |
+| Oceanhorn | `01007D7001D0E000` | 1.0.1 |  |
+| Oceanhorn 2: Knights of the Lost Realm | `01006CB010840000` | 1.1 | 60 fps |
 | OCTOPATH TRAVELER | `010057D006492000` | 1.0.5 | 60 fps |
 | OCTOPATH TRAVELER 0 | `01005270232F2000` | 1.0.5 | 60 fps · 暂不支持 |
 | OCTOPATH TRAVELER II | `0100A3501946E000` | 1.1.1 | 60 fps |
@@ -179,6 +195,7 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | SteamWorld Heist II | `010089C01E9CA000` | 1.5.1 |  |
 | SteamWorld Heist: Ultimate Edition | `010016100A186000` | 2.2.1 |  |
 | STEINS;GATE RE:BOOT | `01008BC024FDE000` | 1.0.3 |  |
+| STORY OF SEASONS: Friends of Mineral Town | `0100ED400EEC2000` | 1.0.5 |  |
 | Streets of Rage 4 | `0100EC9010258000` | 1.0.9 |  |
 | Subnautica | `0100429011144000` | 1.23.83358 |  |
 | Subnautica: Below Zero | `010014C011146000` | 1.23.55063 |  |
@@ -197,8 +214,10 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | Super Smash Bros. Ultimate | `01006A800016E000` | 13.0.5 |  |
 | Taiko Risshiden V DX | `0100346017304000` | 1.1.1 | handheld |
 | Team Sonic Racing | `010092B0091D0000` | 1.0.3 |  |
+| Teenage Mutant Ninja Turtles: Shredder's Revenge | `0100FE701475A000` | 1.0.9 |  |
 | The Binding of Isaac: Rebirth | `01009BC00C38A000` | 1.0 |  |
 | The Great Ace Attorney Chronicles | `010036E00FB20000` | 1.0.0 |  |
+| The Legend of Heroes: Trails into Reverie | `01008CB0156BC000` | 1.0.4 |  |
 | The Legend of Zelda: Breath of the Wild | `01007EF00011E000` | 1.9.0 | 60 fps |
 | The Legend of Zelda: Echoes of Wisdom | `01008CF01BAAC000` | 1.1.0 |  |
 | The Legend of Zelda: Link's Awakening | `01006BB00C6F0000` | 1.1.0 |  |
@@ -212,11 +231,13 @@ Generated from `dm/games/*/game.tsv` by `dm/tools/supported_list.py` — do not 
 | TSUKIHIME A piece of blue glass moon | `010057A01E4D4000` | 1.0.2 |  |
 | TUNIC | `0100DA801624E000` | 1.0.3 | 60 fps |
 | Twelve Minutes | `0100CD701434C000` | 1.0.1 |  |
+| ULTRA STREET FIGHTER II: The Final Challengers | `01007330027EE000` | 1.1.1 |  |
 | Unicorn Overlord | `010069401ADB8000` | 1.05 |  |
 | Unicorn Overlord (Asia) | `010054B01AD92000` | 1.05 |  |
 | UnMetal | `01008F4014A74000` | 1.2.0 |  |
 | Warhammer Survivors | `0100CAA026246000` | 1.0.0 |  |
 | Well Dweller | `0100217023F6C000` | 1.0.0 |  |
+| XCOM 2 Collection | `0100D0B00FB74000` | 1.0.3 | 暂不支持（多程序合集） |
 | Xenoblade Chronicles 2 | `0100E95004038000` | 2.1.0 |  |
 | Xenoblade Chronicles 3 | `010074F013262000` | 2.2.1 |  |
 | Xenoblade Chronicles X: Definitive Edition | `0100453019AA8000` | 1.0.1 | 60 fps |

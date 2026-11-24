@@ -27,6 +27,7 @@ int dm_shell_modules(const char **out, int max);   // loader.c: the module names
 int dm_shader_prep_begin(void (^done)(void));      // dm_shader_prep.m: compile source-form shaders once, before the host starts
 #endif
 UIViewController *front_ios_root(void);
+UIInterfaceOrientationMask front_ios_app_orientations(void);   // front_ios.m: the orientations Rotation allows (DM_ROTATION)
 void front_ios_focus_event(int ev);
 
 static char *g_argv[16]; static int g_argc;   // 2 fixed + the Guest library's module names (a shell has no module list compiled in)
@@ -411,6 +412,7 @@ static int boot_env(void) {
     // The panel is the only switch there is on a phone, so it owns every entry -- including a "{Name}" master, which
     // Atmosphère always runs: with no menu to turn one off, a file whose master breaks the game would be unusable.
     setenv("DM_CHEATS_PANEL", "1", 1);
+    setenv("DM_ALBUM_DIR", [doc stringByAppendingPathComponent:@"album"].fileSystemRepresentation, 0);   // local album screenshots (hle_album.c), visible in Files; created lazily on first save
     setenv("DM_SYSTEM_DIR", [doc stringByAppendingPathComponent:@"system"].fileSystemRepresentation, 0);
     setenv("DM_GUEST_FILE_DIR", NSTemporaryDirectory().fileSystemRepresentation, 0);   // DM_GUEST_FILE (hle_svc.c) keeps the guest's memory in files there
     setenv("DM_FONT_DIR", [[res stringByAppendingPathComponent:@"dm"] stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
@@ -505,6 +507,8 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 - (UISceneConfiguration *)application:(UIApplication *)a configurationForConnectingSceneSession:(UISceneSession *)s options:(UISceneConnectionOptions *)o {
     return [[UISceneConfiguration alloc] initWithName:[s.role isEqualToString:UIWindowSceneSessionRoleExternalDisplayNonInteractive] ? @"TV" : @"Default" sessionRole:s.role];   // a TV (front_ios.m DmTVSceneDelegate)
 }
+// Replaces the Info.plist orientation list: Rotation (DM_ROTATION) can turn a phone upright, auto keeps the list (front_ios.m front_ios_app_orientations)
+- (UIInterfaceOrientationMask)application:(UIApplication *)a supportedInterfaceOrientationsForWindow:(UIWindow *)w { return front_ios_app_orientations(); }
 @end
 
 // Scene lifecycle: create the window + hand focus events to front_ios.m

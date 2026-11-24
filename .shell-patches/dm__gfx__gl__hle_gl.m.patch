@@ -1,15 +1,15 @@
 diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
 --- a/dm/gfx/gl/hle_gl.m
 +++ b/dm/gfx/gl/hle_gl.m
-@@ -147,6 +147,7 @@
- static id<MTLTexture> g_tex0, g_cube0, g_tex3d0, g_arr0;   // bound where a sampler's unit has no texture (or an unusable one): opaque black, as GL samples an incomplete texture
+@@ -152,6 +152,7 @@
+ static id<MTLTexture> g_tex0, g_cube0, g_tex3d0, g_arr0, g_uint0, g_tbuf0;   // opaque black for incomplete textures
  static id<MTLSamplerState> g_samp0;
  static id<MTLLibrary> g_lib, g_util;             // the game's shaders; the layer's own (clears)
 +static NSString *g_srcdir;                       // gl/src when the package holds the shaders as source (no Apple compiler on the packing computer)
  static const char *g_capture_dir, *g_capture_compiler;
  static uint64_t g_serial = 1;                    // serial of the command buffer being recorded (g_cb); committed ones have lower serials
  static _Atomic uint64_t g_done;                  // highest serial whose command buffer has completed
-@@ -244,10 +245,57 @@
+@@ -253,10 +254,57 @@
      }
      fclose(f);
      qsort(g_sh, g_nsh, sizeof *g_sh, sh_cmp);
@@ -68,7 +68,7 @@ diff --git a/dm/gfx/gl/hle_gl.m b/dm/gfx/gl/hle_gl.m
  
  
  static void dev_init_once(void) {
-@@ -2787,12 +2835,19 @@
+@@ -3278,12 +3326,19 @@
      int frag = s->type == GL_FRAGMENT_SHADER;
      s->si = sh_find(s->key, frag);
      @autoreleasepool {

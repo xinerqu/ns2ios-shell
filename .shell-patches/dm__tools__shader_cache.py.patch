@@ -36,12 +36,12 @@ diff --git a/dm/tools/shader_cache.py b/dm/tools/shader_cache.py
  DBMOVED = 1032   # SQLITE_READONLY_DBMOVED, an error's sqlite_errorcode (Python 3.11+)
  READ_ONLY = None   # set only by --run: the harness supplies this module to older SQLite-based builders too
  GENERATION = re.compile(r'cas-([0-9a-f]{12})\.db')   # a chain's file in a cache folder
-@@ -93,7 +112,7 @@
-         if data is None: return False
+@@ -94,7 +113,7 @@
          tmp = f'{path}.tmp-{os.getpid()}-{threading.get_ident()}'
-         with open(tmp, 'wb') as f: f.write(data)
--        os.replace(tmp, path)
-+        _replace(tmp, path)
-         return True
- 
- 
+         try:
+             with open(tmp, 'wb') as f: f.write(data)
+-            os.replace(tmp, path)
++            _replace(tmp, path)
+         except BaseException:
+             try: os.unlink(tmp)
+             except OSError: pass

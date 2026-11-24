@@ -1,9 +1,11 @@
 """Provisional memory layouts must leave room for the game's initial heap."""
 import hashlib
 from pathlib import Path
+import struct
 import sys
 import tempfile
 import unittest
+import zlib
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[3]
@@ -174,6 +176,10 @@ class GlslSources(unittest.TestCase):
         s = pg.shader_sources({'eglCreateWindowSurface'}, 0, [], 0, 0, gl_names=1, gl_src=2, gl_files=6)
         self.assertEqual(s['graphics'][0], 'gl'); self.assertFalse(s['gl_capture'][0])
 
+    def test_embedded_main_glsl_alone_still_enables_gl_capture(self):   # embedded movie/utility shaders in main must not suppress capture when RomFS has no standalone shaders
+        s = pg.shader_sources({'eglCreateWindowSurface'}, 0, [], 0, 0, gl_names=1, gl_src=3, gl_files=0)
+        self.assertEqual(s['graphics'][0], 'gl'); self.assertTrue(s['gl_capture'][0])
+
 
 class Npdm(unittest.TestCase):
     def npdm(self, flags):
@@ -337,6 +343,137 @@ class AddressRegions(unittest.TestCase):
 
     def test_no_table(self):
         self.assertEqual(pg.region_findings('', 0x118000000), [])
+
+
+class Ue3OodlePackages(unittest.TestCase):
+    @staticmethod
+    def pkg(blocks, block=0x40, wide=False):
+        raw = sum(u for _, u in blocks)
+        comp = sum(len(s) for s, _ in blocks)
+        head = (pg.UE3_TAG + bytes(4) if wide else pg.UE3_TAG) + struct.pack('<QQQ' if wide else '<III', block, comp, raw)
+        table = b''.join(struct.pack('<QQ' if wide else '<II', len(s), u) for s, u in blocks)
+        return pg.UE3_TAG + struct.pack('<HH', 864, 0x80e3) + b'summary.' + head + table + b''.join(s for s, _ in blocks)
+
+    def test_detects_narrow_and_wide_oodle_chunks(self):
+        for wide in (False, True):
+            with self.subTest(wide=wide):
+                self.assertTrue(pg.ue3_oodle_package(self.pkg([(b'\x8c\x0a' + b'x' * 10, 0x40), (b'\x8c\x0a' + b'y' * 10, 0x20)], wide=wide)))
+                z = zlib.compressobj(wbits=10)
+                zblk = z.compress(b'TweakvarMap' * 8) + z.flush()
+                self.assertFalse(pg.ue3_oodle_package(self.pkg([(zblk, 88)], block=512, wide=wide)))
+                # A stored uncompressed block whose first byte happens to be 0x8c is not Oodle.
+                self.assertFalse(pg.ue3_oodle_package(self.pkg([(b'\x8c' + b'raw' * 5, 16)], wide=wide)))
+
+    def test_rejects_non_ue3_and_truncated_headers(self):
+        self.assertFalse(pg.ue3_oodle_package(pg.UE3_TAG + b'\0'))
+        self.assertFalse(pg.ue3_oodle_package(pg.UE3_TAG + struct.pack('<i', -7)))
+        self.assertFalse(pg.ue3_oodle_package(pg.UE3_TAG + struct.pack('<HH', 864, 0) + pg.UE3_TAG + bytes(4) + struct.pack('<QQQ', 0, 0, 0)))
+        self.assertFalse(pg.ue3_oodle_package(pg.UE3_TAG + struct.pack('<HH', 864, 0) + pg.UE3_TAG + bytes(4) + struct.pack('<QQQ', 0x40, 0, 0)))
+        wide = self.pkg([(b'\x8c\x0a' + b'x' * 10, 0x40)], wide=True)
+        self.assertFalse(pg.ue3_oodle_package(wide[:28]))
+
+
+class ManifestProvenance(unittest.TestCase):
+    """Multi-program NUP manifests tag sibling rows in an optional fourth column: combined inventory stays whole, while biggest (romfs_marker) stays in the packed program."""
+    def test_sibling_rows_contribute_to_inventory_but_not_biggest(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            exefs = root / 'ExeFS'; exefs.mkdir()
+            manifest = root / 'romfs_manifest.tsv'
+            manifest.write_text(
+                '# path\tbytes\tfirst 32 bytes (hex)\n'
+                f'/dummy.bin\t5\t{b"12345".hex()}\n'
+                f'/sound/jp.pck\t916455424\t{b"AKPK".hex()}\tprogram:0\n'
+            )
+            self.assertEqual(list(pg.romfs_files(manifest)), [('/dummy.bin', 5, b'12345'), ('/sound/jp.pck', 916455424, b'AKPK')])
+            rom = pg.facts_of(exefs, manifest)['romfs']
+            self.assertEqual((rom['n'], rom['bytes']), (2, 916455429))
+            self.assertEqual(rom['mags']['Wwise pck'], 1)
+            self.assertEqual(rom['dirs']['sound'], 1)
+            self.assertEqual(rom['biggest'], (5, 'dummy.bin'))
+
+            manifest.write_text(f'# path\tbytes\tfirst 32 bytes (hex)\n/sound/jp.pck\t916455424\t{b"AKPK".hex()}\tprogram:0\n')
+            rom = pg.facts_of(exefs, manifest)['romfs']
+            self.assertEqual((rom['n'], rom['bytes'], rom['biggest']), (1, 916455424, (0, '')))
+
+
+class DecoderSources(unittest.TestCase):
+    """decoder_sources / decoder_archives must detect every Oodle/LZ5 archive format identically across directory- and .img-backed roots, and ignore LZO1X Scimitar v27."""
+
+    @staticmethod
+    def _forge(ver):
+        return b'scimitar\0' + struct.pack('<I', ver) + bytes(16)
+
+    @staticmethod
+    def _pkz(names):
+        return struct.pack('<4sIIIIIII', b'pkzl', 0, 0, 0, 1, 0x20, len(names), 0) + bytes(0x20) + names
+
+    @staticmethod
+    def _gfpak(comp):
+        return struct.pack('<8sIIIIQ', b'GFLXPACK', 0, 0, 1, 0, 0x20) + struct.pack('<HH20s', 0, comp, b'')
+
+    @staticmethod
+    def _ue_v4_pak():
+        return b'\0' + struct.pack('<IIQQ', 0x5A6F12E1, 4, 0, 0) + bytes(20)
+
+    def _roots(self, files):
+        sys.path.insert(0, str(REPO / 'dm/tools'))
+        import romfs_image
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / 'dir'
+        root.mkdir()
+        for rel, data in files.items():
+            p = root / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        img = Path(tmp.name) / '1.img'
+        romfs_image.pack(root, img)
+        return (('dir', root), ('img', img))
+
+    def test_forge_oodle_versions_vs_lzo_and_invalid_across_dir_and_image(self):
+        for ver in (25, 28, 31):
+            for kind, root in self._roots({'ACB/DataNX_extra.forge': self._forge(ver)}):
+                with self.subTest(ver=ver, kind=kind):
+                    got = pg.decoder_sources([root])
+                    self.assertTrue(got['oodle_packs'][0], got)
+                    self.assertIn('Anvil forge(s)', got['oodle_packs'][1])
+                    self.assertFalse(got['ue_legacy'][0])
+        for label, data in (('v27-lzo', self._forge(27)), ('unknown-ver', self._forge(99)), ('bad-magic', b'notforge' + bytes(16)), ('short', b'scimitar\0')):
+            for kind, root in self._roots({'AC3/DataNX.forge': data}):
+                with self.subTest(label=label, kind=kind):
+                    got = pg.decoder_sources([root])
+                    self.assertFalse(got['oodle_packs'][0], got)
+                    self.assertFalse(got['ue_legacy'][0])
+
+    def test_other_decoder_formats_across_dir_and_image(self):
+        ue3 = Ue3OodlePackages.pkg([(b'\x8c\x0a' + b'x' * 10, 0x40)], wide=False)
+        cases = (
+            ('trinity', {'arc/data.trpfs': b'ONEPACK\0' + bytes(16)}, 'oodle_packs', 'Trinity pack'),
+            ('pkz-oodle', {'data/a.pkz': self._pkz(b'OodleKraken\0')}, 'oodle_packs', 'PlatinumGames PKZ'),
+            ('gfpak-oodle', {'data/a.gfpak': self._gfpak(3)}, 'oodle_packs', 'GFPAK'),
+            ('ue3-oodle', {'cooked/shaders.upk': ue3}, 'oodle_packs', 'Unreal Engine 3'),
+            ('frostbite', {'Data/layout.toc': bytes.fromhex('00d1ce01') + bytes(16)}, 'oodle_packs', 'Frostbite'),
+            ('ue-v4-legacy', {'Paks/game.pak': self._ue_v4_pak()}, 'ue_legacy', 'Unreal pak'),
+        )
+        for label, files, key, snippet in cases:
+            for kind, root in self._roots(files):
+                with self.subTest(label=label, kind=kind):
+                    got = pg.decoder_sources([root])
+                    self.assertTrue(got[key][0], got)
+                    self.assertIn(snippet, got[key][1])
+        for label, files in (('pkz-zstd', {'data/a.pkz': self._pkz(b'ZStandard\0')}), ('gfpak-lz4', {'data/a.gfpak': self._gfpak(2)})):
+            for kind, root in self._roots(files):
+                with self.subTest(label=label, kind=kind):
+                    got = pg.decoder_sources([root])
+                    self.assertFalse(got['oodle_packs'][0], got)
+                    self.assertFalse(got['ue_legacy'][0])
+
+    def test_multiple_roots_combine_directory_and_image(self):
+        (_, empty_dir), (_, empty_img) = self._roots({'placeholder.txt': b'ok'})
+        (_, forge_dir), (_, forge_img) = self._roots({'ACB/a.forge': self._forge(25)})
+        counts = pg.decoder_archives([empty_dir, empty_img, forge_dir, forge_img])
+        self.assertEqual(counts['anvil_forges'], 2)
 
 
 if __name__ == '__main__':

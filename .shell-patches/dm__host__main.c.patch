@@ -4,7 +4,7 @@ diff --git a/dm/host/main.c b/dm/host/main.c
 @@ -129,13 +129,17 @@
      { void dm_term_install(void); dm_term_install(); }   // SIGTERM graceful exit (hle_lifecycle.c)
      { void crash_set_dump_hook(void (*)(void)); void svc_thread_dump(void); crash_set_dump_hook(svc_thread_dump); }   // Dump guest thread state on a crash
-     const char *names[argc + DM_GAME_NMOD]; int n = 0;
+     const char *names[argc + DM_GAME_NMOD + 8]; int n = 0;
 +    // The game profile's game_args also come from the environment: the game-free shell is compiled against the placeholder profile, whose
 +    // string is empty, so a game whose profile sets arguments (Octopath Traveler 0: Unreal's -SwitchVirtualAddressSpaceSize=) gets them
 +    // only from what the packer wrote into dm/env.txt (main.m exports it; the value is passed as it stands, '=' included).
@@ -21,4 +21,4 @@ diff --git a/dm/host/main.c b/dm/host/main.c
 +        LOG("game arguments from the game profile: %s", profile_args);
      }
      if (!n) n = profile_modules(argv[1], names);
-     load_modules(argv[1], names, n);
+     n = dm_exl_mod_modules(names, n, 8);   // prepared code plugins of enabled mods (DM_ROMFS_OVERLAY, Mac only)

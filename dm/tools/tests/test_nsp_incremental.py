@@ -368,11 +368,14 @@ class DeriveProfile(Base):
         with (self.src / 'game.tsv').open('a') as f: f.write('mem_alias\t0x80000000\n')   # every profile has one (the host is built with it)
         self.derive(); patched = self.tmp / 'work/patched_v65536'
         logs = self.tmp / 'logs'; logs.mkdir()
-        def boot(*args): (logs / 'region_check.log').write_text('>>> nnMain\n'); (logs / 'regions.tsv').write_text('# table\n'); return 0
+        def boot(host, patched_dir, henv, *args):
+            self.assertNotIn('DM_ALIAS_SIZE', henv)
+            self.assertEqual(henv.get('DM_KEEP_ALIAS_CUTS'), '1')
+            (logs / 'region_check.log').write_text('>>> nnMain\n'); (logs / 'regions.tsv').write_text('# table\n'); return 0
         def check(key):
             patched.with_name(patched.name + '.key').parent.mkdir(parents=True, exist_ok=True); patched.with_name(patched.name + '.key').write_text(key + '\n')
             with mock.patch.object(nsp, 'build_mac_host'), mock.patch.object(nsp, 'boot_mac', side_effect=boot):
-                return nsp.region_check(REPO, self.ex, patched, self.tmp / 'work', {}, logs, game.Game(self.pdir))
+                return nsp.region_check(REPO, self.ex, patched, self.tmp / 'work', {'DM_ALIAS_SIZE': '0x118000000'}, logs, game.Game(self.pdir))
         g = check('a' * 64)
         self.assertTrue(nsp.region_checked(g, patched))
         self.derive(); self.assertTrue(nsp.region_checked(game.Game(self.pdir), patched))   # the derivation's inputs are unchanged: its stamp stays
@@ -600,6 +603,12 @@ class ComputeReaderAdditions(Base):
         self.assertFalse(self.check())
         self.assertTrue(self.check(dict(self.new, **{'pso_pairs.tsv': f'{self.V}\t{self.P}\n'})))
 
+    def test_registered_geometry_pairs_cannot_disappear(self):   # geo_pairs.tsv: a lost pair would lose its mesh library
+        G = 'e' * 16
+        (self.src / 'geo_pairs.tsv').write_text(f'{self.V}\t{G}\n')
+        self.assertFalse(self.check(dict(self.new, **{'geo_pairs.tsv': '# none\n'})))
+        self.assertTrue(self.check(dict(self.new, **{'geo_pairs.tsv': f'{self.V}\t{G}\n'})))
+
 
 class SplitShaders(Base):
     NAMES = ('shader_map.tsv', 'shader_facts.tsv', 'shader_pairs.tsv', 'pso_pairs.tsv')
@@ -616,9 +625,13 @@ class SplitShaders(Base):
     def split(self, cmd, log, env=None, cwd=None, on_line=None):   # shader_split.py: the package and the four tables, deterministic for the same rows
         self.splits += 1; self.last_cmd = cmd; out = Path(cmd[4]); out.mkdir(parents=True); (out / 'main.bin').write_bytes(self.rows.encode())
         for n, t in zip(self.NAMES, cmd[5:]): Path(t).write_text(self.table(n))
+        Path(cmd[7]).with_name('geo_pairs.tsv').write_text(self.table('geo_pairs.tsv'))   # written beside shader_pairs.tsv
+        Path(cmd[7]).with_name('mesh_pairs.tsv').write_text(self.table('mesh_pairs.tsv'))
         Path(log).write_text(self.log)
 
-    def table(self, n): return self.tables[n] if hasattr(self, 'tables') else f'# split header\n{n}\t{self.rows}\n'
+    def table(self, n):   # tests that set their own tables need not name geo_pairs.tsv or mesh_pairs.tsv
+        if hasattr(self, 'tables'): return self.tables[n] if n not in ('geo_pairs.tsv', 'mesh_pairs.tsv') else self.tables.get(n, '# none\n')
+        return f'# split header\n{n}\t{self.rows}\n'
 
     def go(self, g, own=True, oodle=None, dlc_roms=(), derive_dlc=None, derive_compute=None, env=None, glslc_play=()):
         return nsp.split_shaders(sys.executable, self.repo, [self.ex / 'RomFS'], [self.ex / 'ExeFS/main'], self.pkg, env or {}, self.logs, g, own, oodle, dlc_roms, derive_dlc, derive_compute, glslc_play)
@@ -939,6 +952,11 @@ class SplitShaders(Base):
         self.go(g, own=False)
         self.assertEqual(self.splits, 3)
         self.assertEqual(pairs.read_text(), self.table('pso_pairs.tsv'))
+        geo = self.pkg.with_name('geo_pairs.tsv'); self.assertEqual(geo.read_text(), self.table('geo_pairs.tsv'))   # the vertex / geometry pairs likewise (mesh libraries)
+        geo.unlink()
+        self.go(g, own=False)
+        self.assertEqual(self.splits, 4)
+        self.assertEqual(geo.read_text(), self.table('geo_pairs.tsv'))
 
     def test_derived_rerun_is_incremental(self):   # the whole derived path of a second run: derive, prepare, rewrite keys, split
         g = self.own(); g = nsp.set_keys(g, {'mem_used': ('0x4800000', '')}, 'After the rewrite'); k = self.go(g)
@@ -993,6 +1011,14 @@ class LayerShaders(Base):
                             before = len(runs); self.redump(p); go()
                             self.assertEqual(len(runs), before + int(own))
                             go(); self.assertEqual(len(runs), before + int(own))
+
+    def test_gl_table_only_main_detects_missing_romfs_shaders(self):
+        tsv = self.tmp / 'gl_shaders.tsv'
+        self.assertFalse(nsp.gl_table_only_main(tsv))
+        tsv.write_text('# GL shader ABI 2\n0123456789abcdef\tfrag\tr:-1:0\tmain#0\n')
+        self.assertTrue(nsp.gl_table_only_main(tsv))
+        tsv.write_text('# GL shader ABI 2\n0123456789abcdef\tfrag\tr:-1:0\tmain#0\nfedcba9876543210\tfrag\tr:-1:0\t/shaders/sprite.glsl\n')
+        self.assertFalse(nsp.gl_table_only_main(tsv))
 
 
 class MacApp(Base):
@@ -1156,6 +1182,151 @@ class BuildSources(unittest.TestCase):   # profile_guess.py build_sources reads 
         self.src['nro_imports'] = (frozenset({'glslcCompile'}), '')
         self.assertEqual(self.sources(), self.src); self.assertEqual(self.sources(), self.src); self.assertEqual(len(self.calls), 2)
         self.assertFalse((self.game / 'RomFS.img.sources').exists())
+
+
+class DlcDecoderSources(unittest.TestCase):
+    """DLC decoder-archive discovery works for both .img and directory DLC, caches outside aoc/, and wires DM_OODLE_HOST into split_shaders."""
+
+    def setUp(self):
+        self.t = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, self.t)
+        self.work = self.t / 'work'; self.work.mkdir()
+        self.game = self.work / 'extract/v0'; (self.game / 'ExeFS').mkdir(parents=True)
+        (self.game / 'ExeFS/main').write_bytes(b'code')
+        self.aoc = self.work / 'aoc'; self.aoc.mkdir()
+        self.reader = self.t / 'reader.py'; self.reader.write_text('# readers\n')
+
+    @staticmethod
+    def _forge(ver):
+        return b'scimitar\0' + ver.to_bytes(4, 'little') + bytes(16)
+
+    def _pack_dlc(self, name, files):
+        import romfs_image
+        src = self.t / f'src_{name}'; src.mkdir(parents=True, exist_ok=True)
+        for rel, data in files.items():
+            p = src / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(data)
+        img = self.aoc / name
+        romfs_image.pack(src, img)
+        return img
+
+    def test_image_dlc_cached_outside_aoc_and_invalidated(self):
+        img = self._pack_dlc('1.img', {'ACB/DataNX.forge': self._forge(25)})
+        before = sorted(p.name for p in self.aoc.iterdir())
+        calls = []
+        real = profile_guess.decoder_sources
+        def spy(roots, mains=()): calls.append((list(roots), list(mains))); return real(roots, mains=mains)
+        with mock.patch.object(nsp.pg, 'decoder_sources', side_effect=spy), \
+             mock.patch.object(nsp, 'python_tool_files', lambda *a: [self.reader]):
+            got = nsp.dlc_decoder_sources(REPO, self.work, self.game, [img])
+            self.assertTrue(got['oodle_packs'][0], got)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(sorted(p.name for p in self.aoc.iterdir()), before)   # memo must not sit inside aoc/
+            self.assertTrue((self.work / 'aoc.sources').is_file())
+            self.assertEqual(nsp.dlc_decoder_sources(REPO, self.work, self.game, [img]), got)
+            self.assertEqual(len(calls), 1)   # cache hit
+            changes = (
+                lambda: self._pack_dlc('1.img', {'ACB/DataNX.forge': self._forge(25), 'extra.bin': b'1'}),
+                lambda: os.utime(img, ns=(img.stat().st_atime_ns, img.stat().st_mtime_ns + 1_000_000_000)),
+                lambda: (self.game / 'ExeFS/main').write_bytes(b'c0de'),
+                lambda: self.reader.write_text('# readers v2\n'),
+                lambda: (self.work / 'aoc.sources').write_text('corrupt'),
+            )
+            for n, change in enumerate(changes, 2):
+                with self.subTest(change=n):
+                    change()
+                    nsp.dlc_decoder_sources(REPO, self.work, self.game, [img])
+                    self.assertEqual(len(calls), n)
+            img2 = self._pack_dlc('2.img', {'ACR/placeholder.txt': b'x'})
+            nsp.dlc_decoder_sources(REPO, self.work, self.game, [img, img2])
+            self.assertEqual(len(calls), 7)
+
+    def test_directory_dlc_read_each_time_without_writing_cache(self):
+        dlc_dir = self.aoc / '1'; (dlc_dir / 'ACB').mkdir(parents=True)
+        (dlc_dir / 'ACB/DataNX.forge').write_bytes(self._forge(25))
+        calls = []
+        real = profile_guess.decoder_sources
+        def spy(roots, mains=()): calls.append(list(roots)); return real(roots, mains=mains)
+        with mock.patch.object(nsp.pg, 'decoder_sources', side_effect=spy):
+            self.assertTrue(nsp.dlc_decoder_sources(REPO, self.work, self.game, [dlc_dir])['oodle_packs'][0])
+            self.assertTrue(nsp.dlc_decoder_sources(REPO, self.work, self.game, [dlc_dir])['oodle_packs'][0])
+        self.assertEqual(len(calls), 2)
+        self.assertFalse((self.work / 'aoc.sources').exists())
+
+    def test_main_enables_oodle_host_from_image_or_directory_dlc(self):
+        class Stop(Exception): pass
+        dump = self.t / 'dump'; (dump / 'base/exefs').mkdir(parents=True); (dump / 'base/romfs').mkdir(parents=True)
+        (dump / 'base/exefs/main').write_bytes(b'NSO0' + bytes(0x80))
+        npdm = bytearray(0xa0); npdm[0:4] = b'META'; npdm[0xc] = 1
+        npdm[0x70:0x78] = (0x80).to_bytes(4, 'little') + (0x20).to_bytes(4, 'little')
+        npdm[0x80:0x84] = b'ACI0'; npdm[0x90:0x98] = TID.to_bytes(8, 'little')
+        (dump / 'base/exefs/main.npdm').write_bytes(bytes(npdm))
+        (dump / 'base/romfs/placeholder').write_bytes(b'x')
+        prof_dir = self.t / 'profiles' / f'{TID:016X}'; prof_dir.mkdir(parents=True)
+        (prof_dir / 'game.tsv').write_text(f'title_id\t{TID:016X}\nname\tTest Game\nipa\tTest.ipa\nmodules\tmain\nbuild\tv0\t1.0\tmain={BID}\nshader_versions\tv0\n')
+        g = game.Game(prof_dir)
+
+        def run_to_split(dlc_setup, base_oodle=False):
+            work = self.t / f'run_{len(os.listdir(self.t))}'
+            aoc = work / 'aoc'; aoc.mkdir(parents=True)
+            dlc_setup(aoc)
+            said, captured = [], {}
+            def fake_extract(ex, ver, src, app):
+                d = ex / ver; (d / 'ExeFS').mkdir(parents=True, exist_ok=True); (d / 'RomFS').mkdir(exist_ok=True)
+                nso(d / 'ExeFS/main', BID); return d
+            def fake_split(*a, **k):
+                captured['oodle'] = a[9]
+                captured['oodle_env'] = a[9]() if a[9] else None
+                captured['dlc_roms'] = a[10]
+                raise Stop()
+            src_stub = {'graphics': ('nvn', 'NVN'), 'glslc_capture': (False, ''), 'vk_capture': (False, ''),
+                        'gl_capture': (False, ''), 'gl_fixed': (False, ''), 'ue_decode': (False, ''),
+                        'oodle_packs': (base_oodle, 'base oodle' if base_oodle else ''), 'ue_legacy': (False, '')}
+            args = nsp.parse_args([str(dump), '--platform', 'mac', '--work-dir', str(work), '--title-id', f'{TID:016X}'])
+            with mock.patch.dict(os.environ, {'DM_GAMES_DIR': str(self.t / 'profiles')}), \
+                 mock.patch.object(nsp, 'find_repo', return_value=REPO), mock.patch.object(nsp, 'WORK_DIR', ''), \
+                 mock.patch.object(nsp, 'PROD_KEYS', ''), mock.patch.object(nsp, 'apple_silicon', return_value=True), \
+                 mock.patch.object(nsp, 'check_prereqs'), mock.patch.object(nsp, 'check_metal'), \
+                 mock.patch.object(nsp, 'extract_dump', side_effect=fake_extract), mock.patch.object(nsp, 'check_formats'), \
+                 mock.patch.object(nsp, 'check_versions_aarch64'), mock.patch.object(nsp, 'build_mismatch', return_value=[]), \
+                 mock.patch.object(nsp, 'build_sources', return_value=src_stub), mock.patch.object(nsp, 'extract_aoc', return_value=aoc), \
+                 mock.patch.object(nsp, 'rewrite', return_value=g), mock.patch.object(nsp, 'chain_header'), \
+                 mock.patch.object(nsp, 'build_mac_host', return_value=work / 'tools/dmhost') as build_host, \
+                 mock.patch.object(nsp, 'split_shaders', side_effect=fake_split), \
+                 mock.patch.object(nsp, 'say', side_effect=said.append), \
+                 mock.patch.object(nsp, 'ask', side_effect=AssertionError('asked')):
+                with self.assertRaises(Stop): nsp.main(args)
+            return captured, said, build_host
+
+        import romfs_image
+        def make_img(ver):
+            def setup(aoc):
+                src = aoc.parent / 'tmp_src'; (src / 'ACB').mkdir(parents=True)
+                (src / 'ACB/DataNX.forge').write_bytes(self._forge(ver))
+                romfs_image.pack(src, aoc / '1.img')
+            return setup
+        def make_dir(ver):
+            def setup(aoc):
+                (aoc / '1/ACB').mkdir(parents=True)
+                (aoc / '1/ACB/DataNX.forge').write_bytes(self._forge(ver))
+            return setup
+
+        for label, setup in (('img-v25', make_img(25)), ('dir-v25', make_dir(25))):
+            with self.subTest(case=label):
+                cap, said, build_host = run_to_split(setup)
+                self.assertIsNotNone(cap['oodle'])
+                self.assertEqual(Path(cap['oodle_env']['DM_OODLE_HOST']).name, 'dmhost')
+                self.assertTrue(cap['oodle_env']['DM_OODLE_MODULES'])
+                build_host.assert_called_once()
+                self.assertTrue(any(s.startswith('DLC: 1 Anvil forge(s)') for s in said), said)
+
+        for label, setup in (('img-v27-lzo', make_img(27)), ('dir-v27-lzo', make_dir(27))):
+            with self.subTest(case=label):
+                cap, said, _ = run_to_split(setup)
+                self.assertIsNone(cap['oodle'])
+                self.assertFalse(any(s.startswith('DLC: ') for s in said), said)
+
+        with mock.patch.object(nsp, 'dlc_decoder_sources', side_effect=AssertionError('should not scan DLC when base already triggers Oodle')):
+            cap, _, _ = run_to_split(make_img(25), base_oodle=True)
+            self.assertIsNotNone(cap['oodle'])
 
 
 if __name__ == '__main__': unittest.main()

@@ -1,13 +1,13 @@
 diff --git a/dm/tools/nx_extract/Program.cs b/dm/tools/nx_extract/Program.cs
 --- a/dm/tools/nx_extract/Program.cs
 +++ b/dm/tools/nx_extract/Program.cs
-@@ -148,7 +148,8 @@
+@@ -161,7 +161,8 @@
              Console.WriteLine("program has no data section: empty RomFS");
              return Damaged();
          }
--        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, level) : baseProg.OpenStorage(NcaSectionType.Data, level));
+-        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? source.OpenStorageWithPatch(updProg, NcaSectionType.Data, level) : source.OpenStorage(NcaSectionType.Data, level));
 +        // the update file's storage is stacked, so every read has to go through AlignedReadStorage
-+        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? (IStorage)new AlignedReadStorage(baseProg.OpenStorageWithPatch(updProg, NcaSectionType.Data, level)) : baseProg.OpenStorage(NcaSectionType.Data, level));
++        IFileSystem Romfs(IntegrityCheckLevel level) => new RomFsFileSystem(updProg != null ? (IStorage)new AlignedReadStorage(source.OpenStorageWithPatch(updProg, NcaSectionType.Data, level)) : source.OpenStorage(NcaSectionType.Data, level));
          Func<IFileSystem> romfs = () => Romfs(IntegrityCheckLevel.ErrorOnInvalid);
          // the same RomFS without hash checks, for reading damaged files as they are (--allow-damaged)
          g_lenient = () => Romfs(IntegrityCheckLevel.IgnoreOnInvalid);
